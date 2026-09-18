@@ -7,11 +7,21 @@ a decision from you is §3, and only when you want the address to stop changing.
 
 ## 1. Host a network
 
+**One time, ever:**
+
 ```bash
-pnpm doctor      # checks everything, names anything that needs fixing
-pnpm db:up       # start the database (once per reboot)
-pnpm share       # public address + an invite link
+pnpm install
+pnpm db:up       # the database container now restarts by itself after a reboot
 ```
+
+**Every time you want to host:**
+
+```bash
+pnpm share       # that is the whole thing
+```
+
+`pnpm doctor` checks everything and names anything that needs fixing, if a session does
+not start cleanly.
 
 `pnpm share` generates a strong operator password into `.env` on first run, opens a public
 tunnel, starts the server bound to loopback only, waits until the address genuinely
@@ -24,19 +34,33 @@ pnpm invite sams-laptop
 
 ## 2. Get a friend connected
 
-Send them the printed link. It opens a page showing exactly what to run. The short path,
-once they have the project folder:
+### The one-time part, per computer
+
+Send them an invite link. They run, once:
 
 ```bash
 ./scripts/join.sh https://your-address ABCD-1234
 ```
 
-That checks their Node version, installs pnpm and dependencies if needed, pairs, and
-starts taking work. They stop with Ctrl-C, or `pnpm agent pause` to stay connected but
-idle.
+That checks their Node version, installs dependencies, pairs, and starts taking work.
+Pairing generates a keypair on their machine and stores it in `~/.dwp/`.
 
-**What they need first:** Node.js 24+ and a copy of this project folder. That is the one
-part not yet automated — see §5.
+**A pairing code is needed once per computer, not once per session.** It is single-use and
+expires in ten minutes.
+
+### Every time after that
+
+```bash
+pnpm agent run
+```
+
+No code, no link, no setup. Verified: stopped and restarted an agent repeatedly, and
+restarted the server underneath it — it rejoined by itself each time and carried on
+working with nobody touching it.
+
+They can stop with Ctrl-C, or `pnpm agent pause` to stay enrolled but idle.
+
+**What they need first:** Node.js 24+ and a copy of this project folder — see §5.
 
 ## 3. Make the address permanent — the one thing needing your decision
 

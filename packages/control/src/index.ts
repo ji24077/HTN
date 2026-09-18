@@ -2,7 +2,7 @@ import { migrate, pool } from './db.ts'
 import { config, assertSafeToExpose } from './config.ts'
 import { bootstrapUser } from './auth.ts'
 import { buildServer } from './http.ts'
-import { attachAgentHub, dispatchAll } from './hub.ts'
+import { attachAgentHub, dispatchAll, closeAllConnections } from './hub.ts'
 import { sweepExpiredLeases } from './scheduler.ts'
 import { log } from './logger.ts'
 
@@ -39,8 +39,28 @@ log.info('control.started', {
   leaseSeconds: config.leaseSeconds,
 })
 
+let shuttingDown = false
 for (const sig of ['SIGINT', 'SIGTERM'] as const) {
   process.on(sig, () => {
-    void app.close().then(() => pool.end()).then(() => process.exit(0))
+    // A second Ctrl-C means "I meant it".
+    if (shuttingDown) process.exit(1)
+    shuttingDown = true
+    log.info('control.stopping', { signal: sig })
+
+    // Release agents first, or the close below has nothing to wait for but them.
+    closeAllConnections('server stopping')
+
+    // A backstop, in case something else holds the loop open. Hanging on exit is worse
+    // than an abrupt one: it keeps the port and makes the next start fail.
+    const force = setTimeout(() => {
+      log.warn('control.forced_exit', { afterMs: 5000 })
+      process.exit(0)
+    }, 5_000)
+    force.unref()
+
+    void app.close()
+      .then(() => pool.end())
+      .then(() => process.exit(0))
+      .catch(() => process.exit(1))
   })
 }

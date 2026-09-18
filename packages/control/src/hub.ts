@@ -373,6 +373,27 @@ export function attachAgentHub(server: import('node:http').Server): void {
   }, config.heartbeatSeconds * 1000).unref()
 }
 
+/**
+ * Close every agent connection, for shutdown.
+ *
+ * Without this the process cannot exit: the HTTP server's graceful close waits for open
+ * connections, and an agent's WebSocket is an open connection that will not close until
+ * the server tells it to. The two wait for each other forever, the port stays occupied,
+ * and the next start fails with EADDRINUSE.
+ *
+ * terminate() rather than close(): we are on our way out and have no time to wait for a
+ * closing handshake. Agents treat an abrupt close as a normal disconnect and reconnect.
+ */
+export function closeAllConnections(reason: string): number {
+  const n = connections.size
+  for (const conn of connections.values()) {
+    try { conn.ws.terminate() } catch {}
+  }
+  connections.clear()
+  if (n > 0) log.info('shutdown.connections_closed', { count: n, reason })
+  return n
+}
+
 export async function disconnectHost(hostId: string, reason: string): Promise<void> {
   const conn = connections.get(hostId)
   if (!conn) return
