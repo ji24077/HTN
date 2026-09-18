@@ -11,9 +11,13 @@ scenarios and 25 adversarial input cases pass. See
 ## Share your machine
 
 ```bash
+pnpm doctor         # check this machine is ready, and what to fix if not
 pnpm db:up
 pnpm share          # public address + an invite link, in one command
+pnpm invite <name>  # another invite, without restarting
 ```
+
+Full walkthrough: [`docs/05-running-it.md`](docs/05-running-it.md).
 
 Send a friend the printed `…/join?code=…` link. It shows them the two commands to run.
 Press Enter for another invite. See [`docs/03-connectivity.md`](docs/03-connectivity.md)
@@ -137,7 +141,8 @@ port is exposed, and reports the address the target site actually observed.
 | [`docs/01-architecture.md`](docs/01-architecture.md) | Pass 0: contracts, scheduling, threat model, gates, backlog, go/no-go |
 | [`docs/02-pass1-gate-report.md`](docs/02-pass1-gate-report.md) | Pass 1: what passed, with evidence, and what did not |
 | [`docs/03-connectivity.md`](docs/03-connectivity.md) | Getting friends connected: why a tunnel is required here, choosing a permanent address, watching a live connection |
-| [`docs/04-connectivity-gate-report.md`](docs/04-connectivity-gate-report.md) | Connectivity pass: what was proven, the 11 bugs found, what is still open |
+| [`docs/04-connectivity-gate-report.md`](docs/04-connectivity-gate-report.md) | Connectivity pass: what was proven, the bugs found, what is still open |
+| [`docs/05-running-it.md`](docs/05-running-it.md) | How to host a network, get a friend on, and debug it |
 
 Review page: https://claude.ai/artifact/GrRXxq48Z62UmCtwswZo4h
 

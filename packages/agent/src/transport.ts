@@ -6,6 +6,7 @@ import {
 } from '@dwp/protocol'
 import type { KeyObject } from 'node:crypto'
 import { createLogger } from '@dwp/protocol'
+import { diagnoseOrigin } from '@dwp/protocol'
 import { fallbackLookup, dnsFallbackEnabled, installDnsFallback } from './resolver.ts'
 import { probe } from './capability.ts'
 import { isPaused, type AgentConfig } from './config.ts'
@@ -37,6 +38,8 @@ export function connect(cfg: AgentConfig, privateKey: KeyObject): void {
   let stopped = false
   let attempt = 0
   let connectedSince = 0
+  let everConnected = false
+  let explained = false
   const hostLog = log.child({ hostId: cfg.hostId, label: cfg.label })
   const running = new Map<string, Running>()
 
@@ -85,6 +88,8 @@ export function connect(cfg: AgentConfig, privateKey: KeyObject): void {
     ws.on('open', () => {
       connectedSince = Date.now()
       lastInbound = Date.now()
+      everConnected = true
+      explained = false
       hostLog.info('connect.established', { attempt, dialMs: Date.now() - dialStartedAt, url: cfg.wsUrl })
       send('hello', { capability: probe(ADAPTERS), consent: consent() })
 
@@ -251,6 +256,34 @@ export function connect(cfg: AgentConfig, privateKey: KeyObject): void {
       const delay = Math.random() * backoffMs
       backoffMs = Math.min(backoffMs * 2, MAX_BACKOFF_MS)
       hostLog.info('connect.retry_scheduled', { inMs: Math.round(delay), nextBackoffCapMs: backoffMs })
+
+      // After a few failures in a row, stop emitting the same terse line and say what is
+      // actually wrong. The overwhelmingly likely cause is that the host restarted and
+      // their temporary address changed — which no amount of retrying will fix.
+      // Re-explain periodically rather than once: whoever is going to read this probably
+      // is not watching at the moment it first fails.
+      if (attempt >= 3 && (!explained || attempt % 10 === 0)) {
+        explained = true
+        void diagnoseOrigin(cfg.server).then(d => {
+          hostLog.error('connect.giving_advice', { cause: d.cause, attempts: attempt })
+          console.error(`\n  Cannot reach ${cfg.server} after ${attempt} attempts.\n\n  ${d.message}\n`)
+          // 'not-a-server' covers the common case where a stale tunnel hostname still
+          // resolves but has nothing behind it any more.
+          const looksStale = ['dns-nowhere', 'timeout', 'refused', 'not-a-server'].includes(d.cause)
+          if (looksStale && everConnected) {
+            console.error(
+              `  This address used to work, so the most likely explanation is that the host\n` +
+              `  restarted and their temporary address changed.\n\n` +
+              `  Ask them for a new invite link, then point this computer at it —\n` +
+              `  no need to pair again:\n\n` +
+              `      pnpm agent set-server --server https://their-new-address\n`)
+          }
+          if (d.cause === 'dns-local-only' && !dnsFallbackEnabled()) {
+            console.error(`  Or retry with:  DWP_DNS_FALLBACK=1 pnpm agent run\n`)
+          }
+        }).catch(() => {})
+      }
+
       setTimeout(open, delay)
     }
 

@@ -14,6 +14,7 @@ import { noteConnection, noteDisconnection, noteAuthFailure } from './diagnostic
 type Conn = {
   ws: WebSocket
   hostId: string
+  label: string
   maxConcurrency: number
   allowCompute: boolean
   paused: boolean
@@ -297,7 +298,7 @@ export function attachAgentHub(server: import('node:http').Server): void {
       if (existing) existing.ws.close(4000, 'superseded')
 
       const conn: Conn = {
-        ws, hostId: result.hostId, maxConcurrency: host!.max_concurrency,
+        ws, hostId: result.hostId, label: host!.label, maxConcurrency: host!.max_concurrency,
         allowCompute: host!.allow_compute, paused: host!.paused, running: new Set(),
         lastSeen: Date.now(), connectedAt: Date.now(),
       }
@@ -306,6 +307,9 @@ export function attachAgentHub(server: import('node:http').Server): void {
       noteConnection(conn.hostId, host!.label ?? conn.hostId, remoteAddr)
       log.info('agent.connected', {
         hostId: conn.hostId,
+        // Carry the name through so logs read as names, not UUIDs. Debugging a real
+        // connection means asking "is Sam's laptop on?", not reciting an identifier.
+        label: host!.label,
         remoteAddr,
         supersededPrevious: Boolean(existing),
         userAgent: req.headers['user-agent'] ?? null,
@@ -325,6 +329,7 @@ export function attachAgentHub(server: import('node:http').Server): void {
         noteDisconnection(conn.hostId, code)
         log.info('agent.disconnected', {
           hostId: conn.hostId,
+          label: conn.label,
           closeCode: code,
           closeReason: reason.toString('utf8').slice(0, 120) || null,
           connectedMs: Date.now() - conn.connectedAt,
@@ -347,6 +352,7 @@ export function attachAgentHub(server: import('node:http').Server): void {
         // died. It looks identical to a healthy one until we time it out.
         log.warn('agent.heartbeat_timeout', {
           hostId: conn.hostId,
+          label: conn.label,
           silentMs: Date.now() - conn.lastSeen,
           heldTasks: conn.running.size,
         })

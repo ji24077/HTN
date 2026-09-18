@@ -18,7 +18,9 @@
     "share": "node scripts/share.ts",
     "logs": "node scripts/watch-log.ts",
     "sim": "node sim/run.ts",
-    "sim:edge": "node sim/edge-cases.ts"
+    "sim:edge": "node sim/edge-cases.ts",
+    "invite": "node scripts/invite.ts",
+    "doctor": "node scripts/doctor.ts"
   },
   "devDependencies": {
     "typescript": "7.0.2",

@@ -20,6 +20,7 @@ if (!ORIGIN || !ORIGIN.startsWith('https://')) {
 const EMAIL = process.env.BOOTSTRAP_EMAIL ?? 'operator@local'
 const PASSWORD = process.env.BOOTSTRAP_PASSWORD ?? ''
 
+const DIM = '\x1b[2m', RESET = '\x1b[0m'
 let passed = 0
 let failed = 0
 const check = (name: string, ok: boolean, detail = ''): void => {
@@ -52,29 +53,66 @@ console.log(`\n  This machine's public address: ${myEgress}\n`)
 // one. If one of them can load the URL, the path from the open internet to this laptop
 // is real — not an artefact of the request starting and ending here.
 const FETCHERS = [
+  { name: 'r.jina.ai', url: (t: string) => `https://r.jina.ai/${t}` },
   { name: 'api.codetabs.com', url: (t: string) => `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(t)}` },
   { name: 'api.allorigins.win', url: (t: string) => `https://api.allorigins.win/raw?url=${encodeURIComponent(t)}` },
 ]
 
+/**
+ * Check the messenger before trusting the message.
+ *
+ * These are free public services and they break. An earlier version of this gate
+ * reported that no outside machine could reach the tunnel; in fact two of the three
+ * fetchers were returning errors for example.com as well. A test that cannot tell
+ * "the thing under test is broken" from "my instrument is broken" is worse than no test.
+ */
+async function fetcherWorks(f: (typeof FETCHERS)[number]): Promise<boolean> {
+  try {
+    const res = await fetch(f.url('https://example.com'), { signal: AbortSignal.timeout(25_000) })
+    if (!res.ok) return false
+    return /example/i.test(await res.text())
+  } catch {
+    return false
+  }
+}
+
 let externalOk = false
-let externalDetail = 'no third-party fetcher succeeded'
+let externalDetail = 'no third-party fetcher was working, so this could not be checked'
+let usable = 0
+
 for (const f of FETCHERS) {
+  if (!(await fetcherWorks(f))) {
+    console.log(`  ${DIM}skip  ${f.name} is not working today (failed its own control test)${RESET}`)
+    continue
+  }
+  usable += 1
   try {
     const res = await fetch(f.url(`${ORIGIN}/whoami`), { signal: AbortSignal.timeout(25_000) })
-    if (!res.ok) { externalDetail = `${f.name}: HTTP ${res.status}`; continue }
-    const seen = JSON.parse(await res.text()) as { observedIp?: string }
-    if (!seen.observedIp) { externalDetail = `${f.name}: unexpected body`; continue }
+    const text = await res.text()
+    const seen = /"observedIp"\s*:\s*"([^"]+)"/.exec(text)?.[1]
+    if (!seen) { externalDetail = `${f.name}: reached, but the reply was not recognisable`; continue }
+
+    if (seen === myEgress) {
+      externalDetail = `${f.name} arrived as ${seen}, the same address as this machine — not proof of an outside path`
+      continue
+    }
     externalOk = true
-    externalDetail = seen.observedIp === myEgress
-      ? `${f.name} reached it, but arrived as ${seen.observedIp} — the same address as this machine, so this is not proof of an outside path`
-      : `${f.name} fetched it from ${seen.observedIp}, a different network from this machine (${myEgress})`
-    if (seen.observedIp === myEgress) externalOk = false
+    externalDetail = `${f.name} fetched it from ${seen}, a different network from this machine (${myEgress})`
     break
   } catch (err) {
     externalDetail = `${f.name}: ${err instanceof Error ? err.message : String(err)}`
   }
 }
-check('a computer on another network can reach this machine', externalOk, externalDetail)
+
+if (usable === 0) {
+  console.log(`  ${DIM}note  every public fetcher was down; skipping the outside-reachability check${RESET}`)
+}
+
+if (usable === 0) {
+  console.log(`  ${DIM}----${RESET} a computer on another network can reach this machine  ${DIM}${externalDetail}${RESET}`)
+} else {
+  check('a computer on another network can reach this machine', externalOk, externalDetail)
+}
 
 // 4 ------------------------------------------- an agent can connect over WSS
 let wsReason = 'no result'
@@ -98,7 +136,17 @@ if (PASSWORD) {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ code, publicKey, label: 'connectivity-gate' }),
     })
-    const { hostId, wsUrl } = await pairRes.json() as { hostId: string; wsUrl: string }
+    const { hostId, wsUrl: serverSuppliedWsUrl } = await pairRes.json() as { hostId: string; wsUrl: string }
+
+    // Dial the address under test, not whatever the server believes its own address to
+    // be. An earlier version trusted the server's reply and happily reported "handshake
+    // completed through the public URL" while actually connecting to ws://localhost —
+    // a green check for a claim it never tested.
+    const wsUrl = `${ORIGIN.replace(/^http/, 'ws')}/agent/connect`
+    if (serverSuppliedWsUrl !== wsUrl) {
+      console.log(`  ${DIM}note  the server reports its address as ${serverSuppliedWsUrl};` +
+        ` testing ${wsUrl} instead${RESET}`)
+    }
 
     wsReason = await new Promise<string>(resolve => {
       const ws = new WebSocket(wsUrl, { headers: { authorization: `Bearer ${mintAssertion(hostId, privateKey)}` } })
@@ -111,7 +159,7 @@ if (PASSWORD) {
       })
       ws.on('message', (raw: Buffer) => {
         const msg = JSON.parse(raw.toString('utf8')) as { type: string }
-        if (msg.type === 'hello.ack') { ws.close(); resolve(`handshake completed over ${new URL(wsUrl).protocol}`) }
+        if (msg.type === 'hello.ack') { ws.close(); resolve(`handshake completed over ${wsUrl}`) }
       })
       ws.on('unexpected-response', (_r, res) => resolve(`rejected: HTTP ${res.statusCode}`))
       ws.on('error', (e: Error) => resolve(`error: ${e.message}`))

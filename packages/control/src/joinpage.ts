@@ -48,7 +48,14 @@ ${known ? 'network' : 'network'}. It takes two commands. You stay in control and
 </div>
 
 <div class="card">
-  <h2>2 &middot; Connect</h2>
+  <h2>2 &middot; Connect &mdash; one command</h2>
+  <pre>./scripts/join.sh ${o} ${c}</pre>
+  <p style="margin:12px 0 0;color:var(--ink2);font-size:14px">This checks what you need,
+  installs it, connects, and starts taking work.</p>
+</div>
+
+<div class="card">
+  <h2>3 &middot; Or step by step</h2>
   <pre>pnpm install
 pnpm agent pair --server ${o} --code ${c}
 pnpm agent run</pre>
@@ -56,7 +63,7 @@ pnpm agent run</pre>
 </div>
 
 <div class="card">
-  <h2>3 &middot; Stopping</h2>
+  <h2>4 &middot; Stopping</h2>
   <pre>pnpm agent pause      # stop taking work, right now
 pnpm agent resume     # start again</pre>
   <p style="margin:12px 0 0;color:var(--ink2);font-size:14px">Pause is a local switch. It works even
