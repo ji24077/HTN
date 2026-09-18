@@ -98,7 +98,7 @@ The one environment this can fail in is a network with a TLS-inspecting middlebo
 
 ### 2.5 No exposed CDP
 
-- The agent launches Chromium via Playwright's `chromium.launch()`, which drives the browser over a stdio pipe rather than a TCP debugging port. **[D — Playwright docs; re-verify in Pass 3 by asserting no process has `--remote-debugging-port` and no port is listening.]**
+- The agent launches Chromium through Playwright, which drives the browser over a stdio pipe rather than a TCP debugging port. **[V — Pass 1 read the live process table on macOS and observed `--remote-debugging-pipe` with no `--remote-debugging-port`; `agent browser-probe` re-asserts this on every run and throws if a port appears.]** Note `chromium.launch()` rejects a `--user-data-dir` argument: the ephemeral profile must come from `launchPersistentContext()`.
 - `launchServer()` and any `--remote-debugging-port` flag are **forbidden**; a lint rule and a startup assertion enforce this.
 - Chrome documents that an exposed remote-debugging port permits cookie extraction from the profile. [Chrome remote-debugging security](https://developer.chrome.com/blog/remote-debugging-port) **[D]**
 - The dashboard receives frames and sends semantic input events. It never receives a CDP endpoint, session ID, or WebSocket URL that reaches the browser directly.
@@ -142,13 +142,15 @@ distributed-work-platform/
 
 `protocol` is imported by all three runtime packages; a contract change that breaks a peer fails typecheck in CI. This is the cheapest available defense against the control/agent message drift that kills projects of this shape.
 
+**No build step. [V — Pass 1]** Node 24 strips types from `.ts` files, and it does so across pnpm workspace symlinks — verified directly rather than assumed. Every package runs from source (`node packages/control/src/index.ts`), there is no `dist/`, and TypeScript is only a checker. This removes a whole class of stale-build confusion from the two-machine workflow, where an agent running yesterday's compiled output against today's protocol is an easy and expensive mistake.
+
 ### Versions — [V] resolved from the npm registry on 2026-09-18
 
 | Choice | Version | Note |
 | --- | --- | --- |
 | Node.js | 24.14.0 **[V local]** | Agent and control. Pin via `.nvmrc` + `engines`. |
 | pnpm | 10.27.0 **[V local]** | Workspaces. |
-| TypeScript | 7.0.2 **[V]** | Latest is the native compiler. **[A]** If any dependency's type tooling lags, fall back to the 5.9 line; decide in Pass 1, record the reason. |
+| TypeScript | 7.0.2 **[V]** | Typechecks the whole workspace with zero errors **[V — Pass 1]**, so the 5.9 fallback trigger never fired. Checker only: there is no build step. |
 | Fastify | 5.12.5 **[V]** | HTTP. `ws` 8.21.3 **[V]** for both WSS endpoints. |
 | Drizzle ORM | 0.45.2 **[V]** + `pg` 8.23.0 **[V]** | SQL-first; the lease query is hand-written SQL regardless. |
 | PostgreSQL | 18.3 **[V local]** | `FOR UPDATE SKIP LOCKED` for atomic lease claims. |
@@ -481,7 +483,9 @@ WebRTC is not a drop-in. The agent must become a media sender: the screencast is
 ## 12. Top five failure modes
 
 **12.1 Duplicate or lost results around lease expiry.** A host finishes as its lease expires; the task is already re-queued; two results arrive.
-*Remedy:* conditional terminal `UPDATE`, all attempts retained, late results recorded as `duplicate_result`. *Test:* `SIGKILL` an agent at 60% of a batch and assert `accepted == total` with `attempts > total`.
+*Remedy:* conditional terminal `UPDATE`, all attempts retained, late results recorded as `duplicate_result`. *Test:* `SIGKILL` an agent at 60% of a batch and assert `accepted == total` with `attempts > total`. **[V — Pass 1: 60 tasks, 60 accepted, 2 re-attempted, 0 duplicates.]**
+
+**12.1a The same race one level up, in the dispatcher. [V — Pass 1, found and fixed.]** `SKIP LOCKED` makes the *claim* safe but says nothing about how many tasks a host is offered. Two overlapping dispatch passes each read a host's free capacity before either had claimed, and a host with a concurrency cap of 2 was handed roughly 12 tasks — measured, not theorised. *Remedy:* a per-host dispatch lock, with capacity reserved synchronously before the next `await`. Worth stating plainly: a correct database primitive does not make the code around it correct.
 
 **12.2 Distributed is slower than one host.** Setup and transfer dominate; the water-fill excludes a host or the speedup lands below 1.
 *Remedy:* the §7.4 floor is computed and **shown before launch** — "with your current hosts, this batch needs ≥ 680 items to beat Host A." The run map always shows the overhead breakdown. A result below 1× is a finding, not a bug to be hidden.
@@ -491,6 +495,8 @@ WebRTC is not a drop-in. The agent must become a media sender: the screencast is
 
 **12.4 SSRF / LAN reach from the remote browser.** A redirect or DNS rebind points the browser at the owner's router or a metadata endpoint.
 *Remedy:* the §9.5 enforcing proxy with IP pinning and per-hop revalidation; its unit tests are a release gate.
+
+**12.4a A gate that passes for the wrong reason. [V — Pass 1, found and fixed.]** The first forged-result check used a random task id, so the control service rejected it at an early `not found` bail-out and never reached the signature verification. The gate printed PASS while testing nothing. *Remedy:* every rejection test must forge against state the system genuinely holds, and must assert on the specific event the rejecting code path emits — here, `result.signature_invalid`. A green gate is evidence only if you know which line turned it green.
 
 **12.5 Fake distribution — the demo-integrity failure.** The most damaging outcome is a demo that *looks* distributed but isn't, and the control service's own logs cannot disprove it because the control service writes them.
 *Remedy:* each result carries `sign(host_privkey, {taskId, attempt, outputHash, startedAt, finishedAt, hostId})`, stored in `task_attempts.host_signature`. `scripts/verify-run.ts` takes a job ID and the enrolled public keys and verifies every accepted result independently of the server's narrative. The run map shows a per-task verification badge. A reviewer who does not trust the operator can still check that two distinct machines did the work.

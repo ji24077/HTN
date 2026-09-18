@@ -1,0 +1,16 @@
+{
+  "name": "@dwp/control",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@dwp/protocol": "workspace:*",
+    "fastify": "5.12.5",
+    "ws": "8.21.3",
+    "pg": "8.23.0",
+    "zod": "4.6.5"
+  }
+}
