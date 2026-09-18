@@ -1,0 +1,935 @@
+<title>Distributed Work Platform Architecture</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Serif:ital,wght@0,400;0,600;1,400&display=swap">
+<style>
+:root{
+  --ground:#f4f6f7; --surface:#ffffff; --surface-2:#eceff1; --code-bg:#eef1f3;
+  --ink:#10161b; --ink-2:#3d4b56; --ink-3:#6b7a86;
+  --rule:#d5dbe0; --rule-soft:#e4e9ec;
+  --accent:#0b6e8c; --accent-soft:#e0eef3; --accent-ink:#07536a;
+  --ok:#2c6b45; --ok-soft:#dfeee5;
+  --doc:#4a5a66; --doc-soft:#e6eaed;
+  --warn:#8d5310; --warn-soft:#f6ebdc;
+  --stop:#8c2f2f; --stop-soft:#f6e3e3;
+  --shadow:0 1px 2px rgba(16,22,27,.06),0 8px 24px -16px rgba(16,22,27,.35);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#0e1316; --surface:#151b1f; --surface-2:#1b2227; --code-bg:#11181c;
+    --ink:#e4eaed; --ink-2:#aebac3; --ink-3:#7d8b95;
+    --rule:#2a343a; --rule-soft:#212a2f;
+    --accent:#4bb2d1; --accent-soft:#132931; --accent-ink:#7fcbe2;
+    --ok:#6cbb8c; --ok-soft:#13241a;
+    --doc:#9aa8b2; --doc-soft:#1e252a;
+    --warn:#d6a25c; --warn-soft:#2a2115;
+    --stop:#d98686; --stop-soft:#2a1717;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px -16px rgba(0,0,0,.8);
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0e1316; --surface:#151b1f; --surface-2:#1b2227; --code-bg:#11181c;
+  --ink:#e4eaed; --ink-2:#aebac3; --ink-3:#7d8b95;
+  --rule:#2a343a; --rule-soft:#212a2f;
+  --accent:#4bb2d1; --accent-soft:#132931; --accent-ink:#7fcbe2;
+  --ok:#6cbb8c; --ok-soft:#13241a;
+  --doc:#9aa8b2; --doc-soft:#1e252a;
+  --warn:#d6a25c; --warn-soft:#2a2115;
+  --stop:#d98686; --stop-soft:#2a1717;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px -16px rgba(0,0,0,.8);
+}
+
+*{box-sizing:border-box}
+body{background:var(--ground);color:var(--ink);
+  font-family:"IBM Plex Serif",Georgia,"Times New Roman",serif;
+  font-size:16.5px;line-height:1.66;-webkit-font-smoothing:antialiased}
+
+.doc{display:grid;
+  grid-template-columns:[full-start] minmax(18px,1fr) [wide-start] minmax(0,180px) [text-start] minmax(0,67ch) [text-end] minmax(0,180px) [wide-end] minmax(18px,1fr) [full-end];
+  padding-block:0 96px}
+.doc>*{grid-column:text}
+.wide{grid-column:wide}
+.full{grid-column:full}
+
+/* ---- masthead ---- */
+.bar{grid-column:full;border-bottom:1px solid var(--rule);background:var(--surface);
+  display:flex;flex-wrap:wrap;gap:8px 20px;align-items:baseline;
+  padding:12px max(18px,calc((100% - 1180px)/2));
+  font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3)}
+.bar b{color:var(--ink);font-weight:600;letter-spacing:.04em}
+
+.masthead{grid-column:wide;padding-block:56px 12px}
+.eyebrow{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:11.5px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--accent);margin:0 0 18px}
+h1{font-family:"IBM Plex Sans",system-ui,sans-serif;font-weight:700;font-size:clamp(30px,5.4vw,50px);
+  line-height:1.06;letter-spacing:-.022em;margin:0;text-wrap:balance;max-width:16ch}
+.dek{font-size:19px;line-height:1.55;color:var(--ink-2);margin:20px 0 0;max-width:56ch}
+.meta{grid-column:wide;display:flex;flex-wrap:wrap;gap:0 34px;margin:30px 0 0;
+  padding-top:18px;border-top:1px solid var(--rule);
+  font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:12px;color:var(--ink-3)}
+.meta div{display:flex;flex-direction:column;gap:3px;padding-block:6px}
+.meta span{font-size:10.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--ink-3);opacity:.8}
+.meta strong{font-weight:500;color:var(--ink);font-size:12.5px}
+
+/* ---- verdict ---- */
+.verdict{grid-column:wide;margin:40px 0 8px;background:var(--surface);border:1px solid var(--rule);
+  border-left:3px solid var(--ok);border-radius:3px;padding:22px 26px;box-shadow:var(--shadow)}
+.verdict .stamp{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:12px;font-weight:600;
+  letter-spacing:.14em;text-transform:uppercase;color:var(--ok);display:block;margin-bottom:10px}
+.verdict p{margin:0;font-size:17.5px;line-height:1.58}
+.verdict p+p{margin-top:12px;font-size:15.5px;color:var(--ink-2)}
+
+/* ---- headings ---- */
+h2{font-family:"IBM Plex Sans",system-ui,sans-serif;font-weight:600;font-size:25px;letter-spacing:-.014em;
+  line-height:1.2;margin:66px 0 4px;text-wrap:balance;scroll-margin-top:70px;
+  display:flex;gap:14px;align-items:baseline}
+h2 .num{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:13px;font-weight:500;color:var(--accent);
+  letter-spacing:.04em;flex:none;width:2.4em;margin-left:-3.4em;text-align:right}
+@media (max-width:900px){h2 .num{margin-left:0;width:auto}}
+h3{font-family:"IBM Plex Sans",system-ui,sans-serif;font-weight:600;font-size:16.5px;letter-spacing:-.005em;
+  margin:34px 0 -2px;color:var(--ink)}
+h2+p,h3+p{margin-top:12px}
+p{margin:16px 0}
+a{color:var(--accent-ink);text-decoration-thickness:1px;text-underline-offset:2px}
+strong{font-weight:600}
+em{font-style:italic}
+hr{grid-column:wide;border:0;border-top:1px solid var(--rule);margin:58px 0 0}
+
+/* ---- lists ---- */
+ul,ol{margin:16px 0;padding-left:1.35em}
+li{margin:7px 0}
+li::marker{color:var(--ink-3)}
+ol.steps{counter-reset:s;list-style:none;padding-left:0}
+ol.steps>li{counter-increment:s;position:relative;padding-left:2.2em;margin:11px 0}
+ol.steps>li::before{content:counter(s);position:absolute;left:0;top:.18em;
+  font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:11.5px;font-weight:600;color:var(--accent);
+  background:var(--accent-soft);width:1.55em;height:1.55em;border-radius:2px;
+  display:grid;place-items:center}
+
+/* ---- evidence tags ---- */
+.tag{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:10px;font-weight:600;letter-spacing:.08em;
+  padding:1px 5px;border-radius:2px;vertical-align:.12em;white-space:nowrap}
+.t-v{color:var(--ok);background:var(--ok-soft)}
+.t-d{color:var(--doc);background:var(--doc-soft)}
+.t-a{color:var(--warn);background:var(--warn-soft)}
+.legend{grid-column:wide;display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:1px;
+  background:var(--rule);border:1px solid var(--rule);border-radius:3px;margin-top:30px;overflow:hidden}
+.legend div{background:var(--surface);padding:13px 16px;font-size:13.5px;line-height:1.45;color:var(--ink-2)}
+.legend .tag{margin-right:7px}
+
+/* ---- tables ---- */
+.tw{grid-column:wide;overflow-x:auto;margin:26px 0;border:1px solid var(--rule);border-radius:3px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;min-width:520px;
+  font-family:"IBM Plex Sans",system-ui,sans-serif;font-size:13.5px;line-height:1.48;
+  font-variant-numeric:tabular-nums}
+th{text-align:left;font-weight:600;font-size:11px;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--ink-3);padding:11px 15px;border-bottom:1px solid var(--rule);background:var(--surface-2);
+  white-space:nowrap}
+td{padding:11px 15px;border-bottom:1px solid var(--rule-soft);color:var(--ink-2);vertical-align:top}
+tr:last-child td{border-bottom:0}
+td:first-child{color:var(--ink);font-weight:500}
+td code,th code{font-size:12px}
+.yes{color:var(--ok);font-weight:600}
+.no{color:var(--ink-3)}
+
+/* ---- code ---- */
+code{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:.855em;
+  background:var(--code-bg);padding:1px 4px;border-radius:2px;color:var(--ink)}
+.cw{grid-column:wide;overflow-x:auto;margin:24px 0;background:var(--code-bg);
+  border:1px solid var(--rule);border-radius:3px}
+pre{margin:0;padding:18px 20px;font-family:"IBM Plex Mono",ui-monospace,monospace;
+  font-size:12.5px;line-height:1.62;color:var(--ink-2);white-space:pre}
+pre code{background:none;padding:0;font-size:inherit}
+.cw .cap{padding:9px 20px;border-bottom:1px solid var(--rule);background:var(--surface-2);
+  font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:10.5px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--ink-3)}
+.mermaid{grid-column:wide;margin:26px 0;padding:22px;background:var(--surface);
+  border:1px solid var(--rule);border-radius:3px;overflow-x:auto}
+
+/* ---- callouts ---- */
+.call{grid-column:wide;margin:30px 0;padding:20px 24px;background:var(--surface);
+  border:1px solid var(--rule);border-left:3px solid var(--accent);border-radius:3px}
+.call.warn{border-left-color:var(--warn)}
+.call.stop{border-left-color:var(--stop)}
+.call h4{font-family:"IBM Plex Sans",system-ui,sans-serif;font-size:11px;font-weight:600;letter-spacing:.11em;
+  text-transform:uppercase;color:var(--accent);margin:0 0 10px}
+.call.warn h4{color:var(--warn)}
+.call.stop h4{color:var(--stop)}
+.call p{margin:11px 0;font-size:15.5px}
+.call p:first-of-type{margin-top:0}
+.call p:last-child{margin-bottom:0}
+.call ul{font-size:15.5px;margin:11px 0 0}
+.derive{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:12.5px;line-height:1.75;
+  background:var(--code-bg);border-radius:2px;padding:14px 16px;margin:14px 0;overflow-x:auto;white-space:pre}
+.figure{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:clamp(24px,4.6vw,34px);
+  font-weight:600;color:var(--ink);letter-spacing:-.01em;display:block;margin:4px 0 2px}
+
+/* ---- contents ---- */
+.toc{grid-column:wide;margin:36px 0 0;border-top:1px solid var(--rule);padding-top:22px}
+.toc h4{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:10.5px;letter-spacing:.13em;
+  text-transform:uppercase;color:var(--ink-3);margin:0 0 14px;font-weight:500}
+.toc ol{list-style:none;padding:0;margin:0;columns:2;column-gap:36px;
+  font-family:"IBM Plex Sans",system-ui,sans-serif;font-size:13.5px}
+.toc li{margin:0;break-inside:avoid;border-bottom:1px solid var(--rule-soft)}
+.toc a{display:flex;gap:11px;padding:7px 0;text-decoration:none;color:var(--ink-2)}
+.toc a:hover{color:var(--accent-ink)}
+.toc a b{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:11.5px;font-weight:500;
+  color:var(--accent);flex:none;width:1.6em}
+@media (max-width:620px){.toc ol{columns:1}}
+
+/* ---- backlog ---- */
+.pass{grid-column:wide;margin:22px 0;background:var(--surface);border:1px solid var(--rule);border-radius:3px;
+  overflow:hidden}
+.pass>header{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:baseline;padding:13px 18px;
+  background:var(--surface-2);border-bottom:1px solid var(--rule)}
+.pass>header b{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:11px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--accent)}
+.pass>header span{font-family:"IBM Plex Sans",system-ui,sans-serif;font-weight:600;font-size:14.5px;color:var(--ink)}
+.pass .body{padding:16px 18px;font-size:14.5px;line-height:1.6;color:var(--ink-2)}
+.pass .body p{margin:0 0 10px}
+.pass .body p:last-child{margin:0}
+.accept{font-family:"IBM Plex Sans",system-ui,sans-serif;font-size:13.5px;
+  border-top:1px solid var(--rule-soft);padding-top:12px;margin-top:4px;color:var(--ink-2)}
+.accept b{color:var(--ink);font-weight:600;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;
+  display:block;margin-bottom:5px;color:var(--ink-3)}
+
+footer{grid-column:wide;margin-top:66px;padding-top:22px;border-top:1px solid var(--rule);
+  font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:11.5px;line-height:1.8;color:var(--ink-3)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:2px}
+@media (prefers-reduced-motion:no-preference){a{transition:color .12s ease}}
+</style>
+
+<div class="doc">
+
+<div class="bar">
+  <b>Pass 0 · Architecture review</b>
+  <span>Distributed Work Platform</span>
+  <span>2026-09-18</span>
+  <span>No implementation authorized by this document</span>
+</div>
+
+<header class="masthead">
+  <p class="eyebrow">Implementation architecture</p>
+  <h1>Work scheduled across computers you trust</h1>
+  <p class="dek">A review of the two-workload MVP: what the topology can actually deliver, where the
+  handoff overclaims, and the gates that decide whether the product thesis survives contact with
+  two real machines on two real networks.</p>
+</header>
+
+<div class="meta">
+  <div><span>Status</span><strong>For review</strong></div>
+  <div><span>Recommendation</span><strong>Go for Pass 1</strong></div>
+  <div><span>Input</span><strong>00-handoff.md</strong></div>
+  <div><span>Blocked on</span><strong>2 deployment answers</strong></div>
+</div>
+
+<div class="verdict">
+  <span class="stamp">Executive answer</span>
+  <p>A two-computer cross-network demo <strong>is achievable</strong> under the stated constraints.
+  Nothing in Checkpoint A requires a capability that does not exist. Host-initiated outbound WSS on
+  443 to a public control service is the same mechanism behind every mainstream remote-access and
+  CI-runner product: no inbound ports, no VPN, no UPnP.</p>
+  <p>Three things in the handoff are overclaimed or underspecified, and are corrected below.</p>
+</div>
+
+<ol class="steps">
+  <li><strong>The 1.2× stretch speedup has a hard floor on batch size.</strong> With the illustrative
+  host rates in §7, the batch needs <strong>≥ ~680 items</strong> before 1.2× is arithmetically
+  reachable, regardless of scheduling quality. Smaller batches cannot pass.</li>
+  <li><strong>"Proof of distribution" is not provable from the control service's own logs.</strong>
+  The service writes those logs; a faked demo produces identical ones. Host-signed result
+  attestations are added so provenance is verifiable by a reviewer who does not trust the server.</li>
+  <li><strong>Storing <code>observed_egress_ip</code> on the <code>Host</code> record</strong> is both
+  unstable — CGNAT, tethering, VPN toggles — and a standing privacy cost. It becomes an on-demand
+  probe, recorded per browser session only.</li>
+</ol>
+
+<div class="legend">
+  <div><span class="tag t-v">V</span>Verified in this session against a primary source.</div>
+  <div><span class="tag t-d">D</span>Documented by the vendor, not re-verified here.</div>
+  <div><span class="tag t-a">A</span>Assumption, to be tested during a named pass.</div>
+</div>
+
+<nav class="toc">
+  <h4>Contents</h4>
+  <ol>
+    <li><a href="#s1"><b>1</b>Components, paths, secrets</a></li>
+    <li><a href="#s2"><b>2</b>Pairing, auth, NAT, transport</a></li>
+    <li><a href="#s3"><b>3</b>Why a browser tab can't host</a></li>
+    <li><a href="#s4"><b>4</b>Repository and stack</a></li>
+    <li><a href="#s5"><b>5</b>Contracts, schema, state machine</a></li>
+    <li><a href="#s6"><b>6</b>The two adapters</a></li>
+    <li><a href="#s7"><b>7</b>Scheduling</a></li>
+    <li><a href="#s8"><b>8</b>Authorization and consent</a></li>
+    <li><a href="#s9"><b>9</b>Threat model</a></li>
+    <li><a href="#s10"><b>10</b>Stream transport</a></li>
+    <li><a href="#s11"><b>11</b>Protocol and gates</a></li>
+    <li><a href="#s12"><b>12</b>Top five failure modes</a></li>
+    <li><a href="#s13"><b>13</b>Backlog</a></li>
+    <li><a href="#s14"><b>14</b>Go / no-go</a></li>
+  </ol>
+</nav>
+
+<h2 id="s1"><span class="num">1</span>Components, paths, and secret visibility</h2>
+<p><code>web</code>, <code>control</code>, and <code>agent</code> are three distinct trust principals.
+The handoff's terminology — browser client, host agent, remote browser — is kept verbatim.</p>
+
+<div class="tw"><table>
+<thead><tr><th>Component</th><th>Runs on</th><th>Responsibility</th></tr></thead>
+<tbody>
+<tr><td><code>web</code></td><td>User's browser</td><td>Fleet, job submission, run map, live view, history. Holds no host credentials.</td></tr>
+<tr><td><code>control</code></td><td>Public host, TLS</td><td>AuthN/AuthZ, pairing, placement, lease grants, event log, media relay. Sole DB writer.</td></tr>
+<tr><td><code>db</code></td><td>Managed Postgres</td><td>Durable jobs, tasks, leases, events. Source of truth for placement.</td></tr>
+<tr><td><code>agent</code></td><td>Each opted-in computer</td><td>Outbound WSS client, capability probe, adapter host, consent enforcement, local kill switch.</td></tr>
+<tr><td><code>cpu_inference_batch</code></td><td>Inside <code>agent</code></td><td>ONNX Runtime CPU execution of a pinned model over assigned input slices.</td></tr>
+<tr><td><code>remote_browser_session</code></td><td>Inside <code>agent</code></td><td>Playwright Chromium in an ephemeral context, behind an agent-local enforcing proxy.</td></tr>
+</tbody></table></div>
+
+<h3>Three planes</h3>
+<pre class="mermaid">
+flowchart TB
+  subgraph CP["Control plane"]
+    W["web dashboard"] -->|HTTPS · WSS| C["control service"]
+    A1["agent · Host A"] -->|outbound WSS 443| C
+    A2["agent · Host B"] -->|outbound WSS 443| C
+  end
+  C --> DB[("Postgres")]
+  A1 -->|"GET /artifacts/:sha256"| C
+  A1 -->|"task.result"| C
+  A2 -->|"frames · events"| C
+  C -->|"frames"| W
+  A2 -->|"host-initiated fetch"| S["Target site · allowlisted"]
+</pre>
+
+<p>Only the selected host fetches the target website. The control service never proxies the remote
+browser's page traffic — that would defeat the entire egress feature. This is an invariant, tested by
+the <code>browser-egress</code> gate in §11.</p>
+
+<h3>Who can read what</h3>
+<div class="tw"><table>
+<thead><tr><th>Secret or sensitive datum</th><th>Stored where</th><th>Readable by</th></tr></thead>
+<tbody>
+<tr><td>User password hash</td><td><code>db</code>, Argon2id</td><td>control only</td></tr>
+<tr><td>Session cookie</td><td>Browser · httpOnly, Secure, SameSite=Strict</td><td>web (opaque), control</td></tr>
+<tr><td>Pairing code</td><td><code>db</code>, 10 min TTL, single use</td><td>User once, control</td></tr>
+<tr><td>Host private key (Ed25519)</td><td><code>~/.dwp/agent.key</code>, mode 0600</td><td><strong>Host owner and root on that machine only. Never transmitted.</strong></td></tr>
+<tr><td>Host public key</td><td><code>db</code></td><td>control, anyone with DB read</td></tr>
+<tr><td>Browser-session control token</td><td>Memory + row, session TTL</td><td>Session owner, control</td></tr>
+<tr><td>Remote page content and cookies</td><td>Ephemeral profile, deleted on stop</td><td><strong>Host owner (full), platform operator (frames in transit), session owner</strong></td></tr>
+<tr><td>Job inputs and results</td><td><code>db</code> + content-addressed store</td><td>Submitter, assigned host owner, platform operator</td></tr>
+</tbody></table></div>
+
+<div class="call stop">
+  <h4>No end-to-end confidentiality claim</h4>
+  <p>The two bolded rows are the trust-model core and must appear in the product UI, not only in this
+  document. Relayed frames transit the control service in plaintext-over-TLS and are decryptable
+  there. The MVP makes no E2E claim, and marketing must not imply one.</p>
+</div>
+
+<h2 id="s2"><span class="num">2</span>Pairing, authentication, revocation, NAT</h2>
+
+<h3>Enrollment</h3>
+<ol class="steps">
+  <li>Signed-in user clicks <em>Enroll computer</em> → <code>POST /hosts/pair-code</code> → a code such
+  as <code>K7M2-P4QX</code>. Eight characters, Crockford base32, single use, 10-minute TTL, bound to a user.</li>
+  <li>On the target machine: <code>dwp-agent pair --server https://control.example --code K7M2-P4QX</code>.</li>
+  <li>The agent generates an <strong>Ed25519 keypair locally</strong> and writes the private key to
+  <code>~/.dwp/agent.key</code> at mode 0600. It refuses to start if permissions are wider.
+  <span class="tag t-a">A</span> Keychain and DPAPI storage deferred to hardening.</li>
+  <li><code>POST /hosts/pair</code> validates the code and marks it consumed in the same transaction
+  that creates the host row.</li>
+  <li>The code is never reusable, never logged, and grants nothing by itself — it authorizes the
+  binding of one public key.</li>
+</ol>
+
+<p><strong>Why asymmetric rather than a bearer token:</strong> the control database then holds no
+credential that can impersonate a host. A database read compromise cannot forge host results, which
+is exactly what makes the attestation in §12 meaningful.</p>
+
+<h3>Session authentication</h3>
+<p>The agent connects to <code>wss://control.example/agent/connect</code> presenting an EdDSA-signed
+JWT: <code>{iss: hostId, aud: "dwp-control", iat, exp: iat+120, jti}</code>. The server verifies
+against the stored public key, rejects clock skew beyond 120 s, and rejects a replayed <code>jti</code>
+from a ten-minute cache. Reconnects mint a fresh assertion. No long-lived bearer token exists on the wire.</p>
+
+<h3>Pause and revoke are different things</h3>
+<div class="tw"><table>
+<thead><tr><th>Action</th><th>Who</th><th>Effect</th><th>Reversible</th></tr></thead>
+<tbody>
+<tr><td>Pause</td><td>Host owner, locally or via dashboard</td><td>No new placements; running tasks finish; browser sessions end</td><td class="yes">Yes, instantly</td></tr>
+<tr><td>Revoke</td><td>Host owner or admin</td><td><code>revoked_at</code> set; socket closed with code 4003; agent stops retrying and self-disables</td><td class="no">No — re-pair required</td></tr>
+</tbody></table></div>
+<p>The local pause switch must work with the control service unreachable. It is a local file flag the
+agent reads, not a server round-trip.</p>
+
+<h3>NAT and transport</h3>
+<p>Outbound TCP/443 with TLS and a WebSocket upgrade traverses ordinary home NAT without
+configuration, because the connection is established from inside. No inbound listener exists on the
+host. Keepalive is a WS ping every 15 s; the server marks a host offline after 45 s without a pong;
+the agent reconnects with full-jitter exponential backoff capped at 60 s.</p>
+<p>The one environment this fails in is a network with a TLS-inspecting middlebox or a proxy that
+blocks WS upgrades. <span class="tag t-a">A</span> To be confirmed on both real networks in Pass 1.
+The fallback — long-poll plus POST — is strictly worse and should be built only if measurement
+proves it necessary.</p>
+
+<h3>No exposed CDP</h3>
+<ul>
+  <li>Chromium is launched through Playwright's <code>chromium.launch()</code>, which drives the
+  browser over a stdio pipe rather than a TCP debugging port. <span class="tag t-d">D</span>
+  Re-verified in Pass 3 by asserting no process carries <code>--remote-debugging-port</code> and no
+  port is listening.</li>
+  <li><code>launchServer()</code> and any <code>--remote-debugging-port</code> flag are
+  <strong>forbidden</strong>; a lint rule and a startup assertion enforce it.</li>
+  <li>Chrome documents that an exposed remote-debugging port permits cookie extraction from the
+  profile. <span class="tag t-d">D</span></li>
+  <li>The dashboard receives frames and sends semantic input events. It never receives a CDP
+  endpoint, session ID, or WebSocket URL that reaches the browser directly.</li>
+</ul>
+
+<h2 id="s3"><span class="num">3</span>Why a browser tab cannot be the host</h2>
+<p>A finding, recorded with reasons so it is not relitigated.</p>
+<div class="tw"><table>
+<thead><tr><th>Requirement of a host</th><th>Web page</th><th>Installed agent</th></tr></thead>
+<tbody>
+<tr><td>Launch and drive a separate Chromium with an isolated profile</td><td class="no">Impossible</td><td class="yes">Yes</td></tr>
+<tr><td>Native-speed multithreaded ONNX CPU inference</td><td class="no">WASM only; threads need COOP/COEP and SharedArrayBuffer <span class="tag t-d">D</span></td><td class="yes">Full ORT CPU EP</td></tr>
+<tr><td>Stay available with no tab open</td><td class="no">No</td><td class="yes">Yes</td></tr>
+<tr><td>Stable machine identity and a protected key file</td><td class="no">Origin-scoped storage, clearable</td><td class="yes">Yes</td></tr>
+<tr><td>Screen capture</td><td class="no">User gesture and picker per call <span class="tag t-d">D</span></td><td class="yes">N/A — captures the browser it owns</td></tr>
+<tr><td>Enforceable CPU and RAM caps</td><td class="no">No</td><td class="yes">OS-level</td></tr>
+</tbody></table></div>
+<p>A browser tab can be a <em>viewer</em>, and later an experimental WASM compute worker for a narrow
+task type. It cannot be the general host.</p>
+
+<h2 id="s4"><span class="num">4</span>Repository layout and stack</h2>
+<div class="cw"><div class="cap">pnpm workspace</div><pre><code>distributed-work-platform/
+  packages/
+    protocol/         # zod schemas: REST DTOs, WS envelope, adapter contracts
+    control/          # Fastify + ws + drizzle. The only DB writer.
+      src/{http,ws,scheduler,leases,events,artifacts}/
+      migrations/
+    agent/            # host agent
+      src/{transport,consent,capability,adapters/{inference,browser},proxy}/
+    web/              # Vite + React dashboard
+      src/{fleet,new-work,run-map,live-view,history}/
+  fixtures/           # model + input MANIFESTS (hashes, URLs) — not the blobs
+  bench/              # measurement harness, JSONL output
+  docs/  scripts/</code></pre></div>
+<p><code>protocol</code> is imported by all three runtime packages, so a contract change that breaks a
+peer fails typecheck in CI. This is the cheapest available defense against the control/agent message
+drift that kills projects of this shape.</p>
+
+<div class="tw"><table>
+<thead><tr><th>Choice</th><th>Version</th><th>Note</th></tr></thead>
+<tbody>
+<tr><td>Node.js</td><td>24.14.0 <span class="tag t-v">V</span></td><td>Agent and control. Pinned via <code>.nvmrc</code> and <code>engines</code>.</td></tr>
+<tr><td>pnpm</td><td>10.27.0 <span class="tag t-v">V</span></td><td>Workspaces.</td></tr>
+<tr><td>TypeScript</td><td>7.0.2 <span class="tag t-v">V</span></td><td>Latest is the native compiler. <span class="tag t-a">A</span> Fall back to the 5.9 line if a dependency's type tooling lags; decide in Pass 1 and record the reason.</td></tr>
+<tr><td>Fastify · ws</td><td>5.12.5 · 8.21.3 <span class="tag t-v">V</span></td><td>HTTP and both WSS endpoints.</td></tr>
+<tr><td>Drizzle · pg</td><td>0.45.2 · 8.23.0 <span class="tag t-v">V</span></td><td>SQL-first. The lease query is hand-written SQL regardless.</td></tr>
+<tr><td>PostgreSQL</td><td>18.3 <span class="tag t-v">V</span></td><td><code>FOR UPDATE SKIP LOCKED</code> for atomic lease claims.</td></tr>
+<tr><td>Playwright</td><td>1.63.0 <span class="tag t-v">V</span></td><td>Chromium contexts.</td></tr>
+<tr><td>onnxruntime-node</td><td>1.30.0 <span class="tag t-v">V</span></td><td>Package metadata declares <code>os: ['win32','darwin','linux']</code> <span class="tag t-v">V</span>. CPU EP is the target; GPU EP availability varies by OS <span class="tag t-d">D</span> and is out of scope.</td></tr>
+<tr><td>React · Vite · Zod</td><td>19.3.0 · 8.3.0 · 4.6.5 <span class="tag t-v">V</span></td><td>One schema per contract, shared by both sides of every wire.</td></tr>
+</tbody></table></div>
+<p>All versions are pinned exactly in <code>pnpm-lock.yaml</code>. "Latest" is recorded as of this
+date and is not assumed to stay current.</p>
+
+<h2 id="s5"><span class="num">5</span>Contracts, schema, and the task state machine</h2>
+
+<div class="cw"><div class="cap">REST surface</div><pre><code>POST   /auth/login                      -> sets session cookie
+POST   /hosts/pair-code                 -> { code, expiresAt }
+POST   /hosts/pair                      -> { hostId }        (code-authenticated, not session)
+GET    /hosts                           -> Host[]
+POST   /hosts/:id/consent               -> update allow_compute / allow_browser / caps
+POST   /hosts/:id/revoke                -> 204
+POST   /jobs                            -> Job               (adapter, manifestHash, constraints)
+GET    /jobs/:id                        -> Job + task rollup
+GET    /jobs/:id/tasks                  -> Task[]
+POST   /jobs/:id/cancel                 -> 202
+GET    /jobs/:id/results                -> streamed NDJSON
+POST   /browser-sessions                -> BrowserSession + control token
+POST   /browser-sessions/:id/stop       -> 204
+GET    /artifacts/:sha256               -> bytes              (agent-authenticated)</code></pre></div>
+
+<div class="cw"><div class="cap">WebSocket envelope</div><pre><code>type Envelope&lt;T = unknown&gt; = {
+  v: 1
+  id: string          // ULID, unique per message
+  replyTo?: string    // correlates a response to a request
+  ts: string          // sender clock — for durations only, never for ordering
+  type: string
+  payload: T
+}</code></pre></div>
+
+<p>Ordering is established by the server's monotonic <code>run_events.seq</code>, never by sender
+timestamps. Clock skew between a Mac and a Windows box is a real and under-appreciated source of
+nonsense run maps.</p>
+
+<div class="tw"><table>
+<thead><tr><th>Direction</th><th>Message types</th></tr></thead>
+<tbody>
+<tr><td>agent → control</td><td><code>hello</code>, <code>heartbeat</code>, <code>capability.update</code>, <code>consent.update</code>, <code>task.accept</code>, <code>task.decline</code>, <code>lease.renew</code>, <code>task.progress</code>, <code>task.result</code>, <code>task.error</code>, <code>calib.result</code>, <code>browser.opened</code>, <code>browser.frame</code>, <code>browser.event</code>, <code>browser.closed</code></td></tr>
+<tr><td>control → agent</td><td><code>hello.ack</code>, <code>task.offer</code>, <code>task.cancel</code>, <code>browser.open</code>, <code>browser.input</code>, <code>browser.close</code>, <code>revoked</code>, <code>drain</code></td></tr>
+<tr><td>control → web</td><td><code>job.updated</code>, <code>task.updated</code>, <code>host.updated</code>, <code>run.event</code>, <code>frame</code>, <code>session.ended</code></td></tr>
+<tr><td>web → control</td><td><code>input</code>, <code>session.keepalive</code></td></tr>
+</tbody></table></div>
+
+<p><code>task.result</code> payloads are capped at <strong>256 KiB</strong>; larger outputs are
+uploaded content-addressed and referenced by hash. A classifier over N inputs produces small results,
+so the cap will not bind in the MVP — it exists so the WS relay can never become a bulk data path by
+accident.</p>
+
+<h3>Schema</h3>
+<div class="cw"><div class="cap">abridged · full DDL lands with Pass 2</div><pre><code>users(id, email, password_hash, role, created_at)
+
+hosts(id, owner_id, public_key, trust_tier, allow_compute, allow_browser,
+      os, arch, cpu_model, logical_cores, total_ram_mb, agent_version,
+      max_concurrency, cpu_quota_pct, mem_limit_mb,
+      self_reported_region, online, last_heartbeat_at, paused,
+      created_at, revoked_at)
+-- NOTE: no observed_egress_ip column. See below.
+
+pair_codes(code_hash, user_id, expires_at, consumed_at)
+
+jobs(id, owner_id, adapter, status, manifest_hash, total_items,
+     constraints jsonb, created_at, started_at, ended_at, cancel_requested_at)
+
+tasks(id, job_id, seq, input_ref, state, assigned_host_id,
+      lease_id, lease_expires_at, attempts, idempotency_key,
+      output_ref, output_hash, error_class,
+      queued_at, started_at, finished_at)
+
+task_attempts(id, task_id, attempt, host_id, started_at, finished_at,
+              outcome, host_signature, host_reported_ms)
+
+browser_sessions(id, owner_id, host_id, start_url, allowlist_id, viewport jsonb,
+                 state, observed_egress_ip, created_at, expires_at, ended_at, end_reason)
+
+run_events(seq bigserial, id, job_id, task_id, session_id, host_id,
+           actor, category, type, payload jsonb, server_ts)
+
+calibrations(host_id, adapter, model_hash, agent_version,
+             items_per_sec, setup_ms, measured_at)   -- PK: all four; TTL 24h
+artifacts(sha256, kind, bytes, content_type, created_at)</code></pre></div>
+
+<div class="call warn">
+  <h4>Deviation from the handoff</h4>
+  <p><code>observed_egress_ip</code> is <em>not</em> on <code>hosts</code>. A host's egress address
+  changes with tethering, VPN toggles, and CGNAT reassignment, so a stored value is stale and
+  misleading precisely where honesty matters most. It is probed on demand for the fleet card —
+  displayed, not persisted — and recorded on <code>browser_sessions</code>, where it is evidence
+  about one specific run.</p>
+</div>
+
+<h3>Task lifecycle</h3>
+<pre class="mermaid">
+stateDiagram-v2
+  [*] --> pending
+  pending --> offered: offer
+  offered --> leased: accept
+  offered --> pending: decline
+  leased --> running: start
+  leased --> pending: lease expiry
+  running --> pending: lease expiry
+  running --> succeeded: result accepted
+  pending --> failed: attempts = 3
+  pending --> cancelled: cancel
+  running --> cancelled: cancel
+  succeeded --> [*]
+  failed --> [*]
+  cancelled --> [*]
+</pre>
+
+<ul>
+<li><strong>Lease:</strong> granted for 30 s, renewed by the agent every 10 s. A sweeper every 5 s
+returns expired leases to <code>pending</code> and increments <code>attempts</code>.</li>
+<li><strong>Claim:</strong> <code>SELECT … WHERE state='pending' ORDER BY seq FOR UPDATE SKIP LOCKED
+LIMIT $n</code> inside one transaction that also writes the lease. Two schedulers cannot hand the
+same task to two hosts.</li>
+<li><strong>Idempotency:</strong> the terminal write is <code>UPDATE tasks SET state='succeeded' …
+WHERE id=$1 AND state &lt;&gt; 'succeeded'</code>. A late result from a superseded attempt matches zero
+rows and is logged as <code>duplicate_result</code> rather than an error. Every attempt survives in
+<code>task_attempts</code>, so the run map can show "ran twice, first accepted".</li>
+<li><strong>Cancellation</strong> stops new leases and signals holders. Already-succeeded results are
+kept and the job ends <code>cancelled_partial</code> with an explicit accepted-item count. Partial
+results are surfaced, never silently discarded.</li>
+<li><strong>Max attempts</strong> is 3. A task that fails on two different hosts is flagged as an
+input problem, not a host problem.</li>
+</ul>
+
+<h2 id="s6"><span class="num">6</span>Adapter interface and the two adapters</h2>
+<p>Each adapter is two halves — a <strong>planner</strong> on the control service and an
+<strong>executor</strong> in the agent — sharing a type from <code>protocol/</code>, which is what
+keeps them honest.</p>
+
+<div class="cw"><div class="cap">packages/protocol/adapter.ts</div><pre><code>// agent side
+interface WorkloadExecutor&lt;I, O&gt; {
+  readonly type: string
+  readonly version: string
+  probe(): Promise&lt;CapabilityRecord&gt;                       // at connect + on change
+  calibrate?(spec: CalibSpec): Promise&lt;ThroughputSample&gt;   // { itemsPerSec, setupMs }
+  execute(input: I, ctx: ExecCtx): Promise&lt;O&gt;
+}
+
+interface ExecCtx {
+  signal: AbortSignal                  // cancel, lease loss, or pause
+  onProgress(done: number, total: number): void
+  artifacts: { fetch(sha256: string): Promise&lt;string&gt; }   // verifies hash before returning path
+  tmpdir: string                       // removed on completion
+  limits: { cpuQuotaPct: number; memLimitMb: number; wallClockMs: number }
+}
+
+// control side
+interface WorkloadPlanner&lt;S, I&gt; {
+  readonly type: string
+  validate(spec: S): Result&lt;ValidatedSpec&gt;
+  eligible(host: HostRecord, spec: ValidatedSpec): Eligibility   // { ok } | { ok: false, reason }
+  partition(spec: ValidatedSpec): I[]
+}</code></pre></div>
+
+<p><code>Eligibility</code> returns a <strong>reason</strong> on rejection, and the reasons are shown
+in the New work screen before launch. A scheduler that silently excludes a host is indistinguishable
+from a broken one.</p>
+
+<h3>cpu_inference_batch</h3>
+<ul>
+<li><strong>Spec:</strong> <code>{ modelHash, preprocessingId, inputManifestHash, batchSize, perItemTimeoutMs, tolerance }</code></li>
+<li><strong>Eligibility:</strong> <code>allow_compute ∧ ¬paused ∧ online ∧ os/arch supported ∧ free_ram ≥ footprint × 1.5 ∧ concurrency &lt; max ∧ user under quota</code></li>
+<li><strong>Execution:</strong> fetch model and inputs by hash, verify SHA-256 before use — a mismatch
+is a hard failure, never a warning — create an ORT session with <code>intraOpNumThreads</code> bounded
+by <code>cpu_quota_pct</code>, run assigned items.</li>
+<li><strong>Correctness:</strong> floating-point CPU kernels are not bit-identical across
+microarchitectures, so the gate is <code>max |Δlogit| ≤ tol</code> with <code>tol</code> published —
+not equality. <span class="tag t-a">A</span> Measured in Pass 2, not guessed.</li>
+<li><strong>Hard rule:</strong> one model request is never split across machines. Parallelism is
+across independent items only.</li>
+</ul>
+
+<h3>remote_browser_session</h3>
+<ul>
+<li><strong>Eligibility:</strong> <code>allow_browser ∧ trust_tier = 'trusted' ∧ ¬paused ∧ online ∧ no active session ∧ startUrl ∈ allowlist ∧ requester may use this host</code></li>
+<li><strong>Execution:</strong> launch the agent-local enforcing proxy (§9), then Chromium with
+<code>--proxy-server=127.0.0.1:&lt;port&gt;</code> and a fresh <code>userDataDir</code> under
+<code>tmpdir</code>.</li>
+<li><strong>Lifecycle:</strong> pinned to one host. Disconnect ends the session, closes the context,
+and deletes the profile directory. No cookie or live-state migration between machines — that boundary
+is what keeps the trust model coherent.</li>
+<li><strong>Output:</strong> frames (never persisted), an append-only session event log, and the
+observed egress address.</li>
+</ul>
+
+<h2 id="s7"><span class="num">7</span>Scheduling</h2>
+<p>Minimize <strong>makespan</strong> — the finish time of the slowest host — not average utilization
+and not cost. For host <em>h</em> given <em>n<sub>h</sub></em> items:</p>
+<div class="derive">T_h = q_h + s_h·(1 − cached_h) + n_h / r_h
+
+  q_h       estimated drain time of work already queued on h
+  s_h       setup + transfer: model_bytes / measured_bandwidth + warmup_ms
+  r_h       measured items/sec from the calibrations table
+  cached_h  1 if the host already holds this model_hash</div>
+
+<h3>Water-filling with a tail pool</h3>
+<p>Binary-search the makespan <em>T</em> such that <code>Σ max(0, r_h·(T − q_h − s_h)) = N</code>. A
+host whose share computes to ≤ 0 is <strong>excluded</strong> — meaning its setup cost exceeds any
+contribution it could make, a real and common outcome for a cold slow host on a small batch. The UI
+says so rather than hiding it.</p>
+<p><strong>Ten percent of items are held back as a tail pool</strong>, dispatched on request as hosts
+finish. This is the handoff's "conservative reserve" made concrete: it absorbs calibration error and
+turns a host dropping offline near the end into a small tail rather than a stranded block.</p>
+<p><strong>Calibration is itself overhead.</strong> Results are cached per
+<code>(host, adapter, model_hash, agent_version)</code> with a 24-hour TTL, and a calibration batch is
+capped at <code>min(64 items, 2 s)</code>. Recalibrating on every job would destroy exactly the
+small-batch case that is already marginal.</p>
+
+<h3>Worked two-host example</h3>
+<p><em>Illustrative rates, to be replaced by measured ones.</em> N = 1000. Host A:
+r = 42 items/s, model cached so s = 0. Host B: r = 17 items/s, cold so s = 6.8 s.</p>
+<div class="derive">42·T + 17·(T − 6.8) = 1000
+59·T = 1115.6      →  T = 18.9 s
+
+n_A = 42 × 18.9          = 794 items
+n_B = 17 × (18.9 − 6.8)  = 206 items
+
+single-host baseline on A = 1000 / 42 = 23.8 s
+speedup = 23.8 / 18.9 = 1.26×</div>
+
+<div class="call warn">
+  <h4>The batch-size floor — the most important number here</h4>
+  <p>Generalizing with q = 0 and s<sub>A</sub> = 0:</p>
+  <div class="derive">T = (N + r_B·s_B) / (r_A + r_B)
+S = (N/r_A) / T = N·(r_A + r_B) / (r_A·(N + r_B·s_B))
+
+S rises with N toward the ceiling (r_A + r_B)/r_A = 1.405
+solving S ≥ 1.2 for these rates:</div>
+  <span class="figure">N ≥ 677 items</span>
+  <p>The 1.2× stretch target is <strong>unreachable on any batch smaller than ~680 items</strong> with
+  this host pair, no matter how good the scheduler is. The demo dataset must be sized from measured
+  r<sub>A</sub>, r<sub>B</sub>, s<sub>B</sub> <em>before</em> the benchmark runs, not chosen for
+  convenience and explained afterwards.</p>
+  <p>And if the measured ceiling <code>(r_A + r_B)/r_A</code> is itself below 1.2 — which happens
+  whenever one host is more than 5× slower than the other — the target is unreachable at
+  <strong>any</strong> batch size. The correct response is to report that, not to hunt for a
+  flattering configuration.</p>
+</div>
+
+<h2 id="s8"><span class="num">8</span>Authorization and host-consent matrix</h2>
+<p>Roles are <code>admin</code> and <code>member</code>. A host has one owner; MVP hosts are shared
+within a single team.</p>
+<div class="tw"><table>
+<thead><tr><th>Action</th><th>Host owner</th><th>Other member</th><th>Admin</th><th>Also requires</th></tr></thead>
+<tbody>
+<tr><td>Enroll a host</td><td class="yes">✓ own</td><td class="yes">✓ own</td><td class="yes">✓</td><td>Valid pairing code</td></tr>
+<tr><td>Pause / resume</td><td class="yes">✓</td><td class="no">—</td><td class="yes">✓</td><td>—</td></tr>
+<tr><td>Revoke</td><td class="yes">✓</td><td class="no">—</td><td class="yes">✓</td><td>—</td></tr>
+<tr><td>Change consent flags and caps</td><td class="yes">✓</td><td class="no">—</td><td class="no">—</td><td>—</td></tr>
+<tr><td>Submit compute job (auto-place)</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td>Under user quota</td></tr>
+<tr><td>Target a specific host for compute</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td><code>allow_compute ∧ ¬paused</code></td></tr>
+<tr><td>Open a browser session</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td><code>allow_browser ∧ trusted ∧ URL ∈ allowlist</code></td></tr>
+<tr><td>View frames / send input</td><td colspan="3">Session owner only</td><td>Valid session control token</td></tr>
+<tr><td>View run results</td><td colspan="2">Job owner</td><td class="yes">✓</td><td>—</td></tr>
+</tbody></table></div>
+<p>Two checks are worth stating because they are the ones usually missed. The host owner does
+<strong>not</strong> automatically get to watch another user's browser session on their own machine
+through the dashboard — they can inspect the machine directly, which is the unavoidable trust
+boundary, but the platform does not hand them a viewer. And every frame and input message is
+re-authorized against the session token <strong>on each message</strong>, not only at socket open.</p>
+
+<h2 id="s9"><span class="num">9</span>Threat model</h2>
+
+<h3>Malicious or curious host owner</h3>
+<p>Can read the remote browser's memory, profile directory, and network traffic; can install a root CA
+and inspect TLS; can tamper with results. Mitigations are the trust tier, browser sessions restricted
+to trusted hosts, test accounts and team-owned sites only, and prominent "Running on Host B — its
+owner can see this session" labeling. Result tampering is detectable only for verifiable workloads:
+agreement across hosts on overlapping items, which the tail pool supplies for free.
+<strong>Residual risk: accepted and documented.</strong> A host owner is inside their own machine; no
+MVP control changes that.</p>
+
+<h3>Malicious job submitter</h3>
+<p>Wants the host as an open proxy, a LAN scanner, or a code-execution surface. Mitigations: no
+arbitrary code or shell — only the two adapters; URL allowlist; private-range blocking below; per-user
+quotas on items, concurrent jobs, and session minutes; wall-clock caps per task.</p>
+
+<h3>Platform operator</h3>
+<p>Sees relayed frames, input keystrokes, job inputs and results, and all metadata. Frames are
+relayed, never written to disk; <code>run_events</code> excludes page content by default; log
+retention is bounded. End-to-end media encryption would require the control service to relay opaque
+bytes it cannot decode — a genuine possibility with WebRTC insertable streams later, and explicitly
+not a Pass 1–5 property.</p>
+
+<h3>Target sites</h3>
+<p>See automated traffic from the host's egress. Allowlist of team-operated domains only; robots and
+ToS respected; no marketing of geo-restriction bypass.</p>
+
+<h3>Accidental LAN and metadata access — the sharpest edge</h3>
+<div class="call stop">
+  <h4>A URL allowlist alone is not sufficient</h4>
+  <p>DNS rebinding lets an allowlisted hostname resolve to <code>192.168.1.1</code> on the second
+  lookup, and redirects can walk out of the allowlist. Enforcement therefore sits at an
+  <strong>agent-local HTTP/HTTPS proxy</strong> bound to loopback, which the remote Chromium is
+  launched against.</p>
+  <ol class="steps">
+    <li>Host must match the allowlist — exact host or an explicit suffix rule.</li>
+    <li>Resolve the name <strong>once</strong>; reject unless every returned address is public.</li>
+    <li><strong>Pin</strong> the connection to the checked IP. The browser never re-resolves for itself.</li>
+    <li>Deny <code>127.0.0.0/8</code>, <code>10/8</code>, <code>172.16/12</code>,
+    <code>192.168/16</code>, <code>169.254/16</code> (including <code>169.254.169.254</code>),
+    <code>100.64/10</code>, <code>::1</code>, <code>fc00::/7</code>, <code>fe80::/10</code>, and any
+    non-global IPv6.</li>
+    <li>Re-run steps 1–4 on <strong>every redirect hop</strong>, with a hop cap.</li>
+    <li>Deny non-HTTP(S) schemes, and <code>file:</code> / <code>chrome:</code> navigation via policy flags.</li>
+  </ol>
+  <p>The proxy is small and fully unit-testable, and its test suite is a Pass 3 release gate. This is
+  the one place where a quiet bug turns a friend's laptop into an attack surface against their own
+  network.</p>
+</div>
+
+<h2 id="s10"><span class="num">10</span>Stream transport and the upgrade trigger</h2>
+<p>Pass 3 uses a CDP screencast over the authenticated relay:
+<code>Page.startScreencast({format:'jpeg', quality:60, maxWidth:1280, maxHeight:800, everyNthFrame:2})</code>,
+frames forwarded as binary WS messages and rendered to a canvas. Input travels back as semantic
+events through the Playwright CDP session.</p>
+
+<div class="call">
+  <h4>Backpressure rule — non-negotiable</h4>
+  <p>At most <strong>one frame in flight per session</strong>. If a frame is pending when the next
+  arrives, the older is dropped, never queued. Unbounded frame queues are the standard way this
+  architecture dies: latency grows without bound while throughput still looks fine.</p>
+</div>
+
+<p>Expected cost <span class="tag t-a">A</span>: roughly 30–120 KB per frame at 1280×800 / q60; at
+~10 fps, 0.3–1.2 MB/s per session. Latency is
+<code>RTT(web↔control) + RTT(control↔agent) + encode + queue</code>. The UI displays the
+<strong>measured</strong> refresh rate and never implies 60 fps.</p>
+
+<h3>Move to WebRTC only if, over a 2-minute scripted interaction on the real pair</h3>
+<div class="tw"><table>
+<thead><tr><th>Signal</th><th>Threshold</th></tr></thead>
+<tbody>
+<tr><td>Input-to-visible-frame, p50</td><td>&gt; 250 ms</td></tr>
+<tr><td>Input-to-visible-frame, p95</td><td>&gt; 600 ms</td></tr>
+<tr><td>Sustained host uplink per session</td><td>&gt; 1.5 MB/s</td></tr>
+<tr><td>Dropped-frame rate</td><td>&gt; 20 %</td></tr>
+</tbody></table></div>
+<p><strong>What that upgrade actually costs.</strong> WebRTC is not a drop-in. The agent becomes a
+media sender: the screencast is a stream of JPEGs, so it needs a real VP8/H.264 encode pipeline and a
+WebRTC stack in Node, plus ICE, plus a TURN server for symmetric-NAT pairs — which relays the media
+anyway and returns the operator to the plaintext position. That is why it is conditional on
+measurement rather than planned.</p>
+
+<h2 id="s11"><span class="num">11</span>Test protocol and phase gates</h2>
+<p>Every run records OS, CPU model, logical cores, RAM, network type and measured bandwidth, agent
+version, model hash, manifest hash, item count, cache state, timestamp, and the git SHA of all three
+packages. At least three warm trials per configuration; report <strong>median and full range</strong>,
+never a single best run. Baseline is the faster single eligible host on identical inputs, model, and
+preprocessing. The harness writes one JSONL record per trial and the run-history screen renders
+exactly those records — <strong>the UI cannot show a number the harness did not produce.</strong></p>
+
+<div class="tw"><table>
+<thead><tr><th>Gate</th><th>Pass criterion</th><th>Evidence artifact</th></tr></thead>
+<tbody>
+<tr><td><code>network</code></td><td>Two hosts on distinct networks enroll and execute with outbound-only connections; no port forwarding</td><td>Traceroute/IP evidence from both; socket listing showing no inbound listener</td></tr>
+<tr><td><code>distribution</code></td><td>Results carry valid host signatures from two distinct public keys</td><td>Signature verification report</td></tr>
+<tr><td><code>correctness</code></td><td>Every input ID has exactly one accepted result; cross-host agreement within published tolerance</td><td>Diff report and measured tolerance</td></tr>
+<tr><td><code>recovery</code></td><td>Killing a host mid-batch re-queues only unfinished leases; no duplicate accepted results; browser session ends visibly</td><td>Event log excerpt and <code>task_attempts</code> rows</td></tr>
+<tr><td><code>browser-egress</code></td><td>Team-owned <code>/whoami</code> observes the <strong>host's</strong> egress, not the control service's</td><td>Screenshot pairing the dashboard label with the site response</td></tr>
+<tr><td><code>security</code></td><td>Revoked host rejected; non-owner cannot control a session; pause works offline; private-IP and off-allowlist targets rejected</td><td>Proxy test suite and manual matrix</td></tr>
+<tr><td><code>usability</code></td><td>A fresh host is enrolled end-to-end from the README with no manual DB edits</td><td>Recorded walkthrough</td></tr>
+<tr><td><code>performance</code></td><td>Measured speedup published with median and range; claimed only if median &gt; 1.0</td><td>bench JSONL and run-history screenshot</td></tr>
+</tbody></table></div>
+
+<h2 id="s12"><span class="num">12</span>Top five failure modes</h2>
+
+<h3>1 · Duplicate or lost results around lease expiry</h3>
+<p>A host finishes as its lease expires; the task is already re-queued; two results arrive.
+<em>Remedy:</em> conditional terminal UPDATE, all attempts retained, late results recorded as
+<code>duplicate_result</code>. <em>Test:</em> <code>SIGKILL</code> an agent at 60 % of a batch and
+assert <code>accepted == total</code> with <code>attempts &gt; total</code>.</p>
+
+<h3>2 · Distributed is slower than one host</h3>
+<p>Setup and transfer dominate. <em>Remedy:</em> the §7 floor is computed and <strong>shown before
+launch</strong> — "with your current hosts, this batch needs ≥ 680 items to beat Host A." The run map
+always shows the overhead breakdown. A result below 1× is a finding, not a bug to hide.</p>
+
+<h3>3 · Media backpressure collapse</h3>
+<p>Frames queue, latency climbs, the session becomes unusable while metrics look healthy.
+<em>Remedy:</em> one-frame-in-flight cap, drop-oldest, adaptive quality, hard session TTL, and latency
+measured end-to-end rather than at the encoder.</p>
+
+<h3>4 · SSRF or LAN reach from the remote browser</h3>
+<p>A redirect or DNS rebind points the browser at the owner's router or a metadata endpoint.
+<em>Remedy:</em> the §9 enforcing proxy with IP pinning and per-hop revalidation; its unit tests are a
+release gate.</p>
+
+<h3>5 · Fake distribution — the demo-integrity failure</h3>
+<div class="call stop">
+  <h4>The most damaging outcome</h4>
+  <p>A demo that <em>looks</em> distributed but isn't, where the control service's own logs cannot
+  disprove it — because the control service writes them.</p>
+  <p><em>Remedy:</em> each result carries
+  <code>sign(host_privkey, {taskId, attempt, outputHash, startedAt, finishedAt, hostId})</code>,
+  stored in <code>task_attempts.host_signature</code>. <code>scripts/verify-run.ts</code> takes a job
+  ID and the enrolled public keys and verifies every accepted result independently of the server's
+  narrative. The run map shows a per-task verification badge. A reviewer who does not trust the
+  operator can still check that two distinct machines did the work.</p>
+</div>
+
+<h2 id="s13"><span class="num">13</span>Prioritized backlog</h2>
+
+<div class="pass">
+  <header><b>Pass 1</b><span>Network spike — Gate A</span></header>
+  <div class="body">
+    <div class="tw" style="margin:0 0 14px"><table><thead><tr><th>#</th><th>Item</th><th>Acceptance</th></tr></thead><tbody>
+    <tr><td>1.1</td><td><code>protocol</code>: envelope, <code>hello</code>, <code>heartbeat</code>, <code>echo</code></td><td>Typecheck passes; schemas round-trip in tests</td></tr>
+    <tr><td>1.2</td><td>Control service on a public hostname with a real certificate</td><td><code>wss://</code> reachable from both networks</td></tr>
+    <tr><td>1.3</td><td>Pairing: code issue, keypair generation, <code>POST /hosts/pair</code></td><td>Code single-use and expiring; key file 0600 or the agent refuses to start</td></tr>
+    <tr><td>1.4</td><td>Agent transport: EdDSA assertion, jittered reconnect, heartbeat</td><td>Kill the network for 60 s; agent reconnects without a restart</td></tr>
+    <tr><td>1.5</td><td><code>echo</code> adapter and dispatch</td><td>Each host returns its own <code>hostId</code> and the server nonce</td></tr>
+    <tr><td>1.6</td><td>Presence</td><td>Disconnect shows offline within 45 s</td></tr>
+    <tr><td>1.7</td><td><code>/whoami</code> demo site and first Chromium launch</td><td>Site logs the <strong>host's</strong> egress; no listening debug port, asserted not assumed</td></tr>
+    </tbody></table></div>
+  </div>
+</div>
+
+<div class="pass">
+  <header><b>Pass 2</b><span>Durable batch compute</span></header>
+  <div class="body">
+    <p>Schema and migrations · <code>SKIP LOCKED</code> claim and lease sweeper ·
+    <code>cpu_inference_batch</code> executor with hash verification · manifest and pinned fixtures ·
+    calibration with caching and TTL · water-fill placement with tail pool · host-signed attestation
+    and <code>verify-run</code> · bench harness and baseline.</p>
+    <p class="accept"><b>Acceptance</b>1000 items across two real hosts; exactly one accepted result
+    per input; cross-host agreement within published tolerance; <code>SIGKILL</code> recovery clean;
+    median speedup published with range.</p>
+  </div>
+</div>
+
+<div class="pass">
+  <header><b>Pass 3</b><span>Browser workload</span></header>
+  <div class="body">
+    <p>Enforcing proxy and its test suite · ephemeral context lifecycle and profile deletion ·
+    screencast relay with backpressure · input forwarding with per-message authorization · one
+    scripted workflow with pause, human takeover, resume · session TTL, stop, and disconnect semantics.</p>
+    <p class="accept"><b>Acceptance</b><code>browser-egress</code> and <code>security</code> gates
+    pass; measured latency recorded against the §10 trigger; profile directory provably gone after stop.</p>
+  </div>
+</div>
+
+<div class="pass">
+  <header><b>Pass 4</b><span>Interface</span></header>
+  <div class="body">
+    <p>Fleet · New work, with eligibility reasons and the batch-size floor shown pre-launch · Run map,
+    with per-task host, timing, verification badge, and overhead breakdown · Live view, with host
+    label, egress, measured fps, and control owner · History, with manifest hashes, baseline run ID,
+    and methodology.</p>
+    <p class="accept"><b>Acceptance</b>The entire demo runs with no DB edits and no impersonated host events.</p>
+  </div>
+</div>
+
+<div class="pass">
+  <header><b>Pass 5</b><span>Hardening and rehearsal</span></header>
+  <div class="body">
+    <p>Caps enforcement · revocation · cancellation with partial results · offline-capable local pause ·
+    quotas · README from-scratch walkthrough.</p>
+    <p class="accept"><b>Acceptance</b>Gate table green and every number in the UI traceable to a bench record.</p>
+  </div>
+</div>
+
+<h2 id="s14"><span class="num">14</span>Go / no-go and unresolved decisions</h2>
+<div class="verdict">
+  <span class="stamp">Recommendation · Go for Pass 1</span>
+  <p>The topology is sound, the stack is available on all three target operating systems, and the
+  risky parts are isolated behind measurement gates rather than assumed away.</p>
+</div>
+
+<h3>Two decisions gate Pass 1 and cannot be assumed</h3>
+<ol class="steps">
+  <li><strong>Where does the control service run publicly?</strong> It needs a real TLS certificate
+  and a stable hostname reachable from both home networks. A small managed host is the straightforward
+  answer; a tunnel is acceptable for the spike but must not become the architecture.</li>
+  <li><strong>Which two physical machines, on which two networks?</strong> The handoff is explicit that
+  a VM cannot substitute for the cross-network proof. If only one network is available today, Pass 1
+  stalls at the <code>network</code> gate regardless of code quality.</li>
+</ol>
+
+<h3>Deferred with a named trigger, not left open</h3>
+<div class="tw"><table>
+<thead><tr><th>Decision</th><th>Trigger</th></tr></thead>
+<tbody>
+<tr><td>WebRTC and TURN for media</td><td>§10 thresholds exceeded on real hardware</td></tr>
+<tr><td>TypeScript 5.9 fallback</td><td>Any dependency's type tooling fails under TS 7 in Pass 1</td></tr>
+<tr><td>Keychain / DPAPI key storage</td><td>Pass 5 hardening</td></tr>
+<tr><td>Result upload path for &gt; 256 KiB outputs</td><td>First adapter whose outputs exceed the cap</td></tr>
+<tr><td>GPU execution providers</td><td>After Pass 2 publishes CPU numbers</td></tr>
+</tbody></table></div>
+
+<p><strong>Explicit non-goals, unchanged from the handoff:</strong> untrusted public hosts, arbitrary
+code or shell execution, real logged-in accounts on stranger hosts, mobile host control, cross-chip
+translation, marketplace payments, and any end-to-end media confidentiality claim.</p>
+
+<footer>
+  Pass 0 deliverable · Distributed Work Platform<br>
+  Source of record: <code>docs/01-architecture.md</code> · Input: <code>docs/00-handoff.md</code><br>
+  Versions resolved from the npm registry on 2026-09-18 and pinned in the lockfile at build time.
+</footer>
+
+</div>

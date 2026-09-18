@@ -31,3 +31,8 @@ remotely operate an authorized browser as another task type.
 Untrusted public hosts · arbitrary code or shell execution · real logged-in accounts on
 stranger hosts · mobile host control · cross-chip translation · marketplace payments ·
 end-to-end media confidentiality.
+
+## Review page
+
+The Pass 0 architecture is also published as a readable page:
+https://claude.ai/artifact/GrRXxq48Z62UmCtwswZo4h
