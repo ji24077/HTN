@@ -43,6 +43,28 @@ switch (command) {
     break
   }
 
+  /**
+   * Re-point an already-enrolled host at a new server address.
+   *
+   * A tunnel URL changes every time the tunnel restarts. The host's identity does not,
+   * so this must not require re-pairing — the keypair and host id stay exactly as they
+   * are and only the address changes.
+   */
+  case 'set-server': {
+    const cfg = requireConfig()
+    const server = flag('server') ?? rest[0]
+    if (!server) {
+      console.error('usage: agent set-server --server <url>')
+      process.exit(1)
+    }
+    const origin = server.replace(/\/+$/, '')
+    cfg.server = origin
+    cfg.wsUrl = `${origin.replace(/^http/, 'ws')}/agent/connect`
+    saveConfig(cfg)
+    console.log(`Now pointing at ${origin}\n  host id stays ${cfg.hostId} — no re-pairing needed.`)
+    break
+  }
+
   case 'pause':
   case 'resume': {
     setPaused(command === 'pause')
@@ -74,6 +96,7 @@ switch (command) {
 
   pair --server <url> --code <CODE> [--label <name>]   enroll this computer
   run [--allow-browser]                                 connect and accept work
+  set-server --server <url>                             point at a new server address
   pause | resume                                        local kill switch (works offline)
   status                                                show identity and capability
   browser-probe [--url <url>]                           launch Chromium and report observed egress

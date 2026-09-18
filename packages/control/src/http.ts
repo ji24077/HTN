@@ -7,6 +7,10 @@ import { issuePairCode, redeemPairCode, revokeHost } from './pairing.ts'
 import { record } from './events.ts'
 import { dispatchAll, disconnectHost } from './hub.ts'
 import { settleJob } from './scheduler.ts'
+import { RateLimiter } from './ratelimit.ts'
+import { joinPage } from './joinpage.ts'
+import { snapshot } from './diagnostics.ts'
+import { log } from './logger.ts'
 
 const SESSION_COOKIE = 'dwp_session'
 
@@ -23,6 +27,12 @@ function clientIp(req: FastifyRequest): string {
   return (first ?? req.ip).trim()
 }
 
+// Both of these are reachable without a session, so both are reachable by anyone on
+// the internet once the tunnel is up. Login is guessing a password; pair is guessing
+// an 8-character code.
+const loginLimiter = new RateLimiter(10, 5 * 60_000)
+const pairLimiter = new RateLimiter(20, 5 * 60_000)
+
 export function buildServer(): FastifyInstance {
   const app = Fastify({ logger: false, trustProxy: true })
 
@@ -33,6 +43,16 @@ export function buildServer(): FastifyInstance {
   }
 
   app.get('/health', async () => ({ ok: true, publicOrigin: config.publicOrigin }))
+
+  /**
+   * The page a friend opens to join. Public by design: it carries no secret of its own,
+   * only the server address and instructions. The pairing code arrives in the link the
+   * owner sends, and is single-use and short-lived.
+   */
+  app.get('/join', async (req, reply) => {
+    const { code } = z.object({ code: z.string().max(32).optional() }).parse(req.query ?? {})
+    return reply.type('text/html; charset=utf-8').send(joinPage(config.publicOrigin, code))
+  })
 
   /**
    * The team-operated demo endpoint for the browser-egress gate.
@@ -50,6 +70,11 @@ export function buildServer(): FastifyInstance {
   // ------------------------------------------------------------------- auth
 
   app.post('/auth/login', async (req, reply) => {
+    const retryAfter = loginLimiter.check(clientIp(req))
+    if (retryAfter !== null) {
+      await record({ actor: 'control', category: 'security', type: 'login.rate_limited' })
+      return reply.code(429).header('retry-after', retryAfter).send({ error: 'too-many-attempts', retryAfter })
+    }
     const body = z.object({ email: z.string(), password: z.string() }).parse(req.body)
     const token = await login(body.email, body.password)
     if (!token) return reply.code(401).send({ error: 'invalid-credentials' })
@@ -59,6 +84,24 @@ export function buildServer(): FastifyInstance {
   })
 
   app.get('/me', async req => ({ user: await requireUser(req) }))
+
+  /**
+   * Live connection health: who is connected, who keeps dropping, and why auth failed.
+   *
+   * This is the endpoint to open while a friend is trying to join — it answers
+   * "did their request even reach me?", which the database alone cannot.
+   */
+  app.get('/diagnostics', async req => {
+    await requireUser(req)
+    const { rows: hosts } = await pool.query(
+      `select id, label, online, paused, revoked_at, last_heartbeat_at, agent_version, os, arch
+         from hosts order by created_at`)
+    const { rows: recentSecurity } = await pool.query(
+      `select type, count(*)::int as n, max(server_ts) as last_at
+         from run_events where category = 'security' and server_ts > now() - interval '24 hours'
+        group by type order by n desc`)
+    return { ...snapshot(), hosts, recentSecurity, publicOrigin: config.publicOrigin }
+  })
 
   // ------------------------------------------------------------------ hosts
 
@@ -72,6 +115,11 @@ export function buildServer(): FastifyInstance {
   // Authenticated by the pairing code itself, not by a session: the agent runs on a
   // machine that has never seen the user's browser.
   app.post('/hosts/pair', async (req, reply) => {
+    const retryAfter = pairLimiter.check(clientIp(req))
+    if (retryAfter !== null) {
+      await record({ actor: 'control', category: 'security', type: 'pair.rate_limited' })
+      return reply.code(429).header('retry-after', retryAfter).send({ error: 'too-many-attempts', retryAfter })
+    }
     const body = z.object({
       code: z.string().min(4),
       publicKey: z.string().min(16),
@@ -183,11 +231,20 @@ export function buildServer(): FastifyInstance {
     return { events: rows }
   })
 
-  app.setErrorHandler((err: unknown, _req, reply) => {
-    const status = (err as { statusCode?: number }).statusCode ?? 500
-    const message = err instanceof Error ? err.message : 'internal-error'
-    if (status >= 500) console.error('[http]', err)
-    reply.code(status).send({ error: message })
+  app.setErrorHandler((err: unknown, req, reply) => {
+    // A rejected request body is the caller's mistake, not ours. Returning 500 for it
+    // sends a friend chasing a server fault that does not exist, and hides real 500s
+    // among the noise.
+    const isValidation = err instanceof z.ZodError ||
+      (err as { code?: string }).code === 'FST_ERR_VALIDATION'
+    const status = isValidation ? 400 : ((err as { statusCode?: number }).statusCode ?? 500)
+    const message = isValidation
+      ? 'invalid-request'
+      : (err instanceof Error ? err.message : 'internal-error')
+    if (status >= 500) log.error('http.error', { method: req.method, url: req.url, err })
+    else log.debug('http.rejected', { method: req.method, url: req.url, status, message })
+    // Never hand an internal message to an unauthenticated caller on the open internet.
+    reply.code(status).send({ error: status >= 500 ? 'internal-error' : message })
   })
 
   return app

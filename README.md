@@ -3,15 +3,47 @@
 Coordinate work across computers you trust, see precisely where each task runs, and
 remotely operate an authorized browser as another task type.
 
-**Current phase: Pass 1 complete except the cross-network gate.** Six of seven Pass 1
-items pass with evidence; the `network` gate stays open because both hosts ran on one
-machine. See [`docs/02-pass1-gate-report.md`](docs/02-pass1-gate-report.md).
+**Current phase: connectivity works over the public internet.** A host pairs through a
+public HTTPS address, connects over `wss://`, and returns signed results. Eleven network
+scenarios and 25 adversarial input cases pass. See
+[`docs/04-connectivity-gate-report.md`](docs/04-connectivity-gate-report.md).
+
+## Share your machine
+
+```bash
+pnpm db:up
+pnpm share          # public address + an invite link, in one command
+```
+
+Send a friend the printed `…/join?code=…` link. It shows them the two commands to run.
+Press Enter for another invite. See [`docs/03-connectivity.md`](docs/03-connectivity.md)
+for a permanent address, which you want before relying on this.
+
+## Watch what is happening
+
+```bash
+pnpm logs                 # live, as it happens
+pnpm logs --story         # per-computer summary: joins, drops, refusals
+pnpm logs --level warn    # only problems
+pnpm logs --since 30m --no-follow
+```
+
+## Test it
+
+```bash
+pnpm sim                  # 11 network scenarios against real processes
+pnpm sim --list           # what each covers and why
+pnpm sim:edge             # adversarial input: forged tokens, junk frames, bad clocks
+node --env-file-if-exists=.env scripts/gate-security.ts
+```
 
 ## Status
 
 - [x] **Pass 0** — Architecture review · [`docs/01-architecture.md`](docs/01-architecture.md)
-- [~] **Pass 1** — Network spike · pairing, transport, echo dispatch, leases, recovery,
-      security gate, browser egress. **Open:** two machines on two networks.
+- [x] **Pass 1** — Network spike · pairing, transport, echo dispatch, leases, recovery,
+      security gate, browser egress
+- [x] **Connectivity** — public address, join flow, structured logging, network simulator.
+      **Open:** a permanent address, and a real second computer
 - [ ] **Pass 2** — Durable batch CPU inference + measured baseline
 - [ ] **Pass 3** — Trusted-host remote browser session
 - [ ] **Pass 4** — Dashboard
@@ -104,6 +136,8 @@ port is exposed, and reports the address the target site actually observed.
 | [`docs/00-handoff.md`](docs/00-handoff.md) | The original MVP / architecture brief |
 | [`docs/01-architecture.md`](docs/01-architecture.md) | Pass 0: contracts, scheduling, threat model, gates, backlog, go/no-go |
 | [`docs/02-pass1-gate-report.md`](docs/02-pass1-gate-report.md) | Pass 1: what passed, with evidence, and what did not |
+| [`docs/03-connectivity.md`](docs/03-connectivity.md) | Getting friends connected: why a tunnel is required here, choosing a permanent address, watching a live connection |
+| [`docs/04-connectivity-gate-report.md`](docs/04-connectivity-gate-report.md) | Connectivity pass: what was proven, the 11 bugs found, what is still open |
 
 Review page: https://claude.ai/artifact/GrRXxq48Z62UmCtwswZo4h
 

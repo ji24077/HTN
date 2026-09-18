@@ -8,6 +8,8 @@ import { pool } from './db.ts'
 import { config } from './config.ts'
 import { record } from './events.ts'
 import { claimFor, markLeased, renewLease, releaseOffer, settleJob } from './scheduler.ts'
+import { log } from './logger.ts'
+import { noteConnection, noteDisconnection, noteAuthFailure } from './diagnostics.ts'
 
 type Conn = {
   ws: WebSocket
@@ -17,6 +19,7 @@ type Conn = {
   paused: boolean
   running: Set<string>
   lastSeen: number
+  connectedAt: number
 }
 
 const connections = new Map<string, Conn>()
@@ -82,7 +85,7 @@ async function dispatchTo(conn: Conn): Promise<void> {
 
 export async function dispatchAll(): Promise<void> {
   for (const conn of connections.values()) {
-    try { await dispatchTo(conn) } catch (err) { console.error('[hub] dispatch failed', err) }
+    try { await dispatchTo(conn) } catch (err) { log.error('dispatch.failed', { hostId: conn.hostId, err }) }
   }
 }
 
@@ -254,7 +257,13 @@ export function attachAgentHub(server: import('node:http').Server): void {
 
   server.on('upgrade', async (req: IncomingMessage, socket, head) => {
     if (!req.url?.startsWith('/agent/connect')) return
+    // Behind a tunnel or proxy the socket address is the proxy's, so prefer the
+    // forwarded address when one is present.
+    const fwd = req.headers['x-forwarded-for']
+    const remoteAddr = ((Array.isArray(fwd) ? fwd[0] : fwd?.split(',')[0]) ?? req.socket.remoteAddress ?? 'unknown').trim()
+
     const deny = (reason: string) => {
+      log.warn('agent.upgrade_denied', { reason, remoteAddr })
       socket.write(`HTTP/1.1 401 Unauthorized\r\nx-dwp-reason: ${reason}\r\n\r\n`)
       socket.destroy()
     }
@@ -269,8 +278,8 @@ export function attachAgentHub(server: import('node:http').Server): void {
     })()
     if (!claimedHost) return deny('malformed')
 
-    const { rows } = await pool.query<{ id: string; public_key: string; revoked_at: string | null; max_concurrency: number; allow_compute: boolean; paused: boolean }>(
-      `select id, public_key, revoked_at, max_concurrency, allow_compute, paused from hosts where id = $1`,
+    const { rows } = await pool.query<{ id: string; label: string; public_key: string; revoked_at: string | null; max_concurrency: number; allow_compute: boolean; paused: boolean }>(
+      `select id, label, public_key, revoked_at, max_concurrency, allow_compute, paused from hosts where id = $1`,
       [claimedHost],
     )
     const host = rows[0]
@@ -278,6 +287,8 @@ export function attachAgentHub(server: import('node:http').Server): void {
     if (!result.ok) {
       await record({ hostId: host?.id ?? null, actor: 'control', category: 'security',
         type: 'agent.auth_rejected', payload: { reason: result.reason } })
+      noteAuthFailure(claimedHost, result.reason, remoteAddr)
+      log.warn('agent.auth_rejected', { hostId: claimedHost, reason: result.reason, remoteAddr })
       return deny(result.reason)
     }
 
@@ -287,20 +298,41 @@ export function attachAgentHub(server: import('node:http').Server): void {
 
       const conn: Conn = {
         ws, hostId: result.hostId, maxConcurrency: host!.max_concurrency,
-        allowCompute: host!.allow_compute, paused: host!.paused, running: new Set(), lastSeen: Date.now(),
+        allowCompute: host!.allow_compute, paused: host!.paused, running: new Set(),
+        lastSeen: Date.now(), connectedAt: Date.now(),
       }
       connections.set(conn.hostId, conn)
       void setPresence(conn.hostId, true)
-      console.log(`[hub] host ${conn.hostId} connected`)
+      noteConnection(conn.hostId, host!.label ?? conn.hostId, remoteAddr)
+      log.info('agent.connected', {
+        hostId: conn.hostId,
+        remoteAddr,
+        supersededPrevious: Boolean(existing),
+        userAgent: req.headers['user-agent'] ?? null,
+      })
 
-      ws.on('message', (data: Buffer) => { void onMessage(conn, data).catch(err => console.error('[hub]', err)) })
+      ws.on('message', (data: Buffer) => {
+        void onMessage(conn, data).catch((err: unknown) =>
+          log.error('agent.message_failed', { hostId: conn.hostId, err }))
+      })
       ws.on('pong', () => { conn.lastSeen = Date.now() })
-      ws.on('close', () => {
+      ws.on('close', (code: number, reason: Buffer) => {
+        const heldTasks = [...conn.running]
         if (connections.get(conn.hostId) === conn) {
           connections.delete(conn.hostId)
           void setPresence(conn.hostId, false)
-          console.log(`[hub] host ${conn.hostId} disconnected`)
         }
+        noteDisconnection(conn.hostId, code)
+        log.info('agent.disconnected', {
+          hostId: conn.hostId,
+          closeCode: code,
+          closeReason: reason.toString('utf8').slice(0, 120) || null,
+          connectedMs: Date.now() - conn.connectedAt,
+          // Tasks still held at disconnect are exactly what the lease sweeper
+          // will have to reclaim; naming them here makes that traceable.
+          abandonedTasks: heldTasks.length,
+          taskIds: heldTasks.slice(0, 10),
+        })
       })
       ws.on('error', () => ws.close())
     })
@@ -310,8 +342,27 @@ export function attachAgentHub(server: import('node:http').Server): void {
   setInterval(() => {
     const cutoff = Date.now() - config.offlineAfterSeconds * 1000
     for (const conn of connections.values()) {
-      if (conn.lastSeen < cutoff) conn.ws.close(4008, 'heartbeat-timeout')
-      else if (conn.ws.readyState === conn.ws.OPEN) conn.ws.ping()
+      if (conn.lastSeen < cutoff) {
+        // A silent socket is the normal symptom of a laptop that slept, lost wifi, or
+        // died. It looks identical to a healthy one until we time it out.
+        log.warn('agent.heartbeat_timeout', {
+          hostId: conn.hostId,
+          silentMs: Date.now() - conn.lastSeen,
+          heldTasks: conn.running.size,
+        })
+
+        // terminate(), not close(). A close frame asks the peer to reply, and a peer
+        // that has gone silent never will — the connection would sit in CLOSING
+        // forever, this timer would fire on it again every tick, and the host would
+        // never be marked offline. Drop it from the registry here rather than waiting
+        // for a 'close' event that may not arrive.
+        connections.delete(conn.hostId)
+        void setPresence(conn.hostId, false)
+        noteDisconnection(conn.hostId, 4008)
+        conn.ws.terminate()
+      } else if (conn.ws.readyState === conn.ws.OPEN) {
+        conn.ws.ping()
+      }
     }
   }, config.heartbeatSeconds * 1000).unref()
 }

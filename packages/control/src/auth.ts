@@ -24,10 +24,27 @@ export const sha256 = (s: string) => createHash('sha256').update(s).digest('hex'
 
 export type User = { id: string; email: string; role: string }
 
-/** Seed the single operator account so a fresh clone is usable without manual SQL. */
+/**
+ * Seed the single operator account so a fresh clone is usable without manual SQL.
+ *
+ * The password in the environment is authoritative. If it no longer matches what is
+ * stored, the stored one is replaced — otherwise rotating BOOTSTRAP_PASSWORD would
+ * silently do nothing and the next login would fail with an unexplained 401, which is
+ * exactly what happened the first time `share.ts` generated a strong password for an
+ * account that already existed.
+ */
 export async function bootstrapUser(): Promise<User> {
-  const existing = await pool.query<User>(`select id, email, role from users where email = $1`, [config.bootstrapEmail])
-  if (existing.rows[0]) return existing.rows[0]
+  const existing = await pool.query<User & { password_hash: string }>(
+    `select id, email, role, password_hash from users where email = $1`, [config.bootstrapEmail])
+  const user = existing.rows[0]
+  if (user) {
+    if (!(await checkPassword(config.bootstrapPassword, user.password_hash))) {
+      await pool.query(`update users set password_hash = $2 where id = $1`,
+        [user.id, await hashPassword(config.bootstrapPassword)])
+      console.log(`[auth] operator password for ${config.bootstrapEmail} updated to match the environment`)
+    }
+    return { id: user.id, email: user.email, role: user.role }
+  }
   const { rows } = await pool.query<User>(
     `insert into users(email, password_hash, role) values ($1,$2,'admin') returning id, email, role`,
     [config.bootstrapEmail, await hashPassword(config.bootstrapPassword)],

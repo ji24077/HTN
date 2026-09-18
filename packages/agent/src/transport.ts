@@ -5,28 +5,64 @@ import {
   TaskOffer, HelloAck, Revoked,
 } from '@dwp/protocol'
 import type { KeyObject } from 'node:crypto'
+import { createLogger } from '@dwp/protocol'
+import { fallbackLookup, dnsFallbackEnabled, installDnsFallback } from './resolver.ts'
 import { probe } from './capability.ts'
 import { isPaused, type AgentConfig } from './config.ts'
 import { runEcho } from './adapters/echo.ts'
 
+const log = createLogger({ component: 'agent' })
+
 const ADAPTERS = ['echo']
-const HEARTBEAT_MS = 15_000
-const RENEW_MS = 10_000
+// Fallbacks only. The server announces the real cadence at handshake, and a lease
+// duration with every offer; a hardcoded agent-side interval would silently drift out
+// of agreement with the server the moment either is tuned.
+const DEFAULT_HEARTBEAT_MS = 15_000
+/**
+ * A connection that survives this many heartbeat intervals counts as healthy and resets
+ * the backoff. Relative rather than absolute so it scales with however the server is
+ * tuned — the simulator runs a 2s heartbeat, production 15s.
+ */
+const STABLE_HEARTBEATS = 2
+/** Long enough to stop hammering, short enough that recovery is not glacial. */
+const MAX_BACKOFF_MS = 30_000
+/** A dial that has not completed by now is not going to. */
+const HANDSHAKE_TIMEOUT_MS = 15_000
 
 type Running = { controller: AbortController; leaseId: string; renew: NodeJS.Timeout }
 
 export function connect(cfg: AgentConfig, privateKey: KeyObject): void {
+  installDnsFallback()
   let backoffMs = 1_000
   let stopped = false
+  let attempt = 0
+  let connectedSince = 0
+  const hostLog = log.child({ hostId: cfg.hostId, label: cfg.label })
   const running = new Map<string, Running>()
 
   const open = (): void => {
     if (stopped) return
+    attempt += 1
+    const dialStartedAt = Date.now()
+    hostLog.info('connect.attempt', { attempt, url: cfg.wsUrl })
     const ws = new WebSocket(cfg.wsUrl, {
       headers: { authorization: `Bearer ${mintAssertion(cfg.hostId, privateKey)}` },
+      // Without this a dial into a black hole never returns: the upgrade request is
+      // swallowed, no response ever comes, and the socket sits in CONNECTING forever —
+      // a laptop that wakes from sleep and then simply does nothing, with no error to
+      // show for it. Fail the attempt instead, so the normal retry path takes over.
+      handshakeTimeout: HANDSHAKE_TIMEOUT_MS,
+      // Same resolver fallback as pairing, so a machine that could enrol can also stay
+      // connected rather than failing on the very next dial.
+      ...(dnsFallbackEnabled() ? { lookup: fallbackLookup } : {}),
     })
     let heartbeat: NodeJS.Timeout | undefined
+    let heartbeatMs = DEFAULT_HEARTBEAT_MS
     let pauseWas = isPaused()
+    // Last time we heard ANYTHING from the server. A link can fail in one direction
+    // only — our writes disappear into it while the socket still looks open — so the
+    // absence of inbound traffic is the only reliable signal we have.
+    let lastInbound = Date.now()
 
     const send = (type: string, payload: unknown, replyTo?: string): void => {
       if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(envelope(type, payload, replyTo)))
@@ -39,36 +75,81 @@ export function connect(cfg: AgentConfig, privateKey: KeyObject): void {
       maxConcurrency: cfg.maxConcurrency,
     })
 
+    // The server keeps the link warm with ping frames. The `ws` client answers them
+    // automatically and emits 'ping' — NOT 'pong', which is only for pings we send.
+    // Listening for the wrong one made a healthy idle agent believe the server had gone
+    // silent and reconnect every few seconds.
+    ws.on('ping', () => { lastInbound = Date.now() })
+    ws.on('pong', () => { lastInbound = Date.now() })
+
     ws.on('open', () => {
-      console.log(`[agent] connected to ${cfg.wsUrl}`)
-      backoffMs = 1_000
+      connectedSince = Date.now()
+      lastInbound = Date.now()
+      hostLog.info('connect.established', { attempt, dialMs: Date.now() - dialStartedAt, url: cfg.wsUrl })
       send('hello', { capability: probe(ADAPTERS), consent: consent() })
 
+      startHeartbeat()
+    })
+
+    const startHeartbeat = (): void => {
+      if (heartbeat) clearInterval(heartbeat)
       heartbeat = setInterval(() => {
+        // If the server has said nothing for three intervals, stop believing in this
+        // socket and dial again. Without this an agent whose network died silently
+        // waits forever, looking healthy to itself and absent to everyone else.
+        const silentMs = Date.now() - lastInbound
+        if (silentMs > heartbeatMs * 3) {
+          hostLog.warn('server.went_silent', { silentMs, thresholdMs: heartbeatMs * 3 })
+          ws.terminate()      // not close(): the peer is not answering
+          teardown('server went silent')
+          return
+        }
+
         // The local pause flag is authoritative and is pushed the moment it changes.
         const paused = isPaused()
         if (paused !== pauseWas) {
           pauseWas = paused
           send('consent.update', consent())
-          if (paused) for (const [taskId, r] of running) { r.controller.abort(); clearInterval(r.renew); running.delete(taskId) }
+          if (paused) {
+            for (const [taskId, r] of running) { r.controller.abort(); clearInterval(r.renew); running.delete(taskId) }
+          }
         }
         send('heartbeat', { freeRamMb: Math.round(freemem() / 1024 / 1024), running: running.size })
-      }, HEARTBEAT_MS)
-    })
+        // Our own ping, so a server that stops responding is detectable even when it
+        // has nothing to say to us.
+        if (ws.readyState === WebSocket.OPEN) { try { ws.ping() } catch {} }
+      }, heartbeatMs)
+    }
 
     ws.on('message', (raw: Buffer) => {
+      lastInbound = Date.now()
       const msg = decode(raw)
       if (!msg) return
 
       if (msg.type === 'hello.ack') {
         const ack = HelloAck.safeParse(msg.payload)
-        if (ack.success) console.log(`[agent] host ${ack.data.hostId} online`)
+        if (ack.success) {
+          // Adopt the server's cadence rather than our own guess.
+          if (ack.data.heartbeatSeconds > 0) {
+            heartbeatMs = ack.data.heartbeatSeconds * 1000
+            startHeartbeat()
+          }
+          // Clock skew shows up here first, and misattributed timings later.
+          const skewMs = Date.now() - Date.parse(ack.data.serverTime)
+          hostLog.info('handshake.complete', { serverSkewMs: skewMs })
+          if (Math.abs(skewMs) > 60_000) {
+            hostLog.warn('clock.skewed', {
+              serverSkewMs: skewMs,
+              note: 'this machine disagrees with the server by over a minute',
+            })
+          }
+        }
         return
       }
 
       if (msg.type === 'revoked') {
         const r = Revoked.safeParse(msg.payload)
-        console.error(`[agent] this host was revoked (${r.success ? r.data.reason : 'unknown'}). Stopping.`)
+        hostLog.error('host.revoked', { reason: r.success ? r.data.reason : 'unknown' })
         stopped = true
         ws.close()
         process.exitCode = 1
@@ -94,7 +175,8 @@ export function connect(cfg: AgentConfig, privateKey: KeyObject): void {
 
         send('task.accept', { taskId: offer.taskId, leaseId: offer.leaseId })
         const controller = new AbortController()
-        const renew = setInterval(() => send('lease.renew', { taskId: offer.taskId, leaseId: offer.leaseId }), RENEW_MS)
+        const renewMs = Math.max(1_000, Math.floor((offer.leaseSeconds * 1000) / 3))
+        const renew = setInterval(() => send('lease.renew', { taskId: offer.taskId, leaseId: offer.leaseId }), renewMs)
         running.set(offer.taskId, { controller, leaseId: offer.leaseId, renew })
 
         const startedAt = new Date().toISOString()
@@ -137,22 +219,53 @@ export function connect(cfg: AgentConfig, privateKey: KeyObject): void {
       }
     })
 
-    const teardown = (why: string): void => {
+    let tornDown = false
+    const teardown = (why: string, code?: number): void => {
+      if (tornDown) return
+      tornDown = true
       if (heartbeat) clearInterval(heartbeat)
+      const abandoned = [...running.keys()]
       for (const [, r] of running) { r.controller.abort(); clearInterval(r.renew) }
       running.clear()
+
+      const heldMs = connectedSince ? Date.now() - connectedSince : 0
+      hostLog.warn('connect.lost', {
+        why,
+        closeCode: code ?? null,
+        connectedMs: heldMs,
+        abandonedTasks: abandoned.length,
+      })
+      connectedSince = 0
       if (stopped) return
+
+      // Reset the backoff only for a connection that actually held. Resetting on every
+      // 'open' turns a flapping link into a hot reconnect loop: connect, drop, retry in
+      // 1s, forever, hammering the server. A link that cannot stay up for STABLE_MS is
+      // not working, and we should back away from it like any other failure.
+      if (heldMs >= heartbeatMs * STABLE_HEARTBEATS) {
+        backoffMs = 1_000
+        attempt = 0
+      }
+
       // Full jitter: a fleet reconnecting after an outage must not arrive in lockstep.
       const delay = Math.random() * backoffMs
-      backoffMs = Math.min(backoffMs * 2, 60_000)
-      console.warn(`[agent] disconnected (${why}); retrying in ${Math.round(delay)}ms`)
+      backoffMs = Math.min(backoffMs * 2, MAX_BACKOFF_MS)
+      hostLog.info('connect.retry_scheduled', { inMs: Math.round(delay), nextBackoffCapMs: backoffMs })
       setTimeout(open, delay)
     }
 
-    ws.on('close', (code: number) => teardown(`close ${code}`))
+    ws.on('close', (code: number, reason: Buffer) => {
+      teardown(reason.toString('utf8') || `close ${code}`, code)
+    })
     ws.on('error', (err: Error) => {
-      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) ws.close()
-      else teardown(err.message)
+      // 'error' is usually followed by 'close'; teardown is idempotent so whichever
+      // arrives first wins and the other is ignored.
+      hostLog.warn('connect.error', { message: err.message })
+      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+        try { ws.close() } catch { teardown(err.message) }
+      } else {
+        teardown(err.message)
+      }
     })
   }
 

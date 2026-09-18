@@ -14,7 +14,11 @@
     "agent": "node --env-file-if-exists=.env packages/agent/src/index.ts",
     "tunnel": "cloudflared tunnel --url http://localhost:8787",
     "typecheck": "tsc --build --force",
-    "verify-run": "node scripts/verify-run.ts"
+    "verify-run": "node scripts/verify-run.ts",
+    "share": "node scripts/share.ts",
+    "logs": "node scripts/watch-log.ts",
+    "sim": "node sim/run.ts",
+    "sim:edge": "node sim/edge-cases.ts"
   },
   "devDependencies": {
     "typescript": "7.0.2",
