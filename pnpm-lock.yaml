@@ -27,6 +27,12 @@ importers:
       '@types/ws':
         specifier: 8.18.1
         version: 8.18.1
+      onnxruntime-node:
+        specifier: 1.30.0
+        version: 1.30.0
+      playwright:
+        specifier: 1.63.0
+        version: 1.63.0
       typescript:
         specifier: 7.0.2
         version: 7.0.2
@@ -36,12 +42,6 @@ importers:
       '@dwp/protocol':
         specifier: workspace:*
         version: link:../protocol
-      onnxruntime-node:
-        specifier: 1.30.0
-        version: 1.30.0
-      playwright:
-        specifier: 1.63.0
-        version: 1.63.0
       undici:
         specifier: 7.18.0
         version: 7.18.0

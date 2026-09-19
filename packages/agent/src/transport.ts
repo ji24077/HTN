@@ -17,7 +17,17 @@ import { runWalker } from './adapters/walker.ts'
 
 const log = createLogger({ component: 'agent' })
 
-const ADAPTERS = ['echo', 'cpu_inference_batch', 'walker_evolution']
+import { availableAdapters } from './workloads.ts'
+
+/**
+ * What this machine can actually run, decided when it connects rather than at import.
+ *
+ * Computing this at module load resolved the optional packages before `agent enable` had
+ * installed them, and Node caches that failed lookup — so the very command that installs
+ * a runtime could not then see it. Advertising an adapter whose runtime is missing would
+ * also have the scheduler send work the host can only fail, which reads as a broken
+ * machine rather than an absent option.
+ */
 // Fallbacks only. The server announces the real cadence at handshake, and a lease
 // duration with every offer; a hardcoded agent-side interval would silently drift out
 // of agreement with the server the moment either is tuned.
@@ -98,7 +108,7 @@ export function connect(cfg: AgentConfig, privateKey: KeyObject): void {
       everConnected = true
       explained = false
       hostLog.info('connect.established', { attempt, dialMs: Date.now() - dialStartedAt, url: cfg.wsUrl })
-      send('hello', { capability: probe(ADAPTERS), consent: consent() })
+      send('hello', { capability: probe(availableAdapters()), consent: consent() })
 
       startHeartbeat()
     })
@@ -232,7 +242,7 @@ export function connect(cfg: AgentConfig, privateKey: KeyObject): void {
         if (!parsed.success) return
         const offer = parsed.data
 
-        if (isPaused() || !cfg.allowCompute || !ADAPTERS.includes(offer.adapter)) {
+        if (isPaused() || !cfg.allowCompute || !availableAdapters().includes(offer.adapter)) {
           send('task.decline', { taskId: offer.taskId, leaseId: offer.leaseId, reason: 'not-eligible' })
           return
         }

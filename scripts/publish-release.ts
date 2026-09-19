@@ -8,13 +8,18 @@
  * this machine's release key rather than merely served by the server.
  */
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync, rmSync, statSync } from 'node:fs'
 import { createPrivateKey } from 'node:crypto'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { hashBytes, signRelease, generateReleaseKey, type ReleaseManifest } from '@dwp/protocol'
+// One implementation of the Windows key ACL, shared with the agent rather than copied:
+// two versions of a control that protects a signing key is one version too many.
+import { restrictToCurrentUser } from '../packages/agent/src/winacl.ts'
+import { IS_WINDOWS } from './lib/platform.ts'
 
-const RELEASES = 'releases'
+// Must agree with the control service, which reads the same variable.
+const RELEASES = process.env.DWP_RELEASES_DIR ?? 'releases'
 const KEY_DIR = process.env.DWP_HOME ?? join(homedir(), '.dwp')
 const KEY_PATH = join(KEY_DIR, 'release.key')
 const notes = process.argv[2] ?? ''
@@ -30,12 +35,24 @@ function loadOrCreateKey(): ReturnType<typeof createPrivateKey> {
   if (!existsSync(KEY_PATH)) {
     const { privateKeyPem, publicKeySpki } = generateReleaseKey()
     writeFileSync(KEY_PATH, privateKeyPem, { mode: 0o600 })
+    if (IS_WINDOWS) {
+      const acl = restrictToCurrentUser(KEY_PATH)
+      if (!acl.ok) {
+        console.log(`\n  WARNING: could not restrict access to ${KEY_PATH} — ${acl.detail}`)
+        console.log(`  Anyone who can read it can sign releases every agent will install.`)
+      }
+    }
     console.log(`\n  Created a release signing key at ${KEY_PATH}`)
     console.log(`  Public key: ${publicKeySpki.slice(0, 32)}…`)
     console.log(`  Back this up. Losing it means every agent must re-pair to trust new releases.\n`)
   }
-  const mode = statSync(KEY_PATH).mode & 0o777
-  if (mode & 0o077) throw new Error(`${KEY_PATH} is mode ${mode.toString(8)}; expected 600`)
+  // Windows reports 0o666 for every writable file, so this test would reject a
+  // well-protected key there. Its ACL is applied at creation instead — same split as
+  // the agent's identity key in packages/agent/src/keys.ts.
+  if (!IS_WINDOWS) {
+    const mode = statSync(KEY_PATH).mode & 0o777
+    if (mode & 0o077) throw new Error(`${KEY_PATH} is mode ${mode.toString(8)}; expected 600`)
+  }
   return createPrivateKey(readFileSync(KEY_PATH, 'utf8'))
 }
 
@@ -57,7 +74,7 @@ execFileSync('tar', [
   '--exclude', '.DS_Store',
   '-czf', tmp,
   'package.json', 'pnpm-workspace.yaml', 'pnpm-lock.yaml', 'tsconfig.json',
-  'packages/protocol', 'packages/agent', 'scripts/join.sh',
+  'packages/protocol', 'packages/agent', 'scripts/join.sh', 'scripts/join.ps1',
 ], { stdio: 'pipe' })
 
 const bytes = readFileSync(tmp)
@@ -77,7 +94,7 @@ const signed = signRelease(privateKey, manifest)
 writeFileSync(join(RELEASES, sha256), bytes)
 writeFileSync(join(RELEASES, 'latest.json'), JSON.stringify(signed, null, 2) + '\n')
 chmodSync(join(RELEASES, sha256), 0o644)
-execFileSync('rm', ['-f', tmp])
+rmSync(tmp, { force: true })
 
 console.log(`\n  Published ${version}`)
 console.log(`    size   ${(bytes.length / 1024).toFixed(0)} KB`)

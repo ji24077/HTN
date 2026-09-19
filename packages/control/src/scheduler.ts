@@ -28,6 +28,9 @@ export async function claimFor(hostId: string, limit: number): Promise<ClaimedTa
           and j.status = 'running'
           and j.cancel_requested_at is null
           and (t.pin_host_id is null or t.pin_host_id = $1)
+          -- Only work this host advertised it can run. Offering anything else produces
+          -- a decline, a requeue, and an immediate re-offer to the same host.
+          and j.adapter = any(select unnest(adapters) from hosts where id = $1)
         order by t.seq
         for update of t skip locked
         limit $2

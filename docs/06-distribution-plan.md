@@ -15,7 +15,7 @@ Measured on the current build, not estimated:
 | — ONNX Runtime | **287 MB**, shipping *all three* platforms' binaries to every machine (win32 alone is 133 MB) |
 | — Playwright | a hard dependency, though only the browser workload needs it |
 | Prerequisites | Node 24, pnpm, and a copy of the project folder |
-| Windows | `join.sh` is bash-only; 13 file-permission calls assume POSIX |
+| Windows | **Fixed.** `join.ps1` ships alongside `join.sh`; the POSIX permission checks are platform-gated, with `icacls` ACLs as the Windows equivalent. Untested on real hardware. |
 | Older devices | excluded by the Node 24 floor, which exists only because we run `.ts` directly |
 | Updating | copy a file to each machine by hand |
 
@@ -38,7 +38,9 @@ loads the same web dashboard in a native webview, so there is one UI, not two.
 
 ## Phase 1 — Signed auto-update
 
-*Status: server side built, agent side outstanding.*
+*Status: built and verified end to end on macOS — an agent installed a published release
+over its own connection and restarted into it without anyone touching the machine.
+Windows paths are written but unproven on real hardware; see the caveat below.*
 
 Agents fetch updates over the connection they already hold. The bundle is signed by a
 key **the operator holds**, and each agent pins that key when it pairs.
@@ -55,16 +57,53 @@ trust model, and it is what makes shipping code to a friend's laptop defensible 
 
 **Done when** a new task type reaches every connected machine without anyone touching them.
 
-## Phase 2 — Slim the install
+**Windows caveat, and the one real divergence in this whole plan.** Windows locks files
+that are in use. Updating unpacks over the running install and then runs `pnpm install`,
+and a loaded native addon — `onnxruntime-node`, Playwright's binaries — cannot be replaced
+while the agent holds it open. Source-only updates are therefore fine on Windows; an
+update that *changes a dependency* will fail there with EBUSY while the agent is running,
+where POSIX would simply succeed.
 
-Two changes, both large:
+The fix is sequencing rather than a second mechanism: stop the agent, install, restart.
+Worth designing before Phase 2 changes what is in the bundle, because Tauri's updater in
+Phase 4 has to solve the same problem the same way.
 
-1. **Per-platform dependencies.** Ship only the current platform's ONNX binaries.
-   287 MB → ~85 MB on macOS, ~68 MB on Linux.
-2. **Optional workloads.** Playwright and ONNX become opt-in rather than required, so a
-   machine that only runs compute downloads neither.
+**Not a route to mobile.** App Store guideline 2.5.2 and Google Play's Device and Network
+Abuse policy both forbid an app updating itself outside the store, so this mechanism is
+desktop-only by construction.
 
-**387 MB → ~40 MB compute-only, ~120 MB with ML.** Every later phase inherits this.
+## Phase 2 — Slim the install ✅
+
+*Done. Measured, not estimated.*
+
+| | Before | After |
+| --- | --- | --- |
+| Joining a network | 352 MB | **11 MB** |
+| With machine learning added | 352 MB | 99 MB |
+| Wasted on other platforms' binaries | 202 MB | 0 |
+
+Three changes:
+
+1. **Optional workloads.** ONNX and Playwright are no longer dependencies. A machine
+   joins with 11 MB and can immediately run `echo` and the walker — both pure JavaScript,
+   needing nothing. `pnpm agent enable ml` or `enable browser` adds the rest on demand.
+2. **Per-platform binaries.** onnxruntime-node ships macOS, Linux *and* Windows builds in
+   one 287 MB package; only the current platform's 85 MB can ever execute. Enabling ML
+   now deletes the other 202 MB.
+3. **Capability filtering.** Hosts advertise what they can actually run, and the scheduler
+   only offers matching work. Previously it offered anything to anyone and relied on the
+   agent to decline — which returned the task to the queue and offered it straight back
+   to the same host, forever.
+
+Two details that matter more than they look:
+
+- **The choice survives updates.** A release overwrites `package.json`, which would have
+  silently removed an enabled workload — a machine doing inference would come back from
+  an update unable to, with nothing in the log to explain it. Enabled workloads live in
+  `~/.dwp/config.json`, which updates never touch, and are reinstalled afterwards.
+- **A job nothing can run fails immediately**, and says which of the two reasons it is:
+  nobody is connected, or nobody has that workload installed. Those need completely
+  different responses from whoever submitted it.
 
 ## Phase 3 — One-line install, no prerequisites
 
@@ -122,6 +161,10 @@ decision to take deliberately rather than discover on the day you send someone a
 3. Spike the native-addon question before designing Phase 3.
 4. Phase 3, then Phase 4.
 
-Audit for Windows throughout: file permissions, the `ps` call in the browser probe, and
-the bash installer all need cross-platform equivalents, plus CI on Windows to keep them
-honest.
+Windows is one system, not a parallel one. The trust model — Ed25519 signatures, SHA-256
+hashes, a source bundle over the connection — has no opinion about the operating system,
+and the agent bundle already carries its own Windows code. What was POSIX-only has been
+given equivalents: file permissions, the `ps` call in the browser probe, and the bash
+installer. What remains is the file-locking difference above, the `irm | iex` installer in
+Phase 3, and **CI on Windows**, without which all of this rots quietly — nothing here has
+run on real Windows hardware yet.

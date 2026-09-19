@@ -3,9 +3,19 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
-import { chromium } from 'playwright'
-
 const exec = promisify(execFile)
+
+/** Playwright is ~180 MB with a browser; only load it when a browser is actually wanted. */
+async function loadChromium(): Promise<typeof import('playwright').chromium> {
+  try {
+    return (await import('playwright')).chromium
+  } catch {
+    throw new Error(
+      'this computer does not have the browser runtime installed.\n' +
+      '  Add it with:  pnpm agent enable browser',
+    )
+  }
+}
 
 const MAX_PS_BUFFER = 8 * 1024 * 1024
 
@@ -67,6 +77,8 @@ export async function browserProbe(url: string): Promise<void> {
   if (target.protocol !== 'http:' && target.protocol !== 'https:') {
     throw new Error(`refusing non-HTTP target: ${target.protocol}`)
   }
+
+  const chromium = await loadChromium()
 
   // A profile directory that has never seen the owner's personal browser, deleted on exit.
   const profile = await mkdtemp(join(tmpdir(), 'dwp-browser-'))

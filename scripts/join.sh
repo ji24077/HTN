@@ -46,8 +46,10 @@ echo "  ok  pnpm $(pnpm --version)"
 cd "$(dirname "$0")/.."
 
 if [ ! -d node_modules ]; then
-  echo "  installing dependencies (one time, may take a minute)..."
-  pnpm install --silent
+  # --prod keeps this small. The heavy runtimes (machine learning, browser) are opt-in
+  # via `pnpm agent enable`, so joining costs about 40 MB rather than 350 MB.
+  echo "  installing dependencies (one time, about 40 MB)..."
+  pnpm install --prod --silent
 fi
 echo "  ok  dependencies"
 echo
@@ -61,5 +63,6 @@ node packages/agent/src/index.ts pair --server "$SERVER" --code "$CODE"
 echo
 echo "  Starting. Leave this window open — press Ctrl-C to stop at any time."
 echo "  To stop taking work without closing:  pnpm agent pause"
+echo "  To also run machine-learning work:     pnpm agent enable ml"
 echo
 exec node packages/agent/src/index.ts run

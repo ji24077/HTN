@@ -408,8 +408,21 @@ export function buildServer(): FastifyInstance {
       `select id from hosts
         where owner_id = $1 and revoked_at is null and online and not paused and allow_compute
           and ($2::uuid is null or id = $2)
-        order by created_at`, [user.id, body.hostId ?? null])
-    if (hostRows.length === 0) return reply.code(409).send({ error: 'no-eligible-hosts' })
+          and $3 = any(adapters)
+        order by created_at`, [user.id, body.hostId ?? null, body.adapter])
+    if (hostRows.length === 0) {
+      // Say which of the two reasons it is: "nobody is online" and "nobody can run this"
+      // need completely different responses from whoever submitted it.
+      const { rows: anyOnline } = await pool.query<{ n: string }>(
+        `select count(*)::text as n from hosts
+          where owner_id = $1 and revoked_at is null and online and not paused`, [user.id])
+      return reply.code(409).send({
+        error: 'no-eligible-hosts',
+        reason: Number(anyOnline[0]?.n ?? 0) === 0
+          ? 'no computers are connected'
+          : `no connected computer can run "${body.adapter}" — they may need: pnpm agent enable`,
+      })
+    }
 
     type Item = { pin: string | null; input: Record<string, unknown> }
     let items: Item[]
@@ -417,7 +430,7 @@ export function buildServer(): FastifyInstance {
 
     if (body.adapter === 'walker_evolution') {
       if (!body.tasks?.length) return reply.code(400).send({ error: 'no-tasks' })
-      items = body.tasks.map(input => ({ pin: null, input }))
+      items = body.tasks.map(input => ({ pin: body.hostId ?? null, input }))
     } else if (body.adapter === 'cpu_inference_batch') {
       const m = manifest() as {
         model?: { hash?: string; inputName?: string; outputName?: string }
@@ -433,11 +446,14 @@ export function buildServer(): FastifyInstance {
 
       // Split the batch into independent slices. Never split one inference across
       // machines — parallelism is across items, which is the only safe kind.
+      // Honour an explicit host for every adapter. It was previously accepted and
+      // silently ignored here, so targeting one machine quietly ran the work on another.
+      const pin = body.hostId ?? null
       items = []
       for (let pass = 0; pass < body.repeat; pass++) {
         for (let from = 0; from < wanted; from += body.batchSize) {
           items.push({
-            pin: null,
+            pin,
             input: {
               modelHash: m.model.hash,
               inputsHash: m.inputs.hash,

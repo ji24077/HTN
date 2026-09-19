@@ -32,6 +32,25 @@ pnpm logs --level warn    # only problems
 pnpm logs --since 30m --no-follow
 ```
 
+## Optional workloads
+
+Joining costs about 11 MB. Two workloads run with no extra install at all:
+
+| Workload | Needs | Size |
+| --- | --- | --- |
+| `echo` | nothing | — |
+| `walker_evolution` | nothing | — |
+| `cpu_inference_batch` | `pnpm agent enable ml` | ~85 MB |
+| `remote_browser_session` | `pnpm agent enable browser` | ~180 MB |
+
+```bash
+pnpm agent workloads     # what this computer can run, and what it could add
+pnpm agent enable ml     # add machine-learning inference
+```
+
+Hosts advertise what they can run, and the scheduler only sends matching work. The choice
+is remembered across updates.
+
 ## Test it
 
 ```bash

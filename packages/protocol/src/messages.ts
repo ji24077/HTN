@@ -2,15 +2,35 @@ import { z } from 'zod'
 
 // ---------------------------------------------------------------- capability
 
+/**
+ * What a phone reports about itself beyond its hardware.
+ *
+ * A laptop's capability is static between heartbeats; a phone's is not. It gets hot, it
+ * gets unplugged, it drops into Low Power Mode, and each of those changes whether it is
+ * sensible to hand it another hundred items. Optional, because desktop hosts have no
+ * answer for any of it — and absent is meaningfully different from false here.
+ */
+export const MobileState = z.object({
+  thermal: z.enum(['nominal', 'fair', 'serious', 'critical', 'unknown']),
+  lowPowerMode: z.boolean(),
+  availableMemoryMb: z.number().int().nonnegative(),
+  /** The device's own verdict, so the scheduler need not re-derive the policy. */
+  fitForWork: z.boolean(),
+  batteryLevel: z.number().min(0).max(1).optional(),
+  charging: z.boolean().optional(),
+})
+export type MobileState = z.infer<typeof MobileState>
+
 export const CapabilityRecord = z.object({
   agentVersion: z.string(),
-  os: z.enum(['darwin', 'win32', 'linux']),
+  os: z.enum(['darwin', 'win32', 'linux', 'ios', 'android']),
   arch: z.string(),
   cpuModel: z.string(),
   logicalCores: z.number().int().positive(),
   totalRamMb: z.number().int().positive(),
   freeRamMb: z.number().int().nonnegative(),
   adapters: z.array(z.string()),
+  mobile: MobileState.optional(),
 })
 export type CapabilityRecord = z.infer<typeof CapabilityRecord>
 
@@ -25,7 +45,12 @@ export type ConsentState = z.infer<typeof ConsentState>
 // ------------------------------------------------------------ agent → control
 
 export const Hello = z.object({ capability: CapabilityRecord, consent: ConsentState })
-export const Heartbeat = z.object({ freeRamMb: z.number().nonnegative(), running: z.number().int().nonnegative() })
+export const Heartbeat = z.object({
+  freeRamMb: z.number().nonnegative(),
+  running: z.number().int().nonnegative(),
+  /** Present only from mobile hosts, where this changes minute to minute. */
+  mobile: MobileState.optional(),
+})
 export const TaskAccept = z.object({ taskId: z.string(), leaseId: z.string() })
 export const TaskDecline = z.object({ taskId: z.string(), leaseId: z.string(), reason: z.string() })
 export const LeaseRenew = z.object({ taskId: z.string(), leaseId: z.string() })

@@ -196,13 +196,15 @@ async function onMessage(conn: Conn, raw: Buffer): Promise<void> {
       await pool.query(
         `update hosts set os=$2, arch=$3, cpu_model=$4, logical_cores=$5, total_ram_mb=$6, free_ram_mb=$7,
                 agent_version=$8, allow_compute=$9, allow_browser=$10, paused=$11, max_concurrency=$12,
-                online=true, last_heartbeat_at=now()
+                adapters=$13, online=true, last_heartbeat_at=now()
           where id = $1`,
         [conn.hostId, c.os, c.arch, c.cpuModel, c.logicalCores, c.totalRamMb, c.freeRamMb, c.agentVersion,
-         consent.allowCompute, consent.allowBrowser, consent.paused, consent.maxConcurrency],
+         consent.allowCompute, consent.allowBrowser, consent.paused, consent.maxConcurrency, c.adapters],
       )
       await record({ hostId: conn.hostId, actor: 'agent', category: 'presence', type: 'host.hello',
         payload: { os: c.os, arch: c.arch, cores: c.logicalCores, adapters: c.adapters } })
+      // Now it is genuinely usable: we know what it is and what it can run.
+      await setPresence(conn.hostId, true)
       send(conn, 'hello.ack', {
         hostId: conn.hostId,
         serverTime: new Date().toISOString(),
@@ -308,8 +310,11 @@ export function attachAgentHub(server: import('node:http').Server): void {
         lastSeen: Date.now(), connectedAt: Date.now(),
       }
       connections.set(conn.hostId, conn)
-      void setPresence(conn.hostId, true)
       noteConnection(conn.hostId, host!.label ?? conn.hostId, remoteAddr)
+      // Presence is set once the host has introduced itself, not when the socket opens.
+      // Between the two it is connected but has not yet said what it can run, and a job
+      // submitted in that window was rejected as "no computer can run this" — a window
+      // wide enough to hit on a slow link.
       log.info('agent.connected', {
         hostId: conn.hostId,
         // Carry the name through so logs read as names, not UUIDs. Debugging a real

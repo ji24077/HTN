@@ -2,7 +2,6 @@ import { createHash } from 'node:crypto'
 import { mkdirSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { hostname } from 'node:os'
-import ort from 'onnxruntime-node'
 import { InferenceInput, type InferenceOutput, mintAssertion } from '@dwp/protocol'
 import type { KeyObject } from 'node:crypto'
 import { AGENT_HOME } from '../paths.ts'
@@ -18,8 +17,29 @@ import { AGENT_HOME } from '../paths.ts'
 const CACHE = join(AGENT_HOME, 'artifacts')
 const PIXELS = 28 * 28
 
+type Ort = typeof import('onnxruntime-node')
+type Session = Awaited<ReturnType<Ort['InferenceSession']['create']>>
+
 /** Sessions are expensive to build and safe to reuse, so keep them keyed by model hash. */
-const sessions = new Map<string, Promise<ort.InferenceSession>>()
+const sessions = new Map<string, Promise<Session>>()
+
+/**
+ * Load ONNX Runtime on first use rather than at import.
+ *
+ * A machine that only runs echo or the walker should never have to download 85 MB of
+ * inference runtime, and importing it at the top of this file would make the whole agent
+ * fail to start when it is absent.
+ */
+let ortPromise: Promise<Ort> | null = null
+function loadOrt(): Promise<Ort> {
+  ortPromise ??= import('onnxruntime-node').then(m => m.default ?? m).catch(() => {
+    throw new Error(
+      'this computer does not have the machine-learning runtime installed.\n' +
+      '  Add it with:  pnpm agent enable ml',
+    )
+  }) as Promise<Ort>
+  return ortPromise
+}
 
 async function fetchArtifact(
   server: string, hostId: string, privateKey: KeyObject, sha256: string,
@@ -54,6 +74,7 @@ export async function runInference(
   ctx: { hostId: string; server: string; privateKey: KeyObject; signal: AbortSignal },
 ): Promise<InferenceOutput> {
   const input = InferenceInput.parse(rawInput)
+  const ort = await loadOrt()
 
   const loadStart = performance.now()
   const [modelBytes, inputBytes] = await Promise.all([

@@ -1,22 +1,18 @@
 import { execFile, spawn } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { join } from 'node:path'
 import { promisify } from 'node:util'
 import type { KeyObject } from 'node:crypto'
 import { SignedRelease, verifyRelease, hashBytes, mintAssertion, createLogger } from '@dwp/protocol'
 import { loadConfig, saveConfig, type AgentConfig } from './config.ts'
+import { installRoot } from './paths.ts'
+import { installWorkload } from './workloads.ts'
 
 const exec = promisify(execFile)
 const log = createLogger({ component: 'agent' })
 
 const IS_WINDOWS = process.platform === 'win32'
-
-/** Where this agent is installed — three levels up from packages/agent/src. */
-export function installRoot(): string {
-  return join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
-}
 
 export type UpdateResult =
   | { status: 'current'; version: string }
@@ -121,8 +117,14 @@ export function restartIntoNewVersion(): never {
   // update installed correctly and then the restart threw — leaving the agent updated
   // and dead, which is the worst of both outcomes and invisible to whoever owns the
   // machine. Import it properly instead.
+  //
+  // `detached` is POSIX-only on purpose. There it is what lets the replacement escape
+  // this process group and survive; on Windows a child already outlives its parent, and
+  // detaching additionally means DETACHED_PROCESS — no console — so an agent restarted
+  // that way would keep running with its output going nowhere, in the one window its
+  // owner is watching.
   const child = spawn(process.execPath, process.argv.slice(1), {
-    detached: true,
+    detached: !IS_WINDOWS,
     stdio: 'inherit',
     cwd: process.cwd(),
     env: process.env,

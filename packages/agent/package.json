@@ -10,8 +10,6 @@
     "@dwp/protocol": "workspace:*",
     "ws": "8.21.3",
     "zod": "4.6.5",
-    "playwright": "1.63.0",
-    "undici": "7.18.0",
-    "onnxruntime-node": "1.30.0"
+    "undici": "7.18.0"
   }
 }

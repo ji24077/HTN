@@ -5,6 +5,7 @@ import { pair } from './pair.ts'
 import { probe } from './capability.ts'
 import { browserProbe } from './adapters/browser.ts'
 import { applyUpdate, currentVersion } from './update.ts'
+import { WORKLOADS, enableWorkload, isInstalled, availableAdapters, type WorkloadId } from './workloads.ts'
 import { AGENT_HOME, AGENT_VERSION } from './paths.ts'
 
 const [command, ...rest] = process.argv.slice(2)
@@ -95,6 +96,34 @@ switch (command) {
     break
   }
 
+  /** What this computer can run, and what it could run if you added something. */
+  case 'workloads': {
+    console.log(`\n  This computer can run:\n`)
+    for (const a of availableAdapters()) console.log(`    ${a}`)
+    const missing = WORKLOADS.filter(w => !isInstalled(w.package))
+    if (missing.length === 0) {
+      console.log(`\n  Everything is installed.\n`)
+    } else {
+      console.log(`\n  Available to add:\n`)
+      for (const w of missing) {
+        console.log(`    ${w.id.padEnd(8)} ${w.describe}`)
+        console.log(`             about ${w.approxMb} MB    pnpm agent enable ${w.id}`)
+      }
+      console.log('')
+    }
+    break
+  }
+
+  case 'enable': {
+    const id = (flag('workload') ?? rest[0]) as WorkloadId | undefined
+    if (!id || !WORKLOADS.some(w => w.id === id)) {
+      console.error(`\n  usage: agent enable <${WORKLOADS.map(w => w.id).join('|')}>\n`)
+      process.exit(1)
+    }
+    await enableWorkload(id)
+    break
+  }
+
   case 'update': {
     const cfg = requireConfig()
     const { privateKey } = ensureKeypair()
@@ -145,6 +174,8 @@ switch (command) {
   set-server --server <url>                             point at a new server address
   update [--force]                                      install the latest signed release
   trust-updates [--yes]                                 adopt this server's release key
+  workloads                                             what this computer can run
+  enable <ml|browser>                                   add an optional workload
   pause | resume                                        local kill switch (works offline)
   status                                                show identity and capability
   browser-probe [--url <url>]                           launch Chromium and report observed egress

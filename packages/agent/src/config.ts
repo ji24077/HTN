@@ -18,6 +18,13 @@ export type AgentConfig = {
   releaseKey?: string | null
   installedRelease?: string | null
   autoUpdate?: boolean
+  /**
+   * Optional workloads this machine has chosen to run.
+   *
+   * Kept here rather than in package.json because an update replaces package.json, which
+   * would silently strip them.
+   */
+  enabledWorkloads?: ('ml' | 'browser')[]
 }
 
 export function loadConfig(): AgentConfig | null {

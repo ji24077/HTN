@@ -55,8 +55,9 @@ Write-Host "  ok  pnpm $(pnpm --version)"
 Set-Location (Join-Path $PSScriptRoot '..')
 
 if (-not (Test-Path 'node_modules')) {
-  Write-Host "  installing dependencies (one time, may take a minute)..."
-  pnpm install --silent
+  # --prod keeps this small. The heavy runtimes are opt-in via `pnpm agent enable`.
+  Write-Host "  installing dependencies (one time, about 40 MB)..."
+  pnpm install --prod --silent
   if ($LASTEXITCODE -ne 0) { Write-Host "  pnpm install failed."; exit 1 }
 }
 Write-Host "  ok  dependencies"
@@ -72,6 +73,7 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 Write-Host ""
 Write-Host "  Starting. Leave this window open - press Ctrl-C to stop at any time."
 Write-Host "  To stop taking work without closing:  pnpm agent pause"
+Write-Host "  To also run machine-learning work:     pnpm agent enable ml"
 Write-Host ""
 node packages/agent/src/index.ts run
 exit $LASTEXITCODE
