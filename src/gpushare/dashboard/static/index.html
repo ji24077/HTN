@@ -327,7 +327,6 @@
           <button id="clearPolicy" class="btn secondary">캐시 해제</button>
           <span id="policyStat" class="hint">아직 로드 안 됨</span>
         </div>
-        <textarea id="event" style="width:100%;min-height:52px;margin:12px 0">An employee uploaded credentials to an unknown website.</textarea>
       </article>
 
       <div class="charts" style="margin-top:16px">
@@ -339,22 +338,21 @@
           <div id="abDiag" style="margin-top:14px"></div>
         </article>
         <article class="card">
-          <div class="eyebrow">B · 직접 입력 → 에이전트 최적화 → 다시 실행</div>
-          <h3 style="margin:6px 0 4px">체감되는 것은 시작입니다</h3>
-          <p class="hint">위 이벤트를 그대로 씁니다. 1번을 먼저 돌려 느린 것을 본 뒤, 2번으로 최적화하고, 3번에서 비교합니다.</p>
+          <div class="eyebrow">B · 같은 프롬프트, 최적화 전후</div>
+          <h3 style="margin:6px 0 4px">상태를 바꾸고, 같은 것을 다시 돌립니다</h3>
           <div class="btnrow" style="margin-top:10px">
-            <button id="runBefore" class="btn secondary">1 · 최적화 전 실행</button>
-            <button id="runAgent" class="btn blue">2 · 에이전트 최적화</button>
-            <button id="runAfter" class="btn">3 · 다시 실행</button>
+            <button id="setBefore" class="btn secondary">최적화 전으로</button>
+            <button id="setAfter" class="btn blue">에이전트 최적화</button>
           </div>
-          <div id="agentDiag" style="margin-top:12px"></div>
+          <div id="optState" class="callout" style="margin-top:10px"><strong>상태 확인 중…</strong></div>
+          <textarea id="event" style="width:100%;min-height:64px;margin:12px 0">A contractor emailed an API key to a personal address.</textarea>
+          <button id="runOnce" class="btn" style="width:100%">실행</button>
           <table class="dv" style="margin-top:12px"><thead>
-            <tr><th></th><th>TTFT</th><th>총</th><th>출력</th><th>입력</th></tr></thead><tbody>
-            <tr><td>최적화 전</td><td id="bTtft">—</td><td id="bTotal">—</td><td id="bTok">—</td><td id="bIn">—</td></tr>
-            <tr><td>최적화 후</td><td id="aTtft">—</td><td id="aTotal">—</td><td id="aTok">—</td><td id="aIn">—</td></tr>
-            <tr><td>배수</td><td id="xTtft">—</td><td id="xTotal">—</td><td>—</td><td>—</td></tr>
-          </tbody></table>
-          <div id="reportOut" class="code" style="margin-top:12px;min-height:150px;max-height:320px;overflow:auto;white-space:pre-wrap">—</div>
+            <tr><th>상태</th><th>TTFT</th><th>총</th><th>출력</th><th>입력</th></tr></thead>
+            <tbody id="runRows"><tr><td colspan="5" style="text-align:center;color:var(--muted)">아직 실행 없음</td></tr></tbody>
+          </table>
+          <div id="agentDiag" style="margin-top:12px"></div>
+          <div id="reportOut" class="code" style="margin-top:12px;min-height:140px;max-height:300px;overflow:auto;white-space:pre-wrap">—</div>
         </article>
       </div>
     </section>
@@ -642,6 +640,14 @@
       "Apply the policy above. For the event below return only JSON with keys "
       + "risk, severity, action.\n\nEvent:\n";
 
+    // Four short lines: long enough to watch appear, short enough that the
+    // total is dominated by prefill — which is the thing being optimised.
+    // Measured 10.74s -> 2.72s at 50 tokens.
+    const VERDICT_INSTRUCTION =
+      "Apply the policy above. For the event below reply with exactly four lines "
+      + "and nothing else:\nRISK: <one phrase>\nSEVERITY: <0-5>\nACTION: <one sentence>\n"
+      + "ESCALATE: <yes or no, and to whom>\n\nEvent:\n";
+
     const REPORT_INSTRUCTION =
       "Apply the policy above. Return a structured incident report with these sections:\n"
       + "1. Risk classification\n2. Evidence\n3. Recommended actions\n"
@@ -774,25 +780,79 @@
       } catch (err) { box.innerHTML = '<div class="empty-note">' + esc(String(err.message || err)) + '</div>'; }
     }
 
-    // The three-step flow. What the viewer actually sees change is TIME TO
-    // FIRST TOKEN: before the cache the page sits blank for ~8.6s and then
-    // streams; after it, text starts immediately and streams for the same
-    // length. Total moves far less, and the table shows both so the smaller
-    // number is not hidden behind the bigger one.
-    let beforeRun = null, afterRun = null, policyBuild = null;
+    // One input, one run button, and a state the two buttons move between.
+    // The earlier three-numbered-buttons version put the state change and the
+    // run in the same press, which made it impossible to type a prompt, run
+    // it, change the state, and run THE SAME prompt again — the whole point.
+    let optimized = false, policyBuild = null, runNo = 0;
 
-    async function streamReport(noCache, tag) {
+    function paintState(note) {
+      el('optState').innerHTML = optimized
+        ? '<strong>최적화 후</strong>정책의 KV를 재사용합니다. ' + (note || '')
+        : '<strong>최적화 전</strong>매 요청 정책 전체를 다시 읽습니다. ' + (note || '');
+      el('optState').className = 'callout' + (optimized ? '' : ' warn');
+    }
+
+    // The policy has to be installed for BOTH states: it is the document the
+    // model reads. Without it the server falls back to a short unrelated
+    // prompt that returns in a fraction of a second — which looks exactly like
+    // the optimization already happened, and is how this was misread once.
+    async function ensurePolicy() {
+      const st = (await api('/api/models')).serving || {};
+      if (st.prefix_tokens) { policyBuild = st.prefix_build_s; return true; }
+      paintState('정책 문서를 올리는 중…');
+      try {
+        const r = await api('/api/prefix', {method:'POST', body: JSON.stringify({prefix: policyText()})});
+        policyBuild = r.build_s;
+        el('policyStat').textContent = r.prefix_tokens.toLocaleString() + ' 토큰 · 한 번 계산에 ' + r.build_s.toFixed(2) + 's';
+        return true;
+      } catch (err) { paintState(esc(String(err.message || err))); return false; }
+    }
+
+    async function setBefore() {
+      if (!(await ensurePolicy())) return;
+      optimized = false;
+      el('agentDiag').innerHTML = '';
+      paintState('실행을 눌러 보세요.');
+    }
+
+    async function setAfter() {
+      if (!(await ensurePolicy())) return;
+      optimized = true;
+      const est = Math.round(policyText().length / 3.36);
+      // Arithmetic on the prompt this page built, not a guess: the policy is
+      // fixed across requests and the event is not.
+      el('agentDiag').innerHTML = '<div class="callout"><strong>워크로드 분석</strong>'
+        + '입력의 약 ' + est.toLocaleString() + ' 토큰이 매 요청 동일한 정책입니다. '
+        + '병목은 반복되는 prefill이지 출력 생성이 아닙니다.'
+        + (policyBuild ? ' 이 문서를 한 번 읽는 데 ' + policyBuild.toFixed(2) + '초가 걸렸고, 지금까지 매 요청 그 값을 냈습니다.' : '')
+        + '<br>조치: 그 KV를 다시 계산하지 않고 재사용합니다.</div>';
+      paintState('같은 프롬프트를 다시 실행해 보세요.');
+    }
+
+    function addRow(state, ttft, total, tok, promptTokens, cache) {
+      const body = el('runRows');
+      if (runNo++ === 0) body.innerHTML = '';
+      const tr = document.createElement('tr');
+      tr.innerHTML = '<td>' + state + '</td><td>' + ttft.toFixed(2) + 's</td><td>'
+        + total.toFixed(2) + 's</td><td>' + (tok == null ? '—' : tok) + ' tok</td><td>'
+        + (promptTokens || 0).toLocaleString() + ' · ' + (cache || '—') + '</td>';
+      body.appendChild(tr);
+    }
+
+    async function runOnce() {
       const out = el('reportOut'), ev = el('event').value.trim();
-      if (!ev) { toast('이벤트를 입력하세요', true); return null; }
+      if (!ev) { toast('이벤트를 입력하세요', true); return; }
+      if (!(await ensurePolicy())) return;
+      const wasOptimized = optimized;
       out.textContent = '';
-      el(tag + 'Ttft').textContent = el(tag + 'Total').textContent = el(tag + 'Tok').textContent = '…';
       const t0 = performance.now();
-      let first = null, text = '', tokens = null;
+      let first = null, text = '', tokens = null, ptok = 0, cache = '';
       try {
         const res = await fetch('/api/generate/stream', {
           method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({sentence: REPORT_INSTRUCTION + ev + TURN_END,
-                                max_new_tokens: 256, greedy: true, no_cache: noCache})});
+          body: JSON.stringify({sentence: VERDICT_INSTRUCTION + ev + TURN_END,
+                                max_new_tokens: 96, greedy: true, no_cache: !wasOptimized})});
         const reader = res.body.getReader(), dec = new TextDecoder();
         let buf = '';
         for (;;) {
@@ -805,89 +865,16 @@
             const f = JSON.parse(ln.slice(6));
             if (f.error) { out.textContent += '\n[' + f.error + ']'; continue; }
             if (f.token) {
-              if (first === null) {
-                first = performance.now() - t0;
-                el(tag + 'Ttft').textContent = (first/1000).toFixed(2) + 's';
-              }
+              if (first === null) first = performance.now() - t0;
               text += f.token; out.textContent = text; out.scrollTop = out.scrollHeight;
             }
-            if (f.done) {
-              tokens = f.new_tokens;
-              el(tag + 'Total').textContent = ((performance.now()-t0)/1000).toFixed(2) + 's';
-              el(tag + 'Tok').textContent = (tokens == null ? '—' : tokens) + ' tok';
-              // Input size and cache state, so a run that never saw the policy
-              // cannot be mistaken for a fast one. A four-figure drop here is
-              // the tell: no document, nothing to optimise.
-              el(tag + 'In').textContent = (f.prompt_tokens || 0).toLocaleString() + ' · ' + (f.cache || '—');
-            }
+            if (f.done) { tokens = f.new_tokens; ptok = f.prompt_tokens; cache = f.cache; }
           }
         }
-      } catch (err) { out.textContent += '\n[' + String(err.message || err) + ']'; return null; }
-      const run = {ttft: first/1000, total: (performance.now()-t0)/1000, tokens: tokens};
-      if (beforeRun && afterRun) {
-        el('xTtft').textContent = (beforeRun.ttft / afterRun.ttft).toFixed(1) + 'x';
-        el('xTotal').textContent = (beforeRun.total / afterRun.total).toFixed(1) + 'x';
-      }
-      return run;
-    }
-
-    // The policy has to be installed for BOTH runs: it is the document the
-    // model reads, and without it the server falls back to a short unrelated
-    // prompt — which returns in a fraction of a second and looks like the
-    // optimization already happened. Installing is setup; the agent's decision
-    // is whether to recompute that KV or reuse it.
-    async function ensurePolicy(box) {
-      const h = await api('/api/models');
-      if (h.serving && h.serving.prefix_tokens) return true;
-      box.innerHTML = '<div class="empty-note">정책 문서를 올리는 중 — 아직 캐시는 쓰지 않습니다…</div>';
-      try {
-        const r = await api('/api/prefix', {method:'POST', body: JSON.stringify({prefix: policyText()})});
-        policyBuild = r.build_s;
-        el('policyStat').textContent = r.prefix_tokens.toLocaleString() + ' 토큰 · 한 번 계산에 ' + r.build_s.toFixed(2) + 's';
-        return true;
-      } catch (err) { box.innerHTML = '<div class="empty-note">' + esc(String(err.message || err)) + '</div>'; return false; }
-    }
-
-    async function runBefore() {
-      const box = el('agentDiag');
-      if (!(await ensurePolicy(box))) return;
-      box.innerHTML = '<div class="empty-note">캐시를 쓰지 않고 실행 중 — 첫 토큰까지 걸리는 시간을 보세요…</div>';
-      beforeRun = await streamReport(true, 'b');
-      if (!beforeRun) return;
-      if (beforeRun && afterRun) {
-        el('xTtft').textContent = (beforeRun.ttft / afterRun.ttft).toFixed(1) + 'x';
-        el('xTotal').textContent = (beforeRun.total / afterRun.total).toFixed(1) + 'x';
-      }
-      el('agentDiag').innerHTML = '<div class="callout"><strong>느린 곳은 생성이 아닙니다</strong>'
-        + '첫 토큰까지 ' + beforeRun.ttft.toFixed(1) + '초 동안 아무것도 나오지 않았습니다. '
-        + '그 시간에 모델은 같은 정책 문서를 처음부터 다시 읽고 있었습니다.</div>';
-    }
-
-    async function runAgent() {
-      const box = el('agentDiag');
-      if (!(await ensurePolicy(box))) return;
-      // Arithmetic on the prompt this page just built, not a guess: the policy
-      // is fixed across requests and the event is not.
-      const est = Math.round(policyText().length / 3.36);
-      box.innerHTML = '<div class="callout"><strong>워크로드 분석</strong>'
-        + '입력의 약 ' + est.toLocaleString() + ' 토큰이 매 요청 동일한 정책입니다. '
-        + '병목은 반복되는 prefill이지 출력 생성이 아닙니다.'
-        + (policyBuild ? ' 이 문서를 한 번 읽는 데 ' + policyBuild.toFixed(2) + '초가 걸렸고, 지금까지 매 요청 그 값을 냈습니다.' : '')
-        + '<br>조치: 그 KV를 다시 계산하지 않고 재사용합니다.</div>'
-        + '<div class="callout" style="margin-top:8px"><strong>적용됨</strong>3번을 눌러 같은 프롬프트를 다시 돌려 보세요.</div>';
-    }
-
-    async function runAfter() {
-      afterRun = await streamReport(false, 'a');
-      if (!afterRun || !beforeRun) return;
-      const ttftX = beforeRun.ttft / afterRun.ttft, totX = beforeRun.total / afterRun.total;
-      el('agentDiag').innerHTML = '<div class="callout"><strong>첫 토큰 '
-        + beforeRun.ttft.toFixed(1) + 's → ' + afterRun.ttft.toFixed(1) + 's (' + ttftX.toFixed(1) + '배)</strong>'
-        + '총 시간은 ' + beforeRun.total.toFixed(1) + 's → ' + afterRun.total.toFixed(1)
-        + 's (' + totX.toFixed(1) + '배)입니다.</div>'
-        + '<div class="caveat">두 숫자가 다른 것이 요점입니다. 없앤 것은 <b>반복되는 정책의 prefill</b>이고, '
-        + '토큰을 하나씩 만들어내는 시간은 그대로입니다 — 같은 ' + (afterRun.tokens || '?')
-        + '개를 생성하니까요. 생성이 빨라졌다고 말하면 틀립니다.</div>';
+      } catch (err) { out.textContent += '\n[' + String(err.message || err) + ']'; return; }
+      if (first === null) return;
+      addRow(wasOptimized ? '최적화 후' : '최적화 전',
+             first/1000, (performance.now()-t0)/1000, tokens, ptok, cache);
     }
 
     function renderQualityTiles(x) {
@@ -912,9 +899,10 @@
     el('loadPolicy').addEventListener('click', () => loadPolicy(policyText()));
     el('clearPolicy').addEventListener('click', () => loadPolicy(''));
     el('runAb').addEventListener('click', runAb);
-    el('runBefore').addEventListener('click', runBefore);
-    el('runAgent').addEventListener('click', runAgent);
-    el('runAfter').addEventListener('click', runAfter);
+    el('setBefore').addEventListener('click', setBefore);
+    el('setAfter').addEventListener('click', setAfter);
+    el('runOnce').addEventListener('click', runOnce);
+    paintState('');
 
     function renderFlow() {
       const baselineReady = Boolean(appState && appState.experiment && appState.experiment.after);
