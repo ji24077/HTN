@@ -226,12 +226,33 @@ async def join(request: Request):
         + "same bytes every other machine runs. Keep the <code>-v</code> volume and it stays "
         + "the same machine \u2014 same identity, same history, same limits \u2014 so no new "
         + "invite is needed.</p>"
-        + f'<pre id="updatecmd" style="background:#ecece4;padding:16px;border-radius:8px;overflow-x:auto;white-space:pre-wrap">docker pull {safe_image}\ndocker rm -f dwp-agent\ndocker run -d --name dwp-agent --restart unless-stopped -v dwp-agent-data:/data -p 127.0.0.1:43117:43117 -e DWP_GUI_PUBLIC_ORIGIN="http://127.0.0.1:43117" {safe_image}</pre>'
+        # Clear the port by *port*, not by container name.
+        #
+        # `docker rm -f dwp-agent` only matches a container someone happened to name that.
+        # Whatever is actually holding 43117 may be an older container under a different
+        # name, and then the run below fails with "Ports are not available: address
+        # already in use" -- which is where this stops being an update and becomes a
+        # debugging session. Measured: that is exactly how the first machine to join
+        # failed. `--filter publish` asks Docker what owns the port and removes that.
+        #
+        # -r matters and is not decoration: GNU xargs with empty input runs the command
+        # anyway, so a machine with nothing on the port would see a bare `docker rm -f`
+        # and its "requires at least 1 argument" error, which reads as the reset having
+        # gone wrong. macOS accepts -r and already behaves this way.
+        + f'<pre id="updatecmd" style="background:#ecece4;padding:16px;border-radius:8px;overflow-x:auto;white-space:pre-wrap">docker pull {safe_image}\ndocker ps -aq --filter publish=43117 | xargs -r docker rm -f\ndocker run -d --name dwp-agent --restart unless-stopped -v dwp-agent-data:/data -p 127.0.0.1:43117:43117 -e DWP_GUI_PUBLIC_ORIGIN="http://127.0.0.1:43117" {safe_image}</pre>'
         + '<p><button id="copyupdate" style="font:inherit;padding:8px 14px;border-radius:8px;border:1px solid #242621;background:#fff;cursor:pointer">Copy</button> <span id="copiedupdate" hidden></span></p>'
-        + "<p>Three separate commands, so they paste into any shell. If you named the "
-        + "container something other than <code>dwp-agent</code>, change it in the last two "
-        + "lines. Work in flight is handed back to the network rather than lost, so this is "
-        + "safe to run on a machine that is busy.</p>"
+        + "<p>The middle line stops whatever is holding that port, whatever the container "
+        + "is called \u2014 an older agent under a different name is the usual reason a "
+        + "straight update fails. Your data is in the volume, not the container, so "
+        + "removing it loses nothing.</p>"
+        # PowerShell has no xargs, and the POSIX line above fails there with a message
+        # about a command it has never heard of. Two shells, two lines, said plainly.
+        + "<p><strong>On Windows, in PowerShell</strong>, the middle line is instead:</p>"
+        + '<pre id="updatecmdwin" style="background:#ecece4;padding:16px;border-radius:8px;overflow-x:auto;white-space:pre-wrap">docker ps -aq --filter publish=43117 | ForEach-Object { docker rm -f $_ }</pre>'
+        + '<p><button id="copyupdatewin" style="font:inherit;padding:8px 14px;border-radius:8px;border:1px solid #242621;background:#fff;cursor:pointer">Copy</button> <span id="copiedupdatewin" hidden></span></p>'
+        + "<p>Separate commands, so they paste into any shell and run in order. Work in "
+        + "flight is handed back to the network rather than lost, so this is safe to run on "
+        + "a machine that is busy.</p>"
         + "<h2>Desktop or iOS app</h2><p>Open the desktop worker or iOS app and paste the invite link from your fleet dashboard. Invitations expire after ten minutes and work once.</p>"
         + downloads
         + "<h2>From the repository</h2><p>Install dependencies with <code>pnpm install --frozen-lockfile</code>, then open <code>pnpm agent gui</code> and paste your invite link.</p>"
@@ -330,6 +351,7 @@ async def join(request: Request):
         + "}"
         + "wireCopy('dockercmd','copy','copied');"
         + "wireCopy('updatecmd','copyupdate','copiedupdate');"
+        + "wireCopy('updatecmdwin','copyupdatewin','copiedupdatewin');"
         + "})();</script></html>",
         headers={
             "Referrer-Policy": "no-referrer",
