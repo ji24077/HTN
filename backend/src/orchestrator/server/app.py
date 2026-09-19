@@ -17,6 +17,9 @@ from redis.backoff import NoBackoff
 
 from ..agent import AgentLoop
 from ..llm import OpenAIClient
+from ..preprocessing.routes import router as preprocessing_router
+from ..preprocessing.routes import worker_router as artifact_router
+from ..preprocessing.service import PreprocessingService
 from ..shared.protocol import MESSAGE_LIMIT
 from ..shared.security import authorized
 from ..shared.telemetry import init_sentry
@@ -68,6 +71,7 @@ def create_app(surface: str = "combined") -> FastAPI:
         reconciler = None
         model_client = None
         supervisor_task = None
+        preprocessing_task = None
         sentry_reader = None
         updates = ChangeFeed(config.database_url)
         auth = SupabaseAuth(config.supabase_url) if config.supabase_url else None
@@ -126,8 +130,14 @@ def create_app(surface: str = "combined") -> FastAPI:
                 app.state.supervisor_sentry = sentry_reader
                 app.state.supervisor = SupervisorService(store, model_client, sentry_reader)
                 supervisor_task = asyncio.create_task(app.state.supervisor.run(updates))
+            if model_client is not None:
+                app.state.preprocessing = PreprocessingService(store, model_client)
+                preprocessing_task = asyncio.create_task(app.state.preprocessing.run(updates))
             yield
         finally:
+            if preprocessing_task is not None:
+                preprocessing_task.cancel()
+                await asyncio.gather(preprocessing_task, return_exceptions=True)
             if supervisor_task is not None:
                 supervisor_task.cancel()
                 await asyncio.gather(supervisor_task, return_exceptions=True)
@@ -158,6 +168,7 @@ def create_app(surface: str = "combined") -> FastAPI:
     )
     app.state.surface = surface
     app.state.chat_agent = None
+    app.state.preprocessing = None
     app.state.supervisor = None
     app.state.supervisor_sentry = None
     app.state.chat_slots = asyncio.Semaphore(2)
@@ -203,10 +214,12 @@ def create_app(surface: str = "combined") -> FastAPI:
 
     if surface in {"combined", "worker"}:
         app.add_api_websocket_route("/v1/worker", worker)
+        app.include_router(artifact_router)
     if surface in {"combined", "public"}:
         app.include_router(api_router)
         app.include_router(chat_router)
         app.include_router(supervisor_router)
+        app.include_router(preprocessing_router)
         app.include_router(dashboard_router)
         app.include_router(dwp_router)
         app.include_router(dwp_assets_router)

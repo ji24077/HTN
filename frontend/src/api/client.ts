@@ -424,3 +424,110 @@ export const readSupervisor = (jobId: string, signal?: AbortSignal) =>
     `/v1/jobs/${encodeURIComponent(jobId)}/supervisor`,
     { signal },
   );
+
+export interface SimulationStatus {
+  trial_counts?: Record<string, number>;
+  cleanup?: { required: number; confirmed: number; pending_workers: string[] };
+  job_id: string;
+  phase: string;
+  message: string;
+  description: string;
+  round: number;
+  deadline: string;
+  original_hash: string;
+  validated_hash?: string;
+  limits: { adaptations: number; runtime_seconds: number; workers: number };
+  workers: string[];
+  question?: string;
+  plan?: {
+    summary: string;
+    trials: number;
+    batch_size?: number;
+    workers?: number;
+    reference: string;
+    aggregate: string;
+  };
+  policy?: {
+    rationale: string;
+    local_cases: number;
+    independent_cases: number;
+    validation_timeout_seconds: number;
+    aggregation: string;
+  };
+  schedule?: {
+    rationale: string;
+    batches: { worker_id: string; trials: number; timeout_seconds: number }[];
+    aggregation_worker: string;
+    aggregation_timeout_seconds: number;
+  };
+  measurements?: {
+    stage: string;
+    worker_id: string;
+    tasks: number;
+    trials: number;
+    compute_seconds: number;
+    execution_seconds: number;
+    observed_wall_seconds: number;
+    output_bytes: number;
+  }[];
+  decisions?: {
+    stage: string;
+    tool: string;
+    proposal: { rationale?: string; summary?: string; explanation?: string };
+  }[];
+  versions: {
+    round: number;
+    digest: string;
+    explanation: string;
+    code: string;
+  }[];
+  checks: {
+    round: number;
+    stage: string;
+    passed: boolean;
+    cases?: number;
+    details?: unknown;
+    seeds: number[];
+  }[];
+  tasks: {
+    id: string;
+    state: string;
+    generation: number;
+    worker_id: string | null;
+    role: string;
+    failure: string;
+    progress: number;
+  }[];
+}
+export const readSimulation = (jobId: string, signal?: AbortSignal) =>
+  request<SimulationStatus>(`/v1/simulations/${encodeURIComponent(jobId)}`, {
+    signal,
+  });
+export const answerSimulation = (jobId: string, message: string) =>
+  request(`/v1/simulations/${encodeURIComponent(jobId)}/answer`, {
+    method: "POST",
+    body: JSON.stringify({ message }),
+  });
+export async function uploadSimulation(
+  files: File[],
+  description: string,
+  requestId: string,
+) {
+  const encoded = await Promise.all(
+    files.map(async (file) => {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      let text = "";
+      for (let i = 0; i < bytes.length; i += 8192)
+        text += String.fromCharCode(...bytes.subarray(i, i + 8192));
+      return { name: file.name, content: btoa(text) };
+    }),
+  );
+  return request<Task>("/v1/simulations", {
+    method: "POST",
+    body: JSON.stringify({
+      request_id: requestId,
+      description,
+      files: encoded,
+    }),
+  });
+}

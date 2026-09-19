@@ -98,49 +98,21 @@ async def event(
     spec: dict | None = None,
     **details,
 ) -> None:
-    audit_id = await conn.fetchval(
+    if entity == "task":
+        if spec is None:
+            spec = await conn.fetchval("SELECT spec FROM tasks WHERE id=$1", entity_id)
+        await task_events(conn, [(entity_id, before, after, spec, details)])
+        return
+    await conn.execute(
         """INSERT INTO events(entity,entity_id,previous_state,new_state,details)
-           VALUES($1,$2,$3,$4,$5) RETURNING id""",
+           VALUES($1,$2,$3,$4,$5)""",
         entity,
         entity_id,
         before,
         after,
         details,
     )
-    if entity == "task":
-        if spec is None:
-            spec = await conn.fetchval("SELECT spec FROM tasks WHERE id=$1", entity_id)
-        data = {
-            **details,
-            "state": after,
-            "adapter": spec["kind"],
-            "job_id": spec["job_id"],
-            "runtime": spec["requirements"]["runtime"],
-            "task_hash": hashlib.sha256(json_text(spec).encode()).hexdigest(),
-        }
-        data.pop("session_id", None)
-        if after == "succeeded":
-            data["result_url"] = f"/v1/tasks/{entity_id}"
-        kind = "failed" if after == "queued" and before != "" else after
-        await conn.execute(
-            """INSERT INTO execution_events
-               (task_id,attempt,worker_id,source,sequence,kind,occurred_at,data)
-               VALUES($1,$2,$3,'server',$4,$5,clock_timestamp(),$6)""",
-            entity_id,
-            details.get("generation", 0),
-            details.get("worker_id"),
-            audit_id,
-            kind,
-            scrub_execution(data),
-        )
-        await conn.execute(
-            """INSERT INTO supervisor_events(job_id,kind,data)
-               SELECT id,$2,$3 FROM supervised_jobs WHERE id=$1""",
-            spec["job_id"],
-            "task_" + kind,
-            scrub_execution({"task_id": entity_id, **data}),
-        )
-    elif entity == "worker":
+    if entity == "worker":
         await conn.execute(
             """INSERT INTO supervisor_events(job_id,kind,data)
                SELECT j.id,'worker_health',$2::jsonb FROM supervised_jobs j
@@ -151,6 +123,98 @@ async def event(
             entity_id,
             {"worker_id": entity_id, "state": after},
         )
+
+
+async def task_events(conn, changes) -> None:
+    """Record task audits, execution logs and supervisor wakes in one round trip.
+
+    Call inside the transaction changing these tasks. Each task appears once in
+    changes; the returned audit ID is also its durable execution-event sequence.
+    """
+    entries = []
+    for task_id, before, after, spec, details in changes:
+        data = {
+            **details,
+            "state": after,
+            "adapter": spec["kind"],
+            "job_id": spec["job_id"],
+            "runtime": spec["requirements"]["runtime"],
+            "task_hash": hashlib.sha256(json_text(spec).encode()).hexdigest(),
+        }
+        data.pop("session_id", None)
+        if after == "succeeded":
+            data["result_url"] = f"/v1/tasks/{task_id}"
+        entries.append(
+            {
+                "task_id": task_id,
+                "before": before,
+                "after": after,
+                "details": details,
+                "data": scrub_execution(data),
+                "supervisor_data": scrub_execution({"task_id": task_id, **data}),
+                "job_id": spec["job_id"],
+                "attempt": details.get("generation", 0),
+                "worker_id": details.get("worker_id"),
+                "kind": "failed" if after == "queued" and before != "" else after,
+            }
+        )
+    if not entries:
+        return
+    await conn.execute(
+        """WITH input AS (
+            SELECT * FROM jsonb_to_recordset($1::jsonb) AS x(
+                task_id text, before text, after text, details jsonb, data jsonb,
+                supervisor_data jsonb, job_id text, attempt int, worker_id text, kind text)
+        ), audit AS (
+            INSERT INTO events(entity,entity_id,previous_state,new_state,details)
+            SELECT 'task',task_id,before,after,details FROM input
+            RETURNING id,entity_id,at
+        ), execution AS (
+            INSERT INTO execution_events(task_id,attempt,worker_id,source,sequence,kind,occurred_at,data)
+            SELECT i.task_id,i.attempt,i.worker_id,'server',a.id,i.kind,a.at,i.data
+            FROM input i JOIN audit a ON a.entity_id=i.task_id
+        )
+        INSERT INTO supervisor_events(job_id,kind,data)
+        SELECT i.job_id,'task_' || i.kind,i.supervisor_data
+        FROM input i JOIN supervised_jobs j ON j.id=i.job_id""",
+        entries,
+    )
+
+
+async def cancel_job_tasks(conn, job_id, reason, *, include_failed=False, exclude_root=False):
+    """Cancel a job's outstanding tasks atomically, without per-task queries."""
+    rows = await conn.fetch(
+        """WITH previous AS MATERIALIZED (
+            SELECT id,state,generation,worker_id FROM tasks
+            WHERE spec->>'job_id'=$1 AND (NOT $3::boolean OR id!=$1)
+            AND (state IN ('queued','assigned','running') OR ($2::boolean AND state='failed'))
+        )
+        UPDATE tasks t SET state='cancelled',lease_until=NULL,deadline=NULL,
+            worker_id=NULL,session_id=NULL FROM previous p WHERE t.id=p.id
+        RETURNING t.id,t.spec,p.state,p.generation,p.worker_id""",
+        job_id,
+        include_failed,
+        exclude_root,
+    )
+    await task_events(
+        conn,
+        [
+            (
+                r["id"],
+                r["state"],
+                "cancelled",
+                r["spec"],
+                {
+                    "generation": r["generation"],
+                    "worker_id": r["worker_id"],
+                    "reason": reason,
+                    "cleanup_required": r["spec"]["kind"] == "python_project"
+                    and r["state"] in {"assigned", "running"},
+                },
+            )
+            for r in rows
+        ],
+    )
 
 
 async def ingest_execution_events(
@@ -246,6 +310,8 @@ class Store:
                         "dwp_assertions",
                         "chat_conversations",
                         "execution_events",
+                        "simulation_jobs",
+                        "simulation_artifacts",
                         "supervised_jobs",
                         "supervisor_events",
                         "supervisor_runs",
@@ -276,8 +342,10 @@ class Store:
         async with asyncio.timeout(timeout):
             async with self.pool.acquire() as conn:
                 async with conn.transaction():
-                    await conn.execute("SELECT pg_advisory_xact_lock(71420931)", timeout=timeout)
-                    now = await conn.fetchval("SELECT clock_timestamp()")
+                    now = await conn.fetchval(
+                        "SELECT clock_timestamp() FROM pg_advisory_xact_lock(71420931)",
+                        timeout=timeout,
+                    )
                     yield conn, now
 
     async def task(self, task_id: str) -> Task:
@@ -309,7 +377,7 @@ class Store:
         return [dict(row) for row in rows]
 
     async def append_execution_events(self, worker_id: str, session: str, batch: ExecutionBatch):
-        async with self.change() as (conn, _):
+        async with self.pool.acquire() as conn, conn.transaction():
             await self._worker(conn, worker_id, session)
             # Replay may arrive after cancellation, completion, or a newer attempt.
             # Historical assignment ownership permits diagnostics, never task mutation.
@@ -323,7 +391,8 @@ class Store:
             )
             if not owned:
                 raise StaleAssignment("execution was not assigned to this worker")
-            # Everything here runs under the global lock; keep it to two round trips.
+            # Diagnostics are idempotent and authorized against durable assignment
+            # history; they do not need the scheduler's global mutation lock.
             await conn.executemany(
                 """INSERT INTO execution_events
                    (task_id,attempt,worker_id,source,sequence,kind,occurred_at,data)
@@ -354,11 +423,12 @@ class Store:
             if percents:
                 await conn.execute(
                     """UPDATE tasks SET progress=GREATEST(progress,$4)
-                       WHERE id=$1 AND worker_id=$2 AND generation=$3 AND state='running'""",
+                       WHERE id=$1 AND worker_id=$2 AND generation=$3 AND state='running' AND session_id=$5""",
                     batch.taskId,
                     worker_id,
                     batch.attempt,
                     max(percents),
+                    session,
                 )
             return [item.sequence for item in batch.events]
 
@@ -799,6 +869,10 @@ class Store:
             caps = worker.capabilities
             row = await conn.fetchrow(
                 """SELECT * FROM tasks WHERE state='queued'
+                   AND spec->>'kind' != 'simulation_job'
+                   AND NOT EXISTS(SELECT 1 FROM simulation_jobs p WHERE p.job_id=tasks.spec->>'job_id'
+                       AND (p.deadline<=clock_timestamp() OR p.phase IN ('completed','failed','cancelled')))
+                   AND (spec->>'kind' != 'python_project' OR EXISTS(SELECT 1 FROM job_reservations r WHERE r.worker_id=$4 AND r.job_id=tasks.spec->>'job_id' AND r.expires_at>clock_timestamp()))
                    AND NOT EXISTS (SELECT 1 FROM supervised_jobs j
                        WHERE j.id=tasks.spec->>'job_id' AND j.state!='active')
                    AND NOT EXISTS (SELECT 1 FROM job_reservations r
@@ -822,7 +896,10 @@ class Store:
             lease = min(now + timedelta(seconds=ACK_SECONDS), deadline)
             row = await conn.fetchrow(
                 """UPDATE tasks SET state='assigned',generation=generation+1,worker_id=$2,
-                   session_id=$3,lease_until=$4,deadline=$5,result=NULL,attestation=NULL,
+                   session_id=$3,
+                   lease_until=LEAST($4,(SELECT deadline FROM simulation_jobs WHERE job_id=tasks.spec->>'job_id')),
+                   deadline=LEAST($5,(SELECT deadline FROM simulation_jobs WHERE job_id=tasks.spec->>'job_id')),
+                   result=NULL,attestation=NULL,
                    failure='',progress=0,started_at=NULL
                    WHERE id=$1 RETURNING *""",
                 task.spec.id,
@@ -944,6 +1021,24 @@ class Store:
             )
 
     async def cancel(self, task_id: str) -> None:
+        # The visible simulation row represents the whole pipeline, not one worker task.
+        if await self.pool.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM simulation_jobs WHERE job_id=$1)", task_id
+        ):
+            from ...supervisor.models import Action
+            from ...supervisor.store import SupervisorStore
+
+            if (await self.task(task_id)).state in {"succeeded", "failed", "cancelled"}:
+                return
+            await SupervisorStore(self).action(
+                task_id,
+                Action(
+                    action_id=uuid4(),
+                    operation="cancel_job",
+                    reason="User cancelled the uploaded simulation",
+                ),
+            )
+            return
         async with self.change() as (conn, _):
             row = await conn.fetchrow("SELECT * FROM tasks WHERE id=$1", task_id)
             if row is None:

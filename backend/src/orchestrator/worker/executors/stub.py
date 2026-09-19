@@ -1,4 +1,4 @@
-"""The sole executor is a cancellable stub; no user code is executed."""
+"""Cancellable built-in connection test; this executor does not run user code."""
 
 import asyncio
 import hashlib

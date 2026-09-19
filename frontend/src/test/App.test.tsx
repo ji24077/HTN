@@ -364,6 +364,7 @@ describe("dashboard interactions over pushed updates", () => {
     const user = userEvent.setup();
     const { stream } = await mount();
     await user.click(screen.getByRole("button", { name: "New job" }));
+    await user.click(screen.getByRole("button", { name: "Built-in tasks" }));
     await user.selectOptions(
       screen.getByRole("combobox", { name: "Send to" }),
       "worker-b",
@@ -388,6 +389,7 @@ describe("dashboard interactions over pushed updates", () => {
     const user = userEvent.setup();
     await mount();
     await user.click(screen.getByRole("button", { name: "New job" }));
+    await user.click(screen.getByRole("button", { name: "Built-in tasks" }));
     fetchMock.mockImplementation(
       async (path) =>
         new Response(
@@ -645,6 +647,7 @@ it("submits an intentional failure with instructions to observe the first attemp
   const user = userEvent.setup();
   await mount();
   await user.click(screen.getByRole("button", { name: "New job" }));
+  await user.click(screen.getByRole("button", { name: "Built-in tasks" }));
   await user.click(
     screen.getByRole("checkbox", {
       name: "Intentional failure (supervisor test)",

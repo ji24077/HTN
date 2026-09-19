@@ -25,6 +25,7 @@ class ExecutionEvent(Model):
         "cancelled",
         "timed_out",
         "interrupted",
+        "cleaned",
         "truncated",
     ]
     data: dict[str, JsonValue] = Field(default_factory=dict)

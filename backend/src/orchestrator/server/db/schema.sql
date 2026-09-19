@@ -179,3 +179,25 @@ FOR EACH ROW EXECUTE FUNCTION notify_orchestrator_change();
 CREATE OR REPLACE TRIGGER supervisor_events_changed
 AFTER INSERT ON supervisor_events
 FOR EACH ROW EXECUTE FUNCTION notify_orchestrator_change();
+
+-- Source bundles are immutable and scoped to one simulation job.
+CREATE TABLE IF NOT EXISTS simulation_jobs (
+    job_id text PRIMARY KEY REFERENCES supervised_jobs(id),
+    submission_hash text NOT NULL,
+    original_hash text NOT NULL,
+    phase text NOT NULL DEFAULT 'submitted',
+    data jsonb NOT NULL,
+    revision bigint NOT NULL DEFAULT 0,
+    retry_after timestamptz NOT NULL DEFAULT clock_timestamp(),
+    created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+    deadline timestamptz NOT NULL
+);
+CREATE TABLE IF NOT EXISTS simulation_artifacts (
+    job_id text NOT NULL REFERENCES supervised_jobs(id),
+    digest text NOT NULL,
+    content bytea NOT NULL,
+    PRIMARY KEY(job_id,digest)
+);
+CREATE OR REPLACE TRIGGER simulation_jobs_changed
+AFTER INSERT OR UPDATE OR DELETE ON simulation_jobs
+FOR EACH ROW EXECUTE FUNCTION notify_orchestrator_change();

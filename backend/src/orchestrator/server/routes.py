@@ -22,7 +22,9 @@ async def read_snapshot(request: Request):
         async with conn.transaction(isolation="repeatable_read", readonly=True):
             workers = await conn.fetch("SELECT * FROM workers ORDER BY id LIMIT 500")
             tasks = await conn.fetch(
-                f"SELECT {TASK_SUMMARY_COLUMNS} FROM tasks ORDER BY created_at DESC,id LIMIT 500"
+                f"SELECT {TASK_SUMMARY_COLUMNS} FROM tasks "
+                "WHERE spec->>'kind' != 'python_project' "
+                "ORDER BY created_at DESC,id LIMIT 500"
             )
             events = await conn.fetch("SELECT * FROM events ORDER BY id DESC LIMIT 40")
     return {

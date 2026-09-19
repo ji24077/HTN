@@ -3,6 +3,7 @@ import type { Task, ExecutionEvent } from "../api/types";
 import { ApiError, executionEvents, getTask } from "../api/client";
 import { record, taskTitle, time, workerName } from "../lib/format";
 import { statusLabels } from "../lib/jobs";
+import { SimulationDetails, phaseLabels } from "./SimulationDetails";
 import { JobSupervisor } from "./JobSupervisor";
 import { Icon } from "./Icon";
 
@@ -208,26 +209,51 @@ export function TaskDetails({
               <span>Status</span>
               <strong className={`status-badge ${task.state}`}>
                 <i />
-                {statusLabels[task.state]}
+                {task.spec.kind === "simulation_job"
+                  ? phaseLabels[String(record(task.spec.payload).phase)] ||
+                    statusLabels[task.state]
+                  : statusLabels[task.state]}
               </strong>
             </div>
             <div>
-              <span>Progress</span>
+              <span>
+                {task.spec.kind === "simulation_job"
+                  ? "Pipeline progress"
+                  : "Progress"}
+              </span>
               <strong>
                 {task.state === "succeeded" ? 100 : Math.round(task.progress)}%
               </strong>
             </div>
             <div>
-              <span>{settled ? "Last worker" : "Current worker"}</span>
+              <span>
+                {task.spec.kind === "simulation_job"
+                  ? "Allocation"
+                  : settled
+                    ? "Last worker"
+                    : "Current worker"}
+              </span>
               <strong>
-                {task.worker_id ? workerName(task.worker_id) : "Unassigned"}
+                {task.spec.kind === "simulation_job"
+                  ? "Managed by phase"
+                  : task.worker_id
+                    ? workerName(task.worker_id)
+                    : "Unassigned"}
               </strong>
             </div>
             <div>
-              <span>Attempts</span>
+              <span>
+                {task.spec.kind === "simulation_job" ? "Launch" : "Attempts"}
+              </span>
               <strong>
-                {task.generation}{" "}
-                <small>/ {task.spec.max_attempts} allowed</small>
+                {task.spec.kind === "simulation_job" ? (
+                  "After validation"
+                ) : (
+                  <>
+                    {task.generation}{" "}
+                    <small>/ {task.spec.max_attempts} allowed</small>
+                  </>
+                )}
               </strong>
             </div>
           </div>
@@ -254,6 +280,13 @@ export function TaskDetails({
           )}
           <div className="detail-columns">
             <div className="execution-column">
+              {task.spec.kind === "simulation_job" && (
+                <SimulationDetails
+                  key={task.spec.job_id}
+                  jobId={task.spec.job_id}
+                  cancelled={task.state === "cancelled"}
+                />
+              )}
               {task.failure && (
                 <div className="failure-banner">
                   <Icon name="warning" />
@@ -265,6 +298,7 @@ export function TaskDetails({
               )}
               <section
                 className="attempt-section"
+                hidden={task.spec.kind === "simulation_job"}
                 aria-label="Execution attempts"
               >
                 <div className="section-heading">
