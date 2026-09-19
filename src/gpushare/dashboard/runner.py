@@ -1202,6 +1202,12 @@ def start_migration(*, kind: str, source_pod_id: str, target_pod_id: str) -> Job
             raise JobError("next-generation migration requires two different NVIDIA GPUs")
 
         src_info, dst_info = _ssh_info(source_pod_id), _ssh_info(target_pod_id)
+        # The target runs the validation eval, so it needs the card. Migration
+        # is pinned at both ends — the source holds the checkpoint and the
+        # target is the one being argued about — so it refuses rather than
+        # relocating, unlike training.
+        JOBS.update(job, "checking the target GPU is free", 5)
+        _require_idle_gpu(job, dst_info)
         checkpoint = _checkpoint_for(source_pod_id)
         local_source = Path(checkpoint["local_dir"])
         source_eval = local_source / "eval/after.json"

@@ -1,5 +1,13 @@
 # JI — Agents + Optimization + Dashboard
 
+> **This is the plan, written before anything ran.** What actually holds as of
+> today — what was measured, what is written but never executed, and why — is in
+> `handoff-ji.md`. Demo operation is in `demo.md`.
+>
+> The largest gap between this document and reality: migration is fully written
+> and wired to the UI, and **zero migration jobs have ever run.**
+
+
 Your brief. Self-contained — you don't need any other file.
 
 ---
