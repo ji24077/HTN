@@ -17,6 +17,13 @@
       --s-before:#0089ea; --s-after:#00a05b;
     }
     .charts { display:grid; grid-template-columns:1.05fr .95fr; gap:16px; }
+    .gpuPicker { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
+    .gpuChip { border:1px solid var(--line); background:var(--panel2); color:var(--ink);
+               border-radius:12px; padding:8px 12px; cursor:pointer; text-align:left; line-height:1.35; }
+    .gpuChip small { display:block; color:var(--muted); font-size:11px; }
+    .gpuChip.on { border-color:var(--mint); background:rgba(120,239,177,.12); }
+    .gpuChip.amd { border-left:3px solid var(--amber); }
+    .gpuChip.live { box-shadow:inset 3px 0 0 var(--mint); }
     .chart-head { display:flex; justify-content:space-between; align-items:baseline; gap:12px; flex-wrap:wrap; margin-bottom:14px; }
     .legend { display:flex; gap:14px; }
     .legend span { color:var(--muted); font-size:12px; font-weight:750; }
@@ -215,8 +222,10 @@
       <div class="chat-layout">
         <aside class="card model-control">
           <label>추론할 모델<select id="serveModel"><option value="">모델 불러오는 중…</option></select></label>
-          <label>모델이 저장된 Pod<select id="servePod"><option value="">Pod 불러오는 중…</option></select></label>
-          <button id="prepareBtn" class="btn blue">선택한 모델 추론 준비</button>
+          <div class="label" style="margin-top:10px">어느 GPU 에서 추론할까</div>
+          <div id="gpuPicker" class="gpuPicker">Pod 불러오는 중…</div>
+          <label style="display:none">Pod<select id="servePod"></select></label>
+          <button id="prepareBtn" class="btn blue" style="margin-top:10px">선택한 GPU 에 올리기</button>
           <div id="serveState" class="callout model-state warn"><strong>추론 준비 필요</strong>모델을 선택하고 위 버튼을 누르세요.</div>
           <button id="stopBtn" class="btn secondary">모델 내리기</button>
         </aside>
@@ -230,6 +239,10 @@
             <button id="chatAfter" class="btn blue">추론 최적화 에이전트</button>
             <span id="chatOptState" class="hint">상태 확인 중…</span>
           </div>
+          <table class="dv" style="margin:0 20px 10px"><thead>
+            <tr><th>GPU</th><th>벤더</th><th>첫 토큰</th><th>전체</th><th>답</th></tr></thead>
+            <tbody id="gpuRows"><tr><td colspan="5" style="text-align:center;color:var(--muted)">아직 실행 없음</td></tr></tbody>
+          </table>
           <div id="messages" class="messages" aria-live="polite">
             <div class="message system">추론 서버가 준비되면 아래 입력창이 활성화됩니다. “모델이 load되지 않았다”는 오류 대신 준비 단계를 먼저 안내합니다.</div>
           </div>
@@ -1003,6 +1016,46 @@
         el('serveState').innerHTML = '<strong>모델이 있는 Pod가 꺼져 있습니다</strong>필요한 Pod ' + esc(model.pod_id) + '를 먼저 실행하세요.';
       }
     }
+    // One click per GPU instead of two dropdowns. On a stage the question is
+    // "which chip", and the answer should be a thing you press, not a thing
+    // you find in a list.
+    function renderGpuPicker() {
+      const host = el('gpuPicker');
+      if (!host) return;
+      const running = pods.filter((p) => p.status === 'running');
+      if (!running.length) { host.textContent = '실행 중인 Pod 없음'; return; }
+      const chosen = el('servePod').value;
+      host.innerHTML = '';
+      for (const p of running) {
+        const b = document.createElement('button');
+        const live = serving.running && serving.pod_id === p.id;
+        b.className = 'gpuChip' + (p.vendor === 'amd' ? ' amd' : '')
+                    + (p.id === chosen ? ' on' : '') + (live ? ' live' : '');
+        b.innerHTML = '<b>' + esc(p.gpu.replace('NVIDIA ','').replace('AMD ','')) + '</b>'
+          + '<small>' + esc(p.vendor) + ' · $' + p.cost_per_hour + '/h'
+          + (live ? ' · 상주 중' : '') + '</small>';
+        b.onclick = () => { el('servePod').value = p.id; renderGpuPicker(); syncModelPod(); };
+        host.appendChild(b);
+      }
+    }
+
+    // Rows accumulate so two chips stay on screen together. The answer column
+    // compares against the FIRST row: a migration that changes the answer is
+    // not a migration, and that has to be visible rather than inferred.
+    let firstAnswer = null, gpuRunNo = 0;
+    function addGpuRow(text, ttft, total) {
+      const pod = pods.find((p) => p.id === (serving.pod_id || el('servePod').value)) || {};
+      const body = el('gpuRows');
+      if (gpuRunNo++ === 0) { body.innerHTML = ''; firstAnswer = text; }
+      const same = text === firstAnswer;
+      const tr = document.createElement('tr');
+      tr.innerHTML = '<td>' + esc((pod.gpu || '?').replace('NVIDIA ','').replace('AMD ',''))
+        + '</td><td>' + esc(pod.vendor || '?') + '</td><td>' + (ttft == null ? '—' : ttft.toFixed(2) + 's')
+        + '</td><td>' + total.toFixed(2) + 's</td><td>'
+        + (gpuRunNo === 1 ? '기준' : (same ? '동일' : '다름')) + '</td>';
+      body.appendChild(tr);
+    }
+
     function renderServing() {
       const ready = Boolean(serving && serving.running);
       el('chatInput').disabled = !ready;
@@ -1110,7 +1163,7 @@
         el('healthText').textContent = pods.filter((p) => p.status === 'running').length + '개 RunPod 연결';
         el('healthDot').className = 'dot' + (pods.length ? '' : ' off');
         activeJob = (runningJob() || {}).id || null;
-        renderBaseline(); renderModels(); renderComparison(); renderFlow();
+        renderBaseline(); renderModels(); renderComparison(); renderFlow(); renderGpuPicker();
         drawFieldChart(appState.experiment.before, appState.experiment.after);
         drawLossChart(appState.experiment.train);
         renderQualityTiles(appState.experiment);
@@ -1176,6 +1229,7 @@
               if (data.error) { bubble.classList.add('error'); bubble.textContent = data.error; }
               else {
                 lastInteractive = data;
+                addGpuRow(raw, data.ttft_s, data.latency_s);
                 const timing = document.createElement('div'); timing.className = 'timing';
                 timing.innerHTML = '<span class="pill">첫 토큰 ' + secs(data.ttft_s,2) + '</span>'
                   + '<span class="pill">전체 ' + secs(data.latency_s,2) + '</span>'
