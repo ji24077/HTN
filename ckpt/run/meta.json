@@ -1,0 +1,15 @@
+{
+  "model_id": "Qwen/Qwen2.5-0.5B",
+  "steps": 500,
+  "config_name": "optimized",
+  "dtype": "bf16",
+  "attention": "sdpa",
+  "micro_batch": 16,
+  "grad_accum": 1,
+  "seq_len": 192,
+  "tokens_per_step": 3072,
+  "final_loss": 0.005053840111941099,
+  "t_step_median_s": 0.13742480985820293,
+  "peak_vram_gb": 13.803524608,
+  "gpu": "NVIDIA GeForce RTX 4090"
+}

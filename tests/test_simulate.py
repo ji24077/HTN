@@ -218,7 +218,7 @@ def test_impossible_mfu_is_flagged_not_swallowed(caplog):
 
     chip, model = (
         CHIPS["RTX 4090"],
-        MODELS["qwen2.5-0.5m-test"] if False else MODELS["qwen2.5-0.5b"],
+        MODELS["qwen2.5-0.5b"],
     )
     c = JobConfig(
         job_id="j",

@@ -2,13 +2,12 @@
 __pycache__/
 *.pyc
 .env
-ckpt/
 *.safetensors
 *.db
 .pytest_cache/
 .ruff_cache/
 .DS_Store
 
-# Experiment outputs. Checkpoints are large and reproducible; eval results and
-# meta.json are small and ARE the evidence, so those stay tracked.
-ckpt/*/model.safetensors
+# Checkpoint weights are large and reproducible; *.safetensors above already
+# excludes them. ckpt/*/meta.json is small and IS the measurement evidence,
+# so the directory itself is deliberately NOT ignored.
