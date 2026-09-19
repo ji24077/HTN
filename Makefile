@@ -1,4 +1,4 @@
-.PHONY: help setup-server setup-cuda setup-rocm setup-agent check server worker mock test fmt
+.PHONY: help setup-server setup-cuda setup-rocm setup-agent check probe fit server worker mock test fmt
 
 help:
 	@grep -E '^[a-z-]+:.*?##' $(MAKEFILE_LIST) | sed 's/:.*##/\t/'
@@ -14,6 +14,11 @@ setup-agent:   ## Ji's laptop (no torch)
 
 check:         ## verify the GPU stack actually works on this machine
 	uv run python scripts/check_env.py
+
+probe:         ## measure real step time on THIS gpu (run on a pod) -> probes.jsonl
+	uv run python scripts/probe.py
+fit:           ## fit per-chip constants from probes.jsonl and report the error
+	uv run python scripts/fit_calibration.py probes.jsonl
 
 server:        ## run the hub
 	uv run gpushare-server
