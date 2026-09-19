@@ -40,13 +40,18 @@ from gpushare.contracts import JobConfig
 from gpushare.dashboard.runner import (
     JOBS,
     JobError,
+    available_models,
+    generate,
     latest_run,
     list_pods,
+    serving,
     start_data_generation,
     start_inference_optimization,
+    start_inference_server,
     start_migration,
     start_training,
     start_training_optimization,
+    stop_inference_server,
 )
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -82,8 +87,11 @@ def experiment() -> dict[str, Any]:
         "example": {
             "sentence": "Sarah Chen, 34, joined Anthropic in 2023 as a research engineer.",
             "record": {
-                "name": "Sarah Chen", "age": 34, "org": "Anthropic",
-                "role": "research engineer", "year": 2023,
+                "name": "Sarah Chen",
+                "age": 34,
+                "org": "Anthropic",
+                "role": "research engineer",
+                "year": 2023,
             },
         },
         "before": before,
@@ -147,10 +155,16 @@ def _chip_by_gpu(name: str) -> ChipSpec | None:
 
 def _cfg(meta: dict, *, workers: int, **over) -> JobConfig:
     base = dict(
-        job_id="j1", model=MODEL_KEY, total_steps=meta.get("steps", 500),
-        seq_len=meta["seq_len"], dtype=meta["dtype"], attention=meta["attention"],
-        micro_batch=meta["micro_batch"], grad_accum=meta["grad_accum"],
-        H=190, workers=[f"w{i}" for i in range(workers)],
+        job_id="j1",
+        model=MODEL_KEY,
+        total_steps=meta.get("steps", 500),
+        seq_len=meta["seq_len"],
+        dtype=meta["dtype"],
+        attention=meta["attention"],
+        micro_batch=meta["micro_batch"],
+        grad_accum=meta["grad_accum"],
+        H=190,
+        workers=[f"w{i}" for i in range(workers)],
     )
     base.update(over)
     base["global_batch_tokens"] = (
@@ -188,8 +202,9 @@ def _candidates_for_speed(meta: dict, chip: ChipSpec) -> list[JobConfig]:
     for m in (32, 16, 8, 4):
         if total % m:
             continue
-        cfg = _cfg(meta, workers=1, micro_batch=m, grad_accum=total // m,
-                   dtype="bf16", attention="sdpa")
+        cfg = _cfg(
+            meta, workers=1, micro_batch=m, grad_accum=total // m, dtype="bf16", attention="sdpa"
+        )
         sim = SimProber(NETS["runpod-global"])
         if sim.fits(cfg, chip):
             out.append(cfg)
@@ -199,7 +214,8 @@ def _candidates_for_speed(meta: dict, chip: ChipSpec) -> list[JobConfig]:
 def _pick_target(want: str, exclude: ChipSpec | None) -> ChipSpec | None:
     """Cheapest chip in the wanted class that is not the one we are on."""
     fits = [
-        c for c in CHIPS.values()
+        c
+        for c in CHIPS.values()
         if c.chip_class == want and c.trainable() and (exclude is None or c.name != exclude.name)
     ]
     return min(fits, key=lambda c: c.credits_per_hour) if fits else None
@@ -233,8 +249,11 @@ def _migration(name, src: ChipSpec, dst: ChipSpec, meta: dict, model) -> ActionR
         cal = calibrate.DEFAULTS.get(c.chip_class, calibrate.COLD_START)
         t = predict_t_step(cfg=cfg, model=model, chip=c, cal=cal)
         proj[label] = {
-            "chip": c.name, "chip_class": c.chip_class, "rate_per_hour": c.credits_per_hour,
-            "t_step_s": t, "cost_to_finish": t * meta.get("steps", 500) / 3600 * c.credits_per_hour,
+            "chip": c.name,
+            "chip_class": c.chip_class,
+            "rate_per_hour": c.credits_per_hour,
+            "t_step_s": t,
+            "cost_to_finish": t * meta.get("steps", 500) / 3600 * c.credits_per_hour,
         }
 
     # The number that actually decides. Cheapest per HOUR and cheapest per JOB
@@ -243,13 +262,16 @@ def _migration(name, src: ChipSpec, dst: ChipSpec, meta: dict, model) -> ActionR
     reason = (
         f"{dst.name} finishes the same 500 steps for "
         f"{proj['to']['cost_to_finish']:.2f} vs {proj['from']['cost_to_finish']:.2f} credits."
-        if cheaper else
-        f"{dst.name} costs more per job than {src.name}; migrating would not pay for itself."
+        if cheaper
+        else f"{dst.name} costs more per job than {src.name}; migrating would not pay for itself."
     )
     return ActionResult(
-        action=name, from_chip=src.name, to_chip=dst.name,
+        action=name,
+        from_chip=src.name,
+        to_chip=dst.name,
         decision={"migrate": cheaper, "waits_for_sync": True},
-        reason=reason, decided_by="rules",
+        reason=reason,
+        decided_by="rules",
         projection=proj,
         validation=_validation_for(dst),
     )
@@ -263,19 +285,26 @@ def _optimize_training(meta: dict, chip: ChipSpec, model) -> ActionResult:
 
     i = cands.index(d.config)
     return ActionResult(
-        action="optimize-training", from_chip=chip.name, to_chip=chip.name,
+        action="optimize-training",
+        from_chip=chip.name,
+        to_chip=chip.name,
         decision={
-            "dtype": d.config.dtype, "attention": d.config.attention,
-            "micro_batch": d.config.micro_batch, "grad_accum": d.config.grad_accum,
+            "dtype": d.config.dtype,
+            "attention": d.config.attention,
+            "micro_batch": d.config.micro_batch,
+            "grad_accum": d.config.grad_accum,
             "tokens_per_step": d.config.global_batch_tokens,
         },
-        reason=d.reason, decided_by=d.decided_by,
+        reason=d.reason,
+        decided_by=d.decided_by,
         projection={
             "candidates": [
                 {
-                    "micro_batch": c.micro_batch, "grad_accum": c.grad_accum,
+                    "micro_batch": c.micro_batch,
+                    "grad_accum": c.grad_accum,
                     "tokens_per_step": c.global_batch_tokens,
-                    "t_step_s": p.t_step_median_s, "peak_vram_gb": p.peak_vram_gb,
+                    "t_step_s": p.t_step_median_s,
+                    "peak_vram_gb": p.peak_vram_gb,
                     "chosen": k == i,
                 }
                 for k, (c, p) in enumerate(zip(cands, probes, strict=True))
@@ -292,7 +321,9 @@ def _optimize_inference(meta: dict, chip: ChipSpec, model) -> ActionResult:
     kv_per_seq = 2 * model.layers * model.d_model * 512 * 2
     free = (chip.vram_gb - model.params * 2 / 1e9) * 0.9
     return ActionResult(
-        action="optimize-inference", from_chip=chip.name, to_chip=chip.name,
+        action="optimize-inference",
+        from_chip=chip.name,
+        to_chip=chip.name,
         decision={"engine": "vLLM", "concurrency": 64, "ignore_eos": True, "max_tokens": 128},
         reason=(
             "Decode is memory-bound, so throughput comes from batching, not FLOPs. "
@@ -307,8 +338,10 @@ def _optimize_inference(meta: dict, chip: ChipSpec, model) -> ActionResult:
             "max_concurrent_seqs": int(free * 1e9 / kv_per_seq),
             "NOT_MEASURED": True,
         },
-        validation={"status": "not_built",
-                    "detail": "The inference axis has equations but no runner yet."},
+        validation={
+            "status": "not_built",
+            "detail": "The inference axis has equations but no runner yet.",
+        },
     )
 
 
@@ -325,7 +358,7 @@ def _validation_for(chip: ChipSpec) -> dict[str, Any]:
         return {
             "status": "pending",
             "detail": f"no {path.relative_to(ROOT)} — run scripts/evaluate.py on {chip.name} "
-                      f"with --compare eval/after.json",
+            f"with --compare eval/after.json",
         }
     if after is None:
         return {"status": "pending", "detail": "no baseline eval to compare against"}
@@ -336,9 +369,13 @@ def _validation_for(chip: ChipSpec) -> dict[str, Any]:
         "status": "ok" if ok else "regressed",
         "json_parse_rate": on_target["json_parse_rate"],
         "exact_match_rate": on_target["exact_match_rate"],
-        "delta_parse": dp, "delta_exact": de,
-        "detail": ("within tol=0.02 — the action preserved the model"
-                   if ok else "beyond tol=0.02 — the action broke the model"),
+        "delta_parse": dp,
+        "delta_exact": de,
+        "detail": (
+            "within tol=0.02 — the action preserved the model"
+            if ok
+            else "beyond tol=0.02 — the action broke the model"
+        ),
     }
     _ = before  # kept for symmetry with the CLI gate
 
@@ -365,6 +402,21 @@ class PodRequest(BaseModel):
     pod_id: str
 
 
+class ServeRequest(BaseModel):
+    pod_id: str
+    model_id: str
+    dtype: str = "bf16"
+
+
+class GenerateRequest(BaseModel):
+    sentence: str = Field(min_length=1, max_length=2000)
+    max_new_tokens: int = Field(default=64, ge=8, le=256)
+    # Greedy by default: a before/after comparison between two models has to
+    # vary the model and nothing else. Sampling would add a second source of
+    # difference and leave the viewer unable to say which one moved.
+    greedy: bool = True
+
+
 class MigrationRequest(BaseModel):
     source_pod_id: str
     target_pod_id: str
@@ -384,15 +436,44 @@ def build_app():
     def health():
         return {"ok": True}
 
+    @app.get("/api/models")
+    def models():
+        """What the chat box can point at, and what it is pointed at now."""
+        return {"models": available_models(), "serving": serving()}
+
+    @app.post("/api/serve")
+    def serve(req: ServeRequest):
+        try:
+            return start_inference_server(**req.model_dump()).public()
+        except JobError as e:
+            raise HTTPException(400, str(e)) from e
+
+    @app.post("/api/serve/stop")
+    def serve_stop():
+        return stop_inference_server()
+
+    @app.post("/api/generate")
+    def generate_one(req: GenerateRequest):
+        try:
+            return generate(**req.model_dump())
+        except JobError as e:
+            # 409: the request is fine, the server just is not holding a model.
+            raise HTTPException(409, str(e)) from e
+
     @app.get("/api/state")
     def state():
         return {
             "experiment": experiment(),
             "chips": [
                 {
-                    "name": c.name, "chip_class": c.chip_class, "vram_gb": c.vram_gb,
-                    "cc": c.cc, "tflops_bf16": c.tflops_bf16, "mem_bw_gbs": c.mem_bw_gbs,
-                    "rate_per_hour": c.credits_per_hour, "trainable": c.trainable(),
+                    "name": c.name,
+                    "chip_class": c.chip_class,
+                    "vram_gb": c.vram_gb,
+                    "cc": c.cc,
+                    "tflops_bf16": c.tflops_bf16,
+                    "mem_bw_gbs": c.mem_bw_gbs,
+                    "rate_per_hour": c.credits_per_hour,
+                    "trainable": c.trainable(),
                 }
                 for c in sorted(CHIPS.values(), key=lambda c: c.credits_per_hour)
             ],

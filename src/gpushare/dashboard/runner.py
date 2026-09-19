@@ -8,6 +8,7 @@ loaded into child-process environments but are never returned by the API.
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import json
 import math
@@ -37,6 +38,9 @@ LATEST_PATH = STATE_ROOT / "latest.json"
 REMOTE_ROOT = "/workspace/gpushare-ui"
 
 _POD_ID = re.compile(r"^[a-zA-Z0-9_-]{4,64}$")
+
+# Imported lazily-by-value so runner has no import cycle with agent.task.
+MODEL_ID_FOR_SERVE = "Qwen/Qwen2.5-0.5B"
 
 
 class JobError(RuntimeError):
@@ -1018,3 +1022,225 @@ def start_migration(*, kind: str, source_pod_id: str, target_pod_id: str) -> Job
         }
 
     return JOBS.create(kind, params, work)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Interactive inference: one resident model, reached through an SSH forward
+# ─────────────────────────────────────────────────────────────────────────────
+SERVE_PORT = 8100
+_serve_lock = threading.Lock()
+_serve: dict[str, Any] = {}
+
+
+def available_models() -> list[dict[str, Any]]:
+    """The three things a person actually wants to compare.
+
+    `base` is the untrained model and is listed first on purpose: it is the
+    control. A before/after claim with no before is not a claim, and the run we
+    have scores base at json_parse_rate 0.000 — which is what makes the trained
+    number mean anything.
+    """
+    out = [
+        {
+            "id": "base",
+            "label": "Qwen2.5-0.5B (before training)",
+            "ref": MODEL_ID_FOR_SERVE,
+            "kind": "base",
+            "detail": "has never seen the JSON format",
+        }
+    ]
+    latest = latest_run()
+    if latest and latest.get("remote_checkpoint"):
+        out.append(
+            {
+                "id": "finetuned",
+                "label": "fine-tuned (latest dashboard run)",
+                "ref": latest["remote_checkpoint"],
+                "kind": "finetuned",
+                "job_id": latest.get("job_id"),
+                "detail": "trained from this dashboard",
+            }
+        )
+    else:
+        # The first real 4090 experiment predates the UI and lives outside it.
+        out.append(
+            {
+                "id": "finetuned",
+                "label": "fine-tuned (first 4090 experiment)",
+                "ref": "/workspace/gpushare/ckpt/run",
+                "kind": "finetuned",
+                "legacy": True,
+                "detail": "500 steps, json_parse_rate 1.000 / exact_match 0.910",
+            }
+        )
+    return out
+
+
+def _model_ref(model_id: str, pod_id: str) -> str:
+    for m in available_models():
+        if m["id"] == model_id:
+            return m["ref"]
+    raise JobError(f"unknown model {model_id!r}")
+
+
+def _tunnel_up(timeout: float = 3.0) -> bool:
+    import urllib.error
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{SERVE_PORT}/health", timeout=timeout) as r:
+            return r.status == 200
+    except (urllib.error.URLError, OSError, TimeoutError):
+        return False
+
+
+def stop_inference_server() -> dict[str, Any]:
+    with _serve_lock:
+        for key in ("tunnel", "remote"):
+            proc = _serve.pop(key, None)
+            if proc is not None:
+                with contextlib.suppress(Exception):
+                    proc.terminate()
+        was = _serve.pop("model_id", None)
+        _serve.clear()
+    return {"stopped": was}
+
+
+def serving() -> dict[str, Any]:
+    """What the chat box is currently talking to, if anything."""
+    with _serve_lock:
+        if not _serve.get("model_id"):
+            return {"running": False}
+        return {
+            "running": _tunnel_up(timeout=1.0),
+            "model_id": _serve["model_id"],
+            "model_ref": _serve["model_ref"],
+            "pod_id": _serve["pod_id"],
+            "dtype": _serve["dtype"],
+        }
+
+
+def start_inference_server(*, pod_id: str, model_id: str, dtype: str = "bf16") -> Job:
+    """Load one model on the pod and hold it there.
+
+    Loading Qwen costs ten to twenty seconds. Paying that per message would
+    make the chat unusable AND would drown the latency number we want to show,
+    so the model stays resident and the dashboard reaches it over an SSH local
+    forward — the pod exposes port 22 and nothing else.
+    """
+    ref = _model_ref(model_id, pod_id)
+
+    def work(job: Job) -> dict[str, Any]:
+        stop_inference_server()
+        pod, info = _pod(pod_id), _ssh_info(pod_id)
+        JOBS.update(job, "syncing serve script", 10)
+        _sync_project(job, info)
+        JOBS.update(job, "preparing GPU environment", 25)
+        _setup_pod(job, info, pod["vendor"])
+
+        remote_ref = ref if ref.startswith("/") else ref
+        cmd = (
+            f'export PATH="$HOME/.local/bin:$PATH"; cd {shlex.quote(REMOTE_ROOT)}; '
+            f"pkill -f 'scripts/serve.py' 2>/dev/null; "
+            f"nohup uv run python scripts/serve.py --model {shlex.quote(remote_ref)} "
+            f"--dtype {shlex.quote(dtype)} --port {SERVE_PORT} "
+            f"> /tmp/serve.log 2>&1 & echo started"
+        )
+        JOBS.update(job, f"loading {model_id} on the GPU", 45)
+        _run(job, _ssh_args(info, cmd))
+
+        JOBS.update(job, "opening SSH forward", 65)
+        tunnel = subprocess.Popen(
+            [
+                "ssh",
+                "-i",
+                info["key"],
+                "-p",
+                str(info["port"]),
+                "-o",
+                "BatchMode=yes",
+                "-o",
+                "StrictHostKeyChecking=accept-new",
+                "-o",
+                "ExitOnForwardFailure=yes",
+                "-N",
+                "-L",
+                f"{SERVE_PORT}:127.0.0.1:{SERVE_PORT}",
+                f"root@{info['ip']}",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        # The model load dominates; poll rather than guess a sleep.
+        JOBS.update(job, "waiting for the model to finish loading", 80)
+        for _attempt in range(60):
+            if job.cancel_requested:
+                tunnel.terminate()
+                raise JobError("cancelled")
+            if _tunnel_up(timeout=2.0):
+                break
+            time.sleep(2)
+        else:
+            tunnel.terminate()
+            tail = _capture(_ssh_args(info, "tail -20 /tmp/serve.log"), timeout=20)
+            raise JobError(f"model never became ready. serve.log:\n{tail}")
+
+        with _serve_lock:
+            _serve.update(
+                tunnel=tunnel,
+                model_id=model_id,
+                model_ref=ref,
+                pod_id=pod_id,
+                dtype=dtype,
+            )
+        return {
+            "pod": pod,
+            "model_id": model_id,
+            "model_ref": ref,
+            "dtype": dtype,
+            "port": SERVE_PORT,
+        }
+
+    return JOBS.create("serve-model", {"pod_id": pod_id, "model_id": model_id}, work)
+
+
+def generate(*, sentence: str, max_new_tokens: int = 64, greedy: bool = True) -> dict[str, Any]:
+    """One interactive request against the resident model.
+
+    `latency_s` is what a person feels at batch 1. It is NOT evidence about the
+    inference optimization, which is a concurrency win — at batch 1 there is
+    nothing to batch. benchmark_inference.py is what measures that, at 64
+    concurrent, and the UI must keep the two claims apart.
+    """
+    import urllib.error
+    import urllib.request
+
+    with _serve_lock:
+        state = dict(_serve)
+    if not state.get("model_id"):
+        raise JobError("no model is loaded — start one from the model picker first")
+
+    body = json.dumps(
+        {"sentence": sentence, "max_new_tokens": max_new_tokens, "greedy": greedy}
+    ).encode()
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{SERVE_PORT}/generate",
+        data=body,
+        headers={"Content-Type": "application/json"},
+    )
+    started = time.perf_counter()
+    try:
+        with urllib.request.urlopen(req, timeout=120) as r:
+            out = json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        raise JobError(f"generate failed: {e.read().decode()[:300]}") from e
+    except (urllib.error.URLError, OSError, TimeoutError) as e:
+        raise JobError(f"the model server is unreachable ({e}); restart it") from e
+
+    # Server-side generation time vs what the round trip cost. Showing only the
+    # first would hide the SSH hop; showing only the second would blame the GPU
+    # for the network.
+    out["roundtrip_s"] = time.perf_counter() - started
+    out["model_id"] = state["model_id"]
+    return out

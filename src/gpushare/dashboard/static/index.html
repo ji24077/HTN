@@ -58,6 +58,24 @@
     .section-head h2 { margin: 0; font-size: 25px; letter-spacing: -.035em; }
     .section-head p { color: var(--muted); margin: 0; }
     .pipeline { grid-template-columns: repeat(3, 1fr); }
+    /* Playground ------------------------------------------------------- */
+    .play { grid-template-columns: 340px 1fr; align-items: start; }
+    .model-pick { display: grid; gap: 10px; }
+    .model-pick select, .model-pick textarea { width: 100%; background: #07100d; color: var(--ink); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
+    .model-pick textarea { min-height: 96px; resize: vertical; font: 13px/1.5 inherit; }
+    .serving-pill { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 999px; padding: 7px 12px; font-size: 12px; color: var(--muted); }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 2px; }
+    .chip { border: 1px solid var(--line); background: rgba(7,16,13,.6); color: var(--muted); border-radius: 999px; padding: 5px 10px; font-size: 12px; }
+    .chip:hover { color: var(--ink); border-color: var(--mint-2); }
+    .io { display: grid; gap: 10px; }
+    .verdict { display: inline-flex; align-items: center; gap: 7px; border-radius: 999px; padding: 5px 11px; font-size: 12px; font-weight: 750; border: 1px solid var(--line); }
+    .verdict.ok { color: var(--mint); border-color: rgba(124,242,181,.45); }
+    .verdict.bad { color: var(--red); border-color: rgba(255,123,120,.45); }
+    .latency { display: flex; gap: 18px; flex-wrap: wrap; color: var(--muted); font-size: 12px; }
+    .latency b { color: var(--ink); font: 700 15px/1 ui-monospace, Menlo, monospace; display: block; margin-top: 3px; }
+    .caveat { border-left: 2px solid var(--amber); padding: 8px 0 8px 12px; color: var(--muted); font-size: 12.5px; margin-top: 12px; }
+    .caveat b { color: var(--amber); }
+
     .step { position: relative; overflow: hidden; min-height: 336px; display: flex; flex-direction: column; }
     .step-no { color: var(--mint); font: 800 12px ui-monospace, monospace; margin-bottom: 14px; }
     .step p { color: var(--muted); }
@@ -191,6 +209,41 @@
     </section>
     <section id="samples" class="samples"></section>
 
+
+    <div class="section-head">
+      <div><div class="eyebrow">Try it yourself</div><h2>모델에 직접 물어보기</h2></div>
+      <p>학습 전 모델과 학습 후 모델에 같은 문장을 넣어 보세요.</p>
+    </div>
+    <section class="grid play">
+      <div class="card model-pick">
+        <div class="label">Model</div>
+        <select id="modelSelect"></select>
+        <div class="label" style="margin-top:6px">Pod</div>
+        <select id="servePod"></select>
+        <button class="primary" id="loadModel">이 모델 GPU에 올리기</button>
+        <div class="serving-pill" id="servingPill"><span class="dot off"></span>모델 없음</div>
+        <button id="stopModel" style="background:none;border:1px solid var(--line);color:var(--muted);border-radius:12px;padding:8px">내리기</button>
+      </div>
+      <div class="card io">
+        <div class="label">Input sentence</div>
+        <div class="chips" id="exampleChips"></div>
+        <textarea id="sentence" placeholder="Sarah Chen, 34, joined Anthropic in 2023 as a research engineer."></textarea>
+        <button class="primary" id="runGenerate">추출 실행</button>
+        <div class="label" style="margin-top:4px">Raw output</div>
+        <div class="code" id="genRaw">—</div>
+        <div class="label">Parsed</div>
+        <div class="code" id="genParsed">—</div>
+        <div id="genVerdict"></div>
+        <div class="latency" id="genLatency"></div>
+        <div class="caveat">
+          <b>이 지연 시간은 추론 최적화의 증거가 아닙니다.</b>
+          여기는 동시 요청 1건입니다. 배치 최적화의 이득은 동시성에서 나오므로
+          batch 1에서는 배치할 것이 없습니다. 처리량은 아래 &ldquo;추론 최적화&rdquo;
+          액션이 동시 64건으로 측정합니다.
+        </div>
+      </div>
+    </section>
+
     <div class="section-head">
       <div><div class="eyebrow">Human-triggered / machine-verified</div><h2>에이전트 액션</h2></div>
       <p>결정은 사용자가 시작하고, 결과 검증은 자동입니다.</p>
@@ -293,6 +346,8 @@
     }
 
     function renderPods() {
+      $('servePod').innerHTML = podOptions();
+      $('loadModel').disabled = !$('servePod').value;
       $('trainPod').innerHTML = podOptions();
       $('trainingOptPod').innerHTML = podOptions();
       $('inferenceOptPod').innerHTML = podOptions();
@@ -311,7 +366,7 @@
     async function load() {
       try {
         const [state, podData, jobData] = await Promise.all([api('/api/state'), api('/api/pods'), api('/api/jobs')]);
-        renderState(state); pods = podData.pods; renderPods();
+        renderState(state); pods = podData.pods; renderPods(); loadModels();
         $('healthText').textContent = `${pods.filter(p=>p.status==='running').length}개 RunPod 연결`;
         $('healthDot').className = 'dot';
         const live = jobData.jobs.find(j => ['running','queued','cancelling'].includes(j.status));
@@ -362,6 +417,88 @@
     $('migrateNextBtn').onclick = () => start('/api/jobs/action/migrate-nextgen', {source_pod_id:$('nextSource').value, target_pod_id:$('nextTarget').value});
     $('resultsBtn').onclick = () => $('results').scrollIntoView({behavior:'smooth'});
     $('cancelBtn').onclick = async () => { if (activeJob) await api(`/api/jobs/${activeJob}/cancel`, {method:'POST'}); };
+    // ── Playground ────────────────────────────────────────────────────────
+    const EXAMPLES = [
+      "Sarah Chen, 34, joined Anthropic in 2023 as a research engineer.",
+      "It was in 1996 that Bogdan Ionescu, then 38, started working as a loan officer for Carpathian Savings Bank.",
+      "The startup NeuralLoop hired 24-year-old Kwame Mensah as a machine learning engineer back in 2021.",
+    ];
+
+    function renderServing(info) {
+      const pill = $('servingPill');
+      if (info && info.running) {
+        pill.innerHTML = `<span class="dot"></span>${e(info.model_id)} 상주 중 · ${e(info.dtype)}`;
+      } else if (info && info.model_id) {
+        // A recorded model with a dead tunnel is not "loaded"; saying so would
+        // make the next generate call fail with no explanation.
+        pill.innerHTML = `<span class="dot off"></span>${e(info.model_id)} 연결 끊김 — 다시 올리세요`;
+      } else {
+        pill.innerHTML = '<span class="dot off"></span>모델 없음';
+      }
+    }
+
+    async function loadModels() {
+      try {
+        const data = await api('/api/models');
+        $('modelSelect').innerHTML = data.models
+          .map(m => `<option value="${e(m.id)}">${e(m.label)}</option>`).join('');
+        renderServing(data.serving);
+      } catch (err) { toast(err.message, true); }
+    }
+
+    function renderGenerate(out) {
+      $('genRaw').textContent = out.raw_output || '(빈 출력)';
+      $('genParsed').textContent = out.parsed ? JSON.stringify(out.parsed, null, 2) : '파싱 실패';
+      // Icon + word, never colour alone.
+      $('genVerdict').innerHTML = out.parsed_ok
+        ? '<span class="verdict ok">&#10003; 유효한 JSON · 필수 키 전부</span>'
+        : '<span class="verdict bad">&#10007; 스키마 불일치</span>';
+      $('genLatency').innerHTML = `
+        <div>생성 시간<b>${out.latency_s.toFixed(2)}s</b></div>
+        <div>왕복 포함<b>${out.roundtrip_s.toFixed(2)}s</b></div>
+        <div>새 토큰<b>${out.new_tokens}</b></div>
+        <div>토큰/초 (batch 1)<b>${out.tokens_per_s.toFixed(1)}</b></div>
+        <div>모델<b>${e(out.model_id)}</b></div>`;
+    }
+
+    $('exampleChips').innerHTML = EXAMPLES
+      .map((t,i) => `<button class="chip" data-i="${i}">예문 ${i+1}</button>`).join('');
+    $('exampleChips').onclick = ev => {
+      const i = ev.target.dataset.i;
+      if (i !== undefined) $('sentence').value = EXAMPLES[+i];
+    };
+
+    $('loadModel').onclick = async () => {
+      const pod = $('servePod').value;
+      if (!pod) return toast('실행 중인 Pod이 없습니다', true);
+      await start('/api/serve', {pod_id: pod, model_id: $('modelSelect').value, dtype: 'bf16'});
+      // The load takes 10-20s on the pod; refresh the pill once it settles.
+      setTimeout(loadModels, 4000);
+    };
+
+    $('stopModel').onclick = async () => {
+      try { await api('/api/serve/stop', {method:'POST'}); await loadModels(); }
+      catch (err) { toast(err.message, true); }
+    };
+
+    $('runGenerate').onclick = async () => {
+      const sentence = $('sentence').value.trim();
+      if (!sentence) return toast('문장을 입력하세요', true);
+      const btn = $('runGenerate');
+      btn.disabled = true; btn.textContent = '생성 중...';
+      try {
+        renderGenerate(await api('/api/generate', {method:'POST', body:JSON.stringify({sentence})}));
+      } catch (err) {
+        toast(err.message, true);
+      } finally {
+        btn.disabled = false; btn.textContent = '추출 실행';
+      }
+    };
+
+    $('sentence').addEventListener('keydown', ev => {
+      if ((ev.metaKey || ev.ctrlKey) && ev.key === 'Enter') $('runGenerate').click();
+    });
+
     load();
   </script>
 </body>
