@@ -90,7 +90,7 @@ public enum Capability {
         guard result == KERN_SUCCESS else {
             return Int(ProcessInfo.processInfo.physicalMemory / 1024 / 1024 / 4)
         }
-        let pageSize = UInt64(vm_kernel_page_size)
+        let pageSize = UInt64(sysconf(Int32(_SC_PAGESIZE)))
         let free = (UInt64(stats.free_count) + UInt64(stats.inactive_count)) * pageSize
         return Int(free / 1024 / 1024)
         #endif

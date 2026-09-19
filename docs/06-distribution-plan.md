@@ -117,10 +117,51 @@ Windows         irm https://your-address/install.ps1 | iex
 No Node, no pnpm, no folder. Bundling the runtime also **removes the Node 24 floor**,
 which is what currently excludes older machines.
 
-**Known risk, to spike before committing:** ONNX Runtime is a native `.node` addon, and
-those do not embed cleanly into a true single file. The realistic shape is a small
-executable plus a sidecar folder, shipped as one archive. This needs proving early
-because it changes the packaging design.
+### Spike result — run, not guessed
+
+**The lean agent compiles to a working single binary. Machine learning does not.**
+
+Built with `bun build --compile`, and tested by pairing it against a live server from an
+otherwise empty directory:
+
+| Target | Size | Result |
+| --- | --- | --- |
+| macOS arm64 | 59 MB | pairs, connects, runs walker work |
+| Linux x64 / arm64 | 95 MB | cross-compiled from macOS |
+| Windows x64 | 111 MB | cross-compiled from macOS |
+
+Cross-compilation from one machine means **no CI matrix is needed** to produce all three.
+
+**Machine learning is the exception, and the reason is specific.** Bun does embed the
+`.node` addon and extracts it at runtime — the failure is one layer down:
+
+```
+dlopen(...onnxruntime_binding.node): Library not loaded: @rpath/libonnxruntime.1.dylib
+```
+
+The addon is embedded; its companion shared library is not, and `@rpath` resolves
+relative to the extracted temporary file. Making that work means per-platform library
+surgery — `install_name_tool` on macOS, `patchelf` on Linux, DLL search paths on Windows
+— which is fragile and permanent maintenance.
+
+Attempts that did not work, for the record: marking the package external and placing a
+sidecar `node_modules` beside the binary fails because a compiled binary resolves modules
+against its embedded bundle, not the working directory. `createRequire` anchored in the
+sidecar fails the same way.
+
+### What this means for Phase 3
+
+Two distributions, split along the line the spike drew:
+
+- **Single binary — the default.** One download, no Node, no pnpm, no folder. Covers
+  `echo`, the walker, and any future pure-JavaScript workload. This is what most people
+  get, and it removes every prerequisite.
+- **Node install — for machines doing ML or browser work.** Already 11 MB with opt-in
+  extras, and already updates itself. Unchanged.
+
+Shipping the native libraries properly belongs to the **installer** in Phase 4, which
+lays files down in a known location rather than extracting them to a temporary path. That
+is the right place to solve it, not a workaround bolted onto a single file.
 
 ## Phase 4 — Desktop app
 
