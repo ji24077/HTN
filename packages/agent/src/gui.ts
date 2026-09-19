@@ -367,10 +367,11 @@ async function api(path, body) {
 /**
  * Careful with backslash escapes below this point.
  *
- * Everything from here to </script> is inside a TypeScript template literal, so a \n
- * written here is consumed at build time and emitted as a real newline in the page. In
- * an ordinary JS string literal that is a syntax error, and one is enough to stop the
- * entire inline script parsing -- which does not look like a syntax error to a user. It
+ * Everything from here to the end of the page script is inside a TypeScript template
+ * literal, so a \n written here is consumed at build time and emitted as a real
+ * newline in the page. In an ordinary JS string literal that is a syntax error, and one
+ * is enough to stop the entire inline script parsing -- which does not look like a
+ * syntax error to a user. It
  * looks like an app frozen on "starting…", because no script ran at all to replace the
  * placeholder. Write \\n to emit an escape rather than a line break.
  */
