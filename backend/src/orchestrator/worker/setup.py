@@ -187,6 +187,67 @@ def keep_profile(fd, output, profile, worker_id):
     return True
 
 
+def reserve_profile(output):
+    """Exclusively create a profile and retain its identity until setup finishes."""
+    if os.name != "nt":
+        return os.open(output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    create = kernel.CreateFileW
+    create.argtypes = [
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.HANDLE,
+    ]
+    create.restype = wintypes.HANDLE
+    # CREATE_NEW is O_EXCL. Request DELETE access so cleanup can delete this exact
+    # file by handle, while withholding FILE_SHARE_DELETE prevents path replacement.
+    handle = create(str(output), 0x40000000 | 0x00010000, 0x1 | 0x2, None, 1, 0x80, None)
+    if handle == ctypes.c_void_p(-1).value:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        return msvcrt.open_osfhandle(handle, os.O_WRONLY | os.O_BINARY)
+    except BaseException:
+        close = kernel.CloseHandle
+        close.argtypes = [wintypes.HANDLE]
+        close.restype = wintypes.BOOL
+        close(handle)
+        raise
+
+
+def discard_profile(fd, output):
+    """Remove only our reserved file; Windows deletes it when its handle closes."""
+    try:
+        reserved, current = os.fstat(fd), os.lstat(output)
+    except OSError:
+        return
+    if (current.st_dev, current.st_ino) != (reserved.st_dev, reserved.st_ino):
+        return
+    if os.name != "nt":
+        output.unlink(missing_ok=True)
+        return
+
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    dispose = kernel.SetFileInformationByHandle
+    dispose.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
+    dispose.restype = wintypes.BOOL
+    delete = ctypes.c_bool(True)  # FILE_DISPOSITION_INFO.DeleteFile is a BOOLEAN.
+    if not dispose(msvcrt.get_osfhandle(fd), 4, ctypes.byref(delete), ctypes.sizeof(delete)):
+        raise ctypes.WinError(ctypes.get_last_error())
+
+
 def worker_environment(data, directory, helper):
     worker_id = data["worker_id"]
     # Validate before using remotely supplied names in filesystem paths.
@@ -218,19 +279,22 @@ def worker_environment(data, directory, helper):
 async def setup(args):
     origin = https_origin(args.server)
     helper = args.helper or os.getenv("TAILSCALE_HELPER") or shutil.which("orchestrator-tunnel")
-    if not helper or not Path(helper).is_file():
+    if not helper:
         raise SetupError("Bundled tunnel missing. Specify --helper .local/bin/orchestrator-tunnel")
     output = Path(args.output).expanduser().absolute()
+    # Reject unrepresentable paths before querying the filesystem: Windows rejects
+    # newline filenames itself, but setup should report the same error on every OS.
+    for local in (str(Path(helper).resolve()), str(output.parent.resolve())):
+        dotenv_quote(local)
+    if not Path(helper).is_file():
+        raise SetupError("Bundled tunnel missing. Specify --helper .local/bin/orchestrator-tunnel")
     if output.exists() or output.is_symlink():
         raise SetupError(
             "Worker config already exists; choose a new --output or run the existing worker"
         )
-    # Refuse local paths the profile cannot hold before enrolling anything.
-    for local in (str(Path(helper).resolve()), str(output.parent.resolve())):
-        dotenv_quote(local)
     output.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     # Reserve the file before creating an enrollment; never overwrite an existing identity.
-    fd = os.open(output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    fd = reserve_profile(output)
     saved = False
     try:
         email = args.email or input("Supabase account email: ").strip()
@@ -289,15 +353,10 @@ async def setup(args):
     finally:
         try:
             if not saved:
-                # A failed recovery may have detected a replacement. Only remove the
-                # file we reserved, and keep its descriptor open until after the check.
-                try:
-                    reserved, current = os.fstat(fd), os.lstat(output)
-                except OSError:
-                    pass  # If ownership cannot be established, leave the path alone.
-                else:
-                    if (current.st_dev, current.st_ino) == (reserved.st_dev, reserved.st_ino):
-                        output.unlink(missing_ok=True)
+                # Keep the descriptor open through the ownership check. On Windows,
+                # pathname unlink fails while open; deletion by handle avoids both
+                # that failure and any close-then-unlink race against a replacement.
+                discard_profile(fd, output)
         finally:
             os.close(fd)
 

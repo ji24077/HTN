@@ -1,5 +1,6 @@
 """Dashboard assets and authenticated browser sessions."""
 
+import os
 import re
 import time
 from importlib.resources import files
@@ -59,6 +60,21 @@ async def auth_config(request: Request):
     config = request.app.state.config
     return JSONResponse(
         {"url": config.supabase_url, "publishableKey": config.supabase_publishable_key},
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@router.get("/telemetry/config")
+async def telemetry_config(request: Request):
+    """Browser Sentry settings; a DSN is a public ingest address, not a credential."""
+    if not (local_demo(request) or public_dashboard(request)):
+        raise HTTPException(status_code=404)
+    return JSONResponse(
+        {
+            "dsn": os.getenv("SENTRY_FRONTEND_DSN", ""),
+            "environment": os.getenv("SENTRY_ENVIRONMENT", "development"),
+            "release": os.getenv("SENTRY_RELEASE", ""),
+        },
         headers={"Cache-Control": "no-store"},
     )
 

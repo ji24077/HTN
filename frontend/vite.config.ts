@@ -31,11 +31,24 @@ export default defineConfig(({ mode }) => {
             }
           : undefined,
       strictPort: true,
-      proxy: { "/v1": proxy, "/demo/session": proxy, "/auth": proxy },
+      proxy: {
+        "/v1": proxy,
+        "/demo/session": proxy,
+        "/auth": proxy,
+        "/telemetry": proxy,
+        "/hosts": proxy,
+        "/agent": { ...proxy, ws: true },
+        "/release": proxy,
+        "/artifacts": proxy,
+        "/download": proxy,
+        "/join": proxy,
+      },
     },
     build: {
       outDir: "../backend/src/orchestrator/server/web",
       emptyOutDir: true,
+      // Maps are uploaded to Sentry; the backend only serves .js and .css assets.
+      sourcemap: "hidden",
     },
     test: {
       environment: "jsdom",

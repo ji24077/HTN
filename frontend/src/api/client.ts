@@ -275,6 +275,46 @@ export const cancelTask = (id: string) =>
   request<Task>(`/v1/tasks/${encodeURIComponent(id)}/cancel`, {
     method: "POST",
   });
+export const createDeviceInvite = () =>
+  request<{ code: string; expires_in: number; server: string }>(
+    "/v1/device-invites",
+    { method: "POST" },
+  );
+
+export type WorkloadKind =
+  "stub" | "echo" | "walker_evolution" | "cpu_inference_batch";
+
+export async function workloadTask(
+  kind: WorkloadKind,
+  label: string,
+  target: string,
+  seconds: number,
+  failover: boolean,
+): Promise<TaskSpec> {
+  const task = stubTask(label, target, seconds, failover);
+  task.kind = kind;
+  if (kind === "echo") task.payload = { nonce: label, sleepMs: 1000 };
+  if (kind === "walker_evolution") {
+    task.payload = {
+      generation: 0,
+      parent: Array(308).fill(0),
+      sigma: 0.1,
+      seeds: [1, 2, 3, 4, 5, 6, 7, 8],
+      steps: 600,
+    };
+    task.timeout_seconds = 120;
+  }
+  if (kind === "cpu_inference_batch") {
+    const catalog = await request<{
+      inference: Record<string, unknown> | null;
+    }>("/v1/workloads");
+    if (!catalog.inference)
+      throw new Error("The server has no inference model configured.");
+    task.payload = catalog.inference;
+    task.timeout_seconds = 300;
+  }
+  return task;
+}
 export function stubTask(
   label: string,
   target: string,

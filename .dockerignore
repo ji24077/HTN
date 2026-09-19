@@ -11,6 +11,8 @@
 !transport/tailscale/*.go
 !transport/tailscale/go.mod
 !transport/tailscale/go.sum
+!fixtures/
+!fixtures/**
 frontend/node_modules/
 frontend/coverage/
 backend/src/orchestrator/server/web/

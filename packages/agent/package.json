@@ -1,0 +1,16 @@
+{
+  "name": "@dwp/agent",
+  "version": "0.4.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@sentry/node": "10.75.0",
+    "@dwp/protocol": "workspace:*",
+    "ws": "8.21.3",
+    "zod": "4.6.5",
+    "undici": "7.18.0"
+  }
+}

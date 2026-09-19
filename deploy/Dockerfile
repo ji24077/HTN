@@ -29,6 +29,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 WORKDIR /app
 COPY --from=build --chown=10001:10001 /app/.venv /app/.venv
 COPY --from=tunnel /orchestrator-tunnel /usr/local/bin/orchestrator-tunnel
+COPY --chown=10001:10001 fixtures /app/fixtures
+ENV DWP_FIXTURES_DIR=/app/fixtures DWP_RELEASES_DIR=/app/releases
 ENV PATH="/app/.venv/bin:$PATH" PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 ENV PUBLIC_BIND_HOST=0.0.0.0 TAILSCALE_STATE_DIR=/state TAILSCALE_HOSTNAME=orch-backend
 USER 10001:10001

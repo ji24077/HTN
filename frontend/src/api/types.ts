@@ -35,6 +35,7 @@ export interface Task {
   created_at: string;
   progress: number;
   started_at: string | null;
+  attestation?: Record<string, unknown> | null;
 }
 export interface AuditEvent {
   id: number;

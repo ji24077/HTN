@@ -19,20 +19,21 @@ from uuid import uuid4
 
 import httpx
 from fastapi import HTTPException
-
-import orchestrator
 from fastapi.testclient import TestClient
 
+import orchestrator
 from orchestrator.server.app import create_public_app, create_worker_app
 from orchestrator.server.db.store import Conflict, EnrollmentLimit, NotFound
 from orchestrator.server.enrollment import EnrollmentUnavailable, TailscaleEnrollment
 from orchestrator.worker.setup import (
     SetupError,
+    discard_profile,
     dotenv_quote,
     enrollment_error,
     finish_cleanup,
     https_origin,
     login_and_enroll,
+    reserve_profile,
     setup,
     withdraw_enrollment,
     worker_environment,
@@ -250,6 +251,63 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
 
 
 class SetupTests(unittest.IsolatedAsyncioTestCase):
+    def assert_profile_permissions(self, output):
+        if os.name == "posix":
+            self.assertEqual(output.stat().st_mode & 0o777, 0o600)
+        else:
+            # Windows inherits the containing directory's ACL; stat() mode bits
+            # cannot describe its owner/group access policy.
+            self.assertTrue(os.access(output, os.R_OK | os.W_OK))
+
+    def test_profile_reservation_never_overwrites_existing_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "worker.env"
+            output.write_text("existing identity")
+            with self.assertRaises(OSError):
+                reserve_profile(output)
+            self.assertEqual(output.read_text(), "existing identity")
+
+    def test_discard_reserved_profile_removes_it_after_handle_closes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "worker.env"
+            fd = reserve_profile(output)
+            try:
+                os.write(fd, b"unfinished profile")
+                discard_profile(fd, output)
+            finally:
+                os.close(fd)
+            self.assertFalse(output.exists())
+
+    def test_successful_reservation_keeps_complete_profile_after_close(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "worker.env"
+            fd = reserve_profile(output)
+            try:
+                os.write(fd, b"WORKER_ID=worker-test\n")
+            finally:
+                os.close(fd)
+            self.assertEqual(output.read_text(), "WORKER_ID=worker-test\n")
+            self.assert_profile_permissions(output)
+
+    @unittest.skipUnless(os.name == "nt", "Windows reserves file deletion by handle")
+    def test_windows_reservation_blocks_path_replacement(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "worker.env"
+            replacement = Path(directory) / "replacement.env"
+            replacement.write_text("unrelated identity")
+            fd = reserve_profile(output)
+            try:
+                with self.assertRaises(PermissionError):
+                    output.unlink()
+                with self.assertRaises(PermissionError):
+                    os.replace(replacement, output)
+                self.assertEqual(replacement.read_text(), "unrelated identity")
+                discard_profile(fd, output)
+            finally:
+                os.close(fd)
+            self.assertFalse(output.exists())
+            self.assertEqual(replacement.read_text(), "unrelated identity")
+
     async def test_setup_saves_private_profile_after_join_without_secret_keys(self):
         with tempfile.TemporaryDirectory() as directory:
             helper = Path(directory) / "helper"
@@ -284,7 +342,7 @@ class SetupTests(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn("TS_AUTHKEY", os.environ)
                 with self.assertRaises(SetupError):
                     await setup(args)
-            self.assertEqual(output.stat().st_mode & 0o777, 0o600)
+            self.assert_profile_permissions(output)
             text = output.read_text()
             self.assertIn("WORKER_TOKEN=", text)
             for secret in (
@@ -372,11 +430,11 @@ class SetupTests(unittest.IsolatedAsyncioTestCase):
                 ),
                 patch.dict(os.environ, {}, clear=True),
                 contextlib.redirect_stderr(io.StringIO()) as stderr,
+                self.assertRaises(RuntimeError),
             ):
-                with self.assertRaises(RuntimeError):
-                    await setup(args)
+                await setup(args)
             self.assertIn("Kept", stderr.getvalue())
-            self.assertEqual(output.stat().st_mode & 0o777, 0o600)
+            self.assert_profile_permissions(output)
             text = output.read_text()
             self.assertIn("WORKER_TOKEN=", text)
             for secret in ("tskey-auth-sensitive", "private-password", "private-session"):
@@ -385,7 +443,8 @@ class SetupTests(unittest.IsolatedAsyncioTestCase):
     async def test_setup_rejects_unrepresentable_paths_before_enrolling(self):
         with tempfile.TemporaryDirectory() as directory:
             helper = Path(directory) / "hel\nper"
-            helper.touch()
+            if os.name != "nt":
+                helper.touch()
             output = Path(directory) / "worker.env"
             args = SimpleNamespace(
                 server=ORIGIN,
@@ -397,9 +456,11 @@ class SetupTests(unittest.IsolatedAsyncioTestCase):
                 no_start=True,
             )
             login = AsyncMock()
-            with patch("orchestrator.worker.setup.login_and_enroll", new=login):
-                with self.assertRaises(SetupError):
-                    await setup(args)
+            with (
+                patch("orchestrator.worker.setup.login_and_enroll", new=login),
+                self.assertRaises(SetupError),
+            ):
+                await setup(args)
             login.assert_not_awaited()
             self.assertFalse(output.exists())
 
@@ -519,13 +580,13 @@ except KeyboardInterrupt:
                 ),
                 patch.dict(os.environ, {}, clear=True),
                 contextlib.redirect_stderr(io.StringIO()) as stderr,
+                self.assertRaises(OSError),
             ):
-                with self.assertRaises(OSError):
-                    await setup(args)
+                await setup(args)
             self.assertEqual(len(calls), 2)
             self.assertIn("may still be enrolled", stderr.getvalue())
             self.assertIn("WORKER_TOKEN=", output.read_text())
-            self.assertEqual(output.stat().st_mode & 0o777, 0o600)
+            self.assert_profile_permissions(output)
 
     async def test_recovery_never_writes_through_a_replaced_profile_path(self):
         await self._assert_replacement_preserved(symlink=True, released=False)
@@ -561,6 +622,7 @@ except KeyboardInterrupt:
                 "server_url": "wss://backend.example.ts.net:8443/v1/worker",
             }
             real_fdopen = os.fdopen
+            replacement_blocked = False
 
             class Swapped:
                 def __init__(self, stream):
@@ -574,7 +636,16 @@ except KeyboardInterrupt:
 
                 def write(self, text):
                     # Between reservation and the write, an attacker points the path elsewhere.
-                    output.unlink()
+                    nonlocal replacement_blocked
+                    try:
+                        output.unlink()
+                    except PermissionError:
+                        if os.name != "nt":
+                            raise
+                        # Windows refuses the attack while the reservation is held;
+                        # still simulate the failed profile write and exercise recovery.
+                        replacement_blocked = True
+                        raise OSError("disk full") from None
                     if symlink:
                         output.symlink_to(victim)
                     else:
@@ -605,9 +676,18 @@ except KeyboardInterrupt:
                 ),
                 patch.dict(os.environ, {}, clear=True),
                 contextlib.redirect_stderr(io.StringIO()) as stderr,
+                self.assertRaises(OSError),
             ):
-                with self.assertRaises(OSError):
-                    await setup(args)
+                await setup(args)
+            if os.name == "nt":
+                self.assertTrue(replacement_blocked)
+                self.assertEqual(victim.read_text(), "untouched")
+                if released:
+                    self.assertFalse(output.exists())
+                else:
+                    self.assertIn("Kept", stderr.getvalue())
+                    self.assertIn("WORKER_TOKEN=", output.read_text())
+                return
             if not released:
                 self.assertIn("Could not keep", stderr.getvalue())
             self.assertEqual(output.read_text(), "untouched")
@@ -646,6 +726,7 @@ except KeyboardInterrupt:
     def test_profile_values_round_trip_through_uv_env_file(self):
         values = {
             "TAILSCALE_HELPER": "/Users/José/tools/$HOME/orchestrator-tunnel",
+            "TAILSCALE_STATE_DIR": r"C:\Users\José\tools\$HOME\tailscale",
             "WORKER_TOKEN": 'q"uo\\te\\\\${HOME}',
             "SERVER_URL": "wss://backend.example.ts.net:8443/v1/worker",
         }
@@ -659,10 +740,12 @@ except KeyboardInterrupt:
                     "uv",
                     "run",
                     "--no-project",
+                    "--no-cache",
+                    "--offline",
                     "--python",
                     sys.executable,
                     "--env-file",
-                    str(profile),
+                    profile.as_posix(),
                     "python",
                     "-c",
                     "import json,os,sys;print(json.dumps({k: os.environ[k] for k in sys.argv[1:]}))",
@@ -670,9 +753,10 @@ except KeyboardInterrupt:
                 ],
                 capture_output=True,
                 text=True,
-                check=True,
+                check=False,
                 cwd=directory,
             )
+        self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), values)
         with self.assertRaises(SetupError):
             dotenv_quote("a\nb")
@@ -753,12 +837,14 @@ class DynamicWorkerTests(unittest.TestCase):
             await socket.send_json({"authenticated": True})
             await socket.close()
 
-        with patch("orchestrator.server.app.serve_worker", side_effect=connected):
-            with TestClient(app).websocket_connect(
+        with (
+            patch("orchestrator.server.app.serve_worker", side_effect=connected),
+            TestClient(app).websocket_connect(
                 "/v1/worker",
                 headers={"X-Worker-ID": "worker-new", "Authorization": "Bearer test-worker-secret"},
-            ) as socket:
-                self.assertTrue(socket.receive_json()["authenticated"])
+            ) as socket,
+        ):
+            self.assertTrue(socket.receive_json()["authenticated"])
         app.state.store.worker_authorized.assert_awaited_once_with(
             "worker-new", "Bearer test-worker-secret"
         )

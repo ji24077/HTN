@@ -1,0 +1,24 @@
+{
+  "name": "mnist-handwritten-digits",
+  "model": {
+    "hash": "2f06e72de813a8635c9bc0397ac447a601bdbfa7df4bebc278723b958831c9bf",
+    "bytes": 26454,
+    "source": "onnx/models mnist-8",
+    "inputName": "Input3",
+    "outputName": "Plus214_Output_0"
+  },
+  "inputs": {
+    "hash": "d286b924edbac025b0589550629f0330056e774e961c0520868996833a11d519",
+    "bytes": 7850008,
+    "count": 10000,
+    "shape": [
+      1,
+      1,
+      28,
+      28
+    ],
+    "note": "MNIST test split, pixels then labels"
+  },
+  "preprocessing": "v1: uint8 pixel / 255",
+  "builtAt": "2026-09-19T00:40:07.496Z"
+}

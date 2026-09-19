@@ -148,3 +148,14 @@ subprocess that receives two real SIGINTs under `asyncio.run`; the optional
 PostgreSQL integration test passes with expiry, key retention, withdrawal retry,
 and post-withdrawal registration checks; 19 frontend tests, TypeScript,
 Prettier, and ruff pass.
+
+## Combined device and Sentry integration
+
+Jack's desktop/iOS runtime now uses the Python scheduler and private database schema.
+The combined Windows check runs 100 Python tests: 97 pass; the two opt-in integration
+checks and a POSIX SIGINT test are skipped in default discovery. Both integration checks
+pass when enabled, including a real Node worker and native ONNX inference (10/10 MNIST
+inputs correct). The frontend has 23 passing tests and the desktop/protocol packages have
+16. Typechecks, frontend and Python builds, and Ruff pass. Windows enrollment cleanup and
+tunnel fixtures are now portable. See [the integration review](pr3-review.md) for findings,
+fixes, and the remaining hardware/deployment validation limits.

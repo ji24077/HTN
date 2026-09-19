@@ -5,11 +5,12 @@ import {
   cancelTask,
   logout,
   openSession,
-  stubTask,
+  workloadTask,
   submitTasks,
 } from "./api/client";
 import type { Task, TaskSpec } from "./api/types";
 import { ActivityFeed } from "./components/ActivityFeed";
+import { DeviceInvite } from "./components/DeviceInvite";
 import { Login } from "./components/Login";
 import { TaskComposer } from "./components/TaskComposer";
 import { TaskDetails } from "./components/TaskDetails";
@@ -161,7 +162,11 @@ function FleetApp({
   }
   const fleetSize = snapshot.workers.length;
   const availableWorkers = snapshot.workers.filter(
-    (worker) => healthy(worker) && !worker.paused,
+    (worker) =>
+      healthy(worker) &&
+      !worker.paused &&
+      (worker.capabilities.kinds.includes("stub") ||
+        worker.capabilities.kinds.includes("echo")),
   );
   const metrics = [
     {
@@ -269,18 +274,22 @@ function FleetApp({
               className="outline-btn"
               id="pair-button"
               disabled={busy || availableWorkers.length === 0}
-              onClick={() =>
-                void submit(
+              onClick={async () => {
+                const tasks = await Promise.all(
                   availableWorkers.map((worker) =>
-                    stubTask(
+                    workloadTask(
+                      worker.capabilities.kinds.includes("echo")
+                        ? "echo"
+                        : "stub",
                       `Connection test · ${workerName(worker.id)}`,
                       worker.id,
                       30,
                       true,
                     ),
                   ),
-                )
-              }
+                );
+                void submit(tasks);
+              }}
             >
               <span aria-hidden="true">⇉</span> Run one on each
             </button>
@@ -306,6 +315,7 @@ function FleetApp({
               </div>
             ))}
           </section>
+          <DeviceInvite />
           <div className="layout">
             <div className="left-column">
               <WorkerGrid
@@ -338,8 +348,8 @@ function FleetApp({
           </div>
           <footer className="footer">
             <span>
-              <b>Independent workers. One control plane.</b> Stub task
-              execution.
+              <b>Independent workers. One control plane.</b> Python, desktop,
+              and iOS workers.
             </span>
             <span id="updated">
               {updatedAt

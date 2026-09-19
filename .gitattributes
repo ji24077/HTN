@@ -1,0 +1,6 @@
+# Keep line endings stable across a fleet that spans macOS, Linux and Windows.
+# Without this, Git's autocrlf on Windows rewrites join.sh with CRLF and bash rejects it.
+* text=auto eol=lf
+*.sh text eol=lf
+*.ps1 text eol=crlf
+*.onnx binary

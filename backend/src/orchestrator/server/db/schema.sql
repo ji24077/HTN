@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS tasks (
 CREATE INDEX IF NOT EXISTS tasks_queue ON tasks(created_at, id) WHERE state = 'queued';
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS progress double precision NOT NULL DEFAULT 0;
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS started_at timestamptz;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS attestation jsonb;
 CREATE INDEX IF NOT EXISTS tasks_leases ON tasks(lease_until) WHERE state IN ('assigned', 'running');
 CREATE UNIQUE INDEX IF NOT EXISTS one_task_per_worker ON tasks(worker_id) WHERE state IN ('assigned', 'running');
 
@@ -48,6 +49,37 @@ CREATE TABLE IF NOT EXISTS worker_enrollments (
     created_at timestamptz NOT NULL DEFAULT clock_timestamp()
 );
 CREATE INDEX IF NOT EXISTS worker_enrollments_user_time ON worker_enrollments(user_id, created_at);
+
+-- DWP devices share workers/tasks and the existing scheduler. Pair codes are
+-- hashed, expire after ten minutes and are consumed in the device transaction.
+CREATE TABLE IF NOT EXISTS dwp_pair_codes (
+    code_hash text PRIMARY KEY,
+    owner_id uuid,
+    created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+    expires_at timestamptz NOT NULL,
+    used_at timestamptz
+);
+CREATE INDEX IF NOT EXISTS dwp_pair_codes_owner_time ON dwp_pair_codes(owner_id, created_at);
+CREATE INDEX IF NOT EXISTS dwp_pair_codes_expiry ON dwp_pair_codes(expires_at);
+
+CREATE TABLE IF NOT EXISTS dwp_devices (
+    worker_id text PRIMARY KEY,
+    owner_id uuid,
+    public_key text UNIQUE NOT NULL,
+    display_name text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+    revoked_at timestamptz
+);
+CREATE INDEX IF NOT EXISTS dwp_devices_owner ON dwp_devices(owner_id);
+
+-- The key includes the device ID and is durable across gateway processes.
+CREATE TABLE IF NOT EXISTS dwp_assertions (
+    worker_id text NOT NULL REFERENCES dwp_devices(worker_id) ON DELETE CASCADE,
+    jti uuid NOT NULL,
+    expires_at timestamptz NOT NULL,
+    PRIMARY KEY (worker_id, jti)
+);
+CREATE INDEX IF NOT EXISTS dwp_assertions_expiry ON dwp_assertions(expires_at);
 
 -- NOTIFY is delivered only after commit. Identical notifications within one
 -- transaction coalesce. Row triggers keep no-op reconciliation scans quiet.

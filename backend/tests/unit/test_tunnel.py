@@ -50,6 +50,22 @@ class TunnelLifecycleTests(unittest.IsolatedAsyncioTestCase):
         )
         self.env.start()
         self.addCleanup(self.env.stop)
+        if sys.platform == "win32":
+            # Windows cannot execute the test fixture's shebang. Keep a real
+            # child process and production's arguments, pipes and filtered env.
+            create_process = asyncio.create_subprocess_exec
+
+            async def launch_helper(program, *args, **kwargs):
+                if Path(program).resolve() == self.helper.resolve():
+                    return await create_process(sys.executable, program, *args, **kwargs)
+                return await create_process(program, *args, **kwargs)
+
+            launcher = patch(
+                "orchestrator.worker.tunnel.asyncio.create_subprocess_exec",
+                new=launch_helper,
+            )
+            launcher.start()
+            self.addCleanup(launcher.stop)
 
     def script(self, body):
         self.helper.write_text(f"#!{sys.executable}\n" + body)
@@ -64,7 +80,8 @@ sys.stdin.read()
 """)
         async with EmbeddedTunnel(config()) as tunnel:
             self.assertEqual(tunnel.port, 12345)
-            self.assertEqual(tunnel.state.stat().st_mode & 0o777, 0o700)
+            if sys.platform != "win32":
+                self.assertEqual(tunnel.state.stat().st_mode & 0o777, 0o700)
             self.assertIsNone(tunnel.process.returncode)
         self.assertIsNotNone(tunnel.process.returncode)
 
