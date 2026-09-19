@@ -7,6 +7,7 @@ import os
 from contextlib import asynccontextmanager
 
 import asyncpg
+import sentry_sdk
 import uvicorn
 from fastapi import FastAPI, Request, WebSocket
 from fastapi.responses import JSONResponse
@@ -16,6 +17,7 @@ from redis.backoff import NoBackoff
 
 from ..shared.protocol import MESSAGE_LIMIT
 from ..shared.security import authorized
+from ..shared.telemetry import init_sentry
 from .config import ServerConfig
 from .dashboard import router as dashboard_router
 from .db.store import Conflict, NotFound, Store
@@ -33,6 +35,7 @@ log = logging.getLogger(__name__)
 def create_app(surface: str = "combined") -> FastAPI:
     if surface not in {"combined", "public", "worker"}:
         raise ValueError("Unknown server surface")
+    init_sentry("server", surface=surface)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -118,6 +121,7 @@ def create_app(surface: str = "combined") -> FastAPI:
         return JSONResponse(status_code=404, content={"error": str(exc)})
 
     async def unavailable(_request: Request, exc: Exception):
+        sentry_sdk.capture_exception(exc)
         log.error("database operation unavailable: %s", type(exc).__name__)
         return JSONResponse(status_code=503, content={"error": "database unavailable"})
 

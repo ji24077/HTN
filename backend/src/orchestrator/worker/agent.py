@@ -6,6 +6,7 @@ import random
 import signal
 from collections.abc import Callable
 
+import sentry_sdk
 from websockets.asyncio.client import ClientConnection, connect
 
 from ..shared.protocol import (
@@ -21,6 +22,7 @@ from ..shared.protocol import (
     json_loads,
     task_ref,
 )
+from ..shared.telemetry import init_sentry
 from .config import WorkerConfig
 from .executors import StubExecutor
 from .tunnel import EmbeddedTunnel
@@ -48,15 +50,23 @@ async def receive(socket: ClientConnection) -> Message:
 
 async def execute(executor: Executor, task: Task, report: Callable[[float], None]) -> Message:
     ref = task_ref(task)
-    try:
-        async with asyncio.timeout(task.spec.timeout_seconds):
-            result = bounded_json(await executor.execute(task.spec, report))
-        return Message(type="complete", ref=ref, result=result)
-    except TimeoutError:
-        return Message(type="failed", ref=ref, error="execution deadline", retryable=True)
-    except Exception as exc:
-        # Cancellation is BaseException and must propagate without a completion.
-        return Message(type="failed", ref=ref, error=(str(exc) or type(exc).__name__)[:2048])
+    with sentry_sdk.start_transaction(op="task.execute", name=f"task {task.spec.kind}") as span:
+        span.set_tag("task_id", task.spec.id)
+        span.set_tag("job_id", task.spec.job_id)
+        span.set_data("generation", task.generation)
+        try:
+            async with asyncio.timeout(task.spec.timeout_seconds):
+                result = bounded_json(await executor.execute(task.spec, report))
+            return Message(type="complete", ref=ref, result=result)
+        except TimeoutError as exc:
+            sentry_sdk.capture_exception(exc)
+            span.set_status("deadline_exceeded")
+            return Message(type="failed", ref=ref, error="execution deadline", retryable=True)
+        except Exception as exc:
+            # Cancellation is BaseException and must propagate without a completion.
+            sentry_sdk.capture_exception(exc)
+            span.set_status("internal_error")
+            return Message(type="failed", ref=ref, error=(str(exc) or type(exc).__name__)[:2048])
 
 
 class Agent:
@@ -75,6 +85,8 @@ class Agent:
                 await self.session()
             except Exception as exc:
                 # Log the exception class, not connection headers or credentials.
+                # Sentry receives the traceback only after the telemetry scrubber.
+                sentry_sdk.capture_exception(exc)
                 log.warning("worker disconnected: %s", type(exc).__name__)
             if asyncio.get_running_loop().time() - started > 60:
                 delay = 1.0
@@ -231,6 +243,7 @@ class Agent:
 async def run_worker() -> None:
     executor = StubExecutor()
     config = WorkerConfig.from_env(executor.kind)
+    init_sentry("worker", worker_id=config.worker_id)
 
     async def run():
         if config.transport == "direct":
