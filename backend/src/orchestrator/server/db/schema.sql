@@ -88,6 +88,20 @@ CREATE TABLE IF NOT EXISTS dwp_devices (
 );
 CREATE INDEX IF NOT EXISTS dwp_devices_owner ON dwp_devices(owner_id);
 
+-- How the operator has set this machine's accelerator, and what the machine said back.
+--
+-- The preference lives here rather than only on the device because the dashboard must be
+-- able to set it while the machine is offline: a laptop that is asleep when the switch is
+-- flipped has to pick the change up when it reconnects, which it does by the server
+-- replaying this value at hello. The device remains free to refuse -- `runtime_applied`
+-- records whether it did, so the dashboard shows what is true rather than what was asked.
+ALTER TABLE dwp_devices ADD COLUMN IF NOT EXISTS runtime_preference text NOT NULL DEFAULT 'auto';
+ALTER TABLE dwp_devices ADD COLUMN IF NOT EXISTS runtime_applied boolean;
+ALTER TABLE dwp_devices ADD COLUMN IF NOT EXISTS runtime_detail text NOT NULL DEFAULT '';
+ALTER TABLE dwp_devices DROP CONSTRAINT IF EXISTS dwp_devices_runtime_preference_check;
+ALTER TABLE dwp_devices ADD CONSTRAINT dwp_devices_runtime_preference_check
+    CHECK (runtime_preference IN ('auto', 'cpu'));
+
 -- The key includes the device ID and is durable across gateway processes.
 CREATE TABLE IF NOT EXISTS dwp_assertions (
     worker_id text NOT NULL REFERENCES dwp_devices(worker_id) ON DELETE CASCADE,

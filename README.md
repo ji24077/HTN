@@ -36,6 +36,26 @@ and [networking](docs/networking.md) for hosting the website and connecting
 workers. The optional `orchestrator-demo` commands remain available for isolated
 tests; the app launcher does not use them.
 
+## Add a machine
+
+A machine joins the compute network by running one container:
+
+```sh
+docker run -d --restart unless-stopped -v dwp-agent-data:/data -p 127.0.0.1:43117:43117 \
+  -e DWP_INVITE='https://your-control-service/join?code=CODE' dwp-agent:latest
+```
+
+Nothing is compiled per platform and nothing needs a port open: the agent dials out, so
+a machine in another country joins the same way one in the next room does. The window at
+`http://127.0.0.1:43117/` is the same desktop app as before — status, recent work, the
+pause switch — served by the agent process itself.
+
+Whoever you invite does not need this repository. The image is published to
+`ghcr.io/<owner>/dwp-agent` by `.github/workflows/agent-image.yml`, and the `/join` page
+their invite link points at gives them that command with their code already in it. See
+[the agent as a container](docs/docker-agent.md) for publishing, several agents on one
+host, optional ML workloads, and putting the container on a tailnet.
+
 ## Project layout
 
 ```text
@@ -51,7 +71,7 @@ HTN/
 │   ├── tests/               # Unit and local PostgreSQL integration tests
 │   ├── pyproject.toml       # Python dependencies and entry points
 │   └── uv.lock
-├── deploy/                  # Dockerfile, local Compose, public HTTPS proxy
+├── deploy/                  # Dockerfiles (backend, worker, agent), Compose, HTTPS proxy
 ├── transport/tailscale/     # Embedded worker tunnel (Go / tsnet)
 ├── docs/                    # Architecture, setup, API, and validation guides
 ├── examples/                # Runnable client and task fixtures
@@ -71,6 +91,9 @@ Hosted entry points are `orchestrator-public` and
 
 ## Guides
 
+- [The agent as a container](docs/docker-agent.md): one image instead of five binaries,
+  joining from an invite in the environment, several agents on one host, and the
+  end-to-end fleet check.
 - [Desktop and iOS integration](docs/jack-integration.md): device invites, real workloads,
   signed results, releases, Sentry, and validation.
 - [Automatic worker enrollment](docs/worker-enrollment.md): Supabase sign-in,
@@ -96,6 +119,8 @@ npm --prefix frontend run build
 pnpm install --frozen-lockfile
 pnpm typecheck
 pnpm test
+pnpm check:gui
+pnpm docker:build && pnpm docker:test -- --agents 4 --tasks 24
 uv run --project backend python -m unittest discover -s backend/tests -v
 uvx ruff check --config backend/pyproject.toml backend/src backend/tests examples/agent_task.py --select F,I
 uv build --project backend

@@ -1,8 +1,8 @@
-import { freemem } from 'node:os'
+import { setTimeout as sleep } from 'node:timers/promises'
 import WebSocket from 'ws'
 import {
   decode, envelope, mintAssertion, signAttestation, hashOutput, resultTooLarge, JSON_LIMIT,
-  TaskOffer, HelloAck, Revoked,
+  TaskOffer, HelloAck, Revoked, SettingsUpdate,
 } from '@dwp/protocol'
 import type { KeyObject } from 'node:crypto'
 import { createLogger } from '@dwp/protocol'
@@ -10,8 +10,11 @@ import { diagnoseOrigin } from '@dwp/protocol'
 import { fallbackLookup, dnsFallbackEnabled, installDnsFallback, directDial } from './resolver.ts'
 import { applyUpdate, restartIntoNewVersion } from './update.ts'
 import { AGENT_VERSION, isCompiledBinary } from './paths.ts'
-import { probe } from './capability.ts'
-import { isPaused, type AgentConfig } from './config.ts'
+import { isContainer } from './runtime.ts'
+import { allowedWorkloads, decide, liveConditions } from './limits.ts'
+import { freeRamMb, probe } from './capability.ts'
+import { detectAccelerator } from './accelerator.ts'
+import { isPaused, loadConfig, saveConfig, type AgentConfig } from './config.ts'
 import { runEcho } from './adapters/echo.ts'
 import { runInference } from './adapters/inference.ts'
 import { runWalker } from './adapters/walker.ts'
@@ -86,6 +89,14 @@ export type AgentState = {
   advice: string | null
   /** Another agent holds this host's identity, so this one has stood down. */
   stoodDown: boolean
+  /**
+   * The last offer this machine turned down, and why.
+   *
+   * Without this, a machine sitting idle because of its own limits looks exactly like a
+   * machine nobody is sending work to, and the owner has no way to tell whether the rule
+   * they set is doing something or whether the network is quiet.
+   */
+  lastDeclined: { at: number; adapter: string; reason: string; detail: string } | null
   updating: boolean
   /**
    * When this machine last finished a task, so a window can say "last run 4 min ago"
@@ -101,6 +112,43 @@ export type AgentHandle = {
   retryNow(): void
   /** Stop for good: no more work, no reconnection. Used when leaving a network. */
   stop(): void
+  /** Reconnect so the server learns a changed capability set. Cheap and idempotent. */
+  refresh(): void
+  /**
+   * Give back any work in flight, then close the connection — for a process that is
+   * about to disappear. Resolves once the server has been told or the attempt has run
+   * out of time, whichever comes first, and never rejects.
+   */
+  handOff(): Promise<void>
+}
+
+/**
+ * How long a shutdown may spend being polite.
+ *
+ * `docker stop` allows ten seconds before SIGKILL, and a person pressing Ctrl-C expects
+ * the prompt back. Three seconds is long enough for a decline frame and a close
+ * handshake on any working link, and short enough that a dead link does not turn a stop
+ * into a hang.
+ */
+const HAND_OFF_BUDGET_MS = 3_000
+
+/**
+ * Let what we just queued actually leave, then close, then stop waiting.
+ *
+ * `ws.send` only buffers; returning immediately after it means the process exits with
+ * the decline frames still in the socket, which is the same as never having sent them.
+ * Every wait here is bounded, because the case this runs in is a machine on its way out
+ * and a shutdown that hangs is worse than one that gives up.
+ */
+async function closePolitely(ws: WebSocket): Promise<void> {
+  const deadline = Date.now() + HAND_OFF_BUDGET_MS
+  while (ws.bufferedAmount > 0 && Date.now() < deadline) await sleep(25)
+  await new Promise<void>(resolve => {
+    const finish = (): void => { clearTimeout(timer); resolve() }
+    const timer = setTimeout(finish, Math.max(100, deadline - Date.now()))
+    ws.once('close', finish)
+    try { ws.close(1001, 'agent stopping') } catch { finish() }
+  })
 }
 
 export function connect(
@@ -129,15 +177,18 @@ export function connect(
   const running = new Map<string, Running>()
   const journal = new ExecutionJournal(cfg.server, cfg.hostId)
 
+  let lastDeclined: AgentState['lastDeclined'] = null
   const state: AgentState = {
     connection: 'offline', attempt: 0, connectedSince: null, running: [],
     lastLostReason: null, advice: null, stoodDown: false, updating: false, lastRunAt: null,
+    lastDeclined: null,
   }
   /** Derive the task list from the live map rather than maintaining a second copy. */
   const notify = (patch: Partial<AgentState> = {}): void => {
     Object.assign(state, patch)
     state.running = [...running].map(([taskId, r]) =>
       ({ taskId, adapter: r.adapter, startedAt: r.startedAt }))
+    state.lastDeclined = lastDeclined
     observe?.({ ...state, running: [...state.running] })
   }
 
@@ -228,7 +279,19 @@ export function connect(
         ...(sleptForMs > 0 ? { afterSuspensionMs: Math.round(sleptForMs) } : {}),
       })
       send('hello', {
-        capability: probe(availableAdapters(), cfg.installedRelease),
+        /**
+         * Advertise what this machine is *willing* to run, not merely what it can.
+         *
+         * The scheduler filters offers on this list (`spec->>'kind'=ANY(caps.kinds)`),
+         * so a workload the owner turned off is never offered at all rather than being
+         * offered and declined every time — which would churn the queue and make the
+         * machine look like it was failing work it had simply been told not to do.
+         */
+        capability: probe(
+          allowedWorkloads(cfg.limits, availableAdapters()),
+          cfg.installedRelease,
+          cfg.runtimePreference ?? 'auto',
+        ),
         consent: consent(),
         ...(sleptForMs > 0 ? { afterSuspensionMs: Math.round(sleptForMs) } : {}),
       })
@@ -245,6 +308,15 @@ export function connect(
      */
     const maybeUpdate = (offered: string | null): void => {
       if (cfg.autoUpdate === false) return
+      /**
+       * Stop before asking, not after being refused.
+       *
+       * applyUpdate refuses in a container anyway, but reaching it means a fetch of the
+       * release index every ten minutes and an `update.refused` line every handshake,
+       * for a decision that can never change while this process lives. A permanent false
+       * alarm is exactly the noise that hides a real one later.
+       */
+      if (isContainer()) return
 
       /**
        * A compiled binary ignores what the handshake announces.
@@ -356,7 +428,8 @@ export function connect(
             for (const [taskId, r] of running) { r.controller.abort(); clearInterval(r.renew); running.delete(taskId) }
           }
         }
-        send('heartbeat', { freeRamMb: Math.round(freemem() / 1024 / 1024), running: running.size })
+        // The container's free memory, not the host's — the same correction probe() makes.
+        send('heartbeat', { freeRamMb: freeRamMb(), running: running.size })
         // Our own ping, so a server that stops responding is detectable even when it
         // has nothing to say to us.
         if (ws.readyState === WebSocket.OPEN) { try { ws.ping() } catch {} }
@@ -423,6 +496,42 @@ export function connect(
         return
       }
 
+      /**
+       * The operator changed how this machine should run work.
+       *
+       * Answered always, including when nothing changed and when the request cannot be
+       * honoured. An operator who flips a switch and gets silence cannot tell a machine
+       * that applied it from one too old to understand the frame, and that ambiguity is
+       * the whole reason this acknowledgement exists.
+       *
+       * Persisted before acknowledging: the container runtime may restart this process
+       * at any moment, and a setting that was acknowledged but not written would come
+       * back as `auto` while the dashboard still showed what the operator chose.
+       */
+      if (msg.type === 'settings.update') {
+        const parsed = SettingsUpdate.safeParse(msg.payload)
+        if (!parsed.success) return
+        const wanted = parsed.data.runtimePreference
+        const probed = detectAccelerator(wanted)
+        // Asking for a device on a machine that has none changes nothing, and says so.
+        const applied = wanted === 'cpu' || probed.available
+        if (applied) {
+          const cfg2 = loadConfig()
+          if (cfg2) saveConfig({ ...cfg2, runtimePreference: wanted })
+          cfg.runtimePreference = wanted
+        }
+        hostLog.info('settings.applied', { runtimePreference: wanted, applied, runtime: probed.runtime })
+        send('settings.ack', {
+          runtimePreference: applied ? wanted : (cfg.runtimePreference ?? 'auto'),
+          applied,
+          detail: applied
+            ? (wanted === 'cpu' ? 'work will stay on the CPU' : 'using the best available device')
+            : probed.reason,
+          accelerator: probed,
+        })
+        return
+      }
+
       if (msg.type === 'task.cancel') {
         const taskId = (msg.payload as { taskId?: string }).taskId
         const r = taskId ? running.get(taskId) : undefined
@@ -435,8 +544,27 @@ export function connect(
         if (!parsed.success) return
         const offer = parsed.data
 
-        if (isPaused() || !cfg.allowCompute || !availableAdapters().includes(offer.adapter)) {
+        /**
+         * The owner's rules are applied here, and only here.
+         *
+         * This is the one point in the agent where refusing costs nothing: the lease is
+         * not held, no work has started, and the server requeues the task for someone
+         * else immediately. It is also the only point where the decision is genuinely
+         * local — it works with the control service unreachable and cannot be overridden
+         * by it. A limit enforced anywhere else is a request.
+         */
+        const verdict = isPaused()
+          ? { ok: false as const, reason: 'paused' as const, detail: 'paused' }
+          : !cfg.allowCompute
+            ? { ok: false as const, reason: 'consent' as const, detail: 'not accepting compute' }
+            : decide(cfg.limits, liveConditions(offer.adapter, availableAdapters()))
+        if (!verdict.ok) {
+          // Kept in the window so it can say *why* nothing is running, which was
+          // previously indistinguishable from the network being quiet.
+          lastDeclined = { at: Date.now(), adapter: offer.adapter, reason: verdict.reason, detail: verdict.detail }
+          hostLog.info('task.declined', { taskId: offer.taskId, adapter: offer.adapter, reason: verdict.reason })
           send('task.decline', { taskId: offer.taskId, leaseId: offer.leaseId, reason: 'not-eligible' })
+          notify()
           return
         }
 
@@ -715,16 +843,100 @@ export function connect(
     })
   }
 
+  /**
+   * Hand work back before this process goes away.
+   *
+   * Without this, a stopping agent simply vanished: the socket dropped, the server
+   * marked the host unhealthy, and the task it was holding sat untouchable until its
+   * 45-second lease expired. One machine restarting is a shrug. A fleet restarting —
+   * which is exactly what `docker compose up -d` does, and now the ordinary way to
+   * deploy — stalls every task in flight for those 45 seconds, and the queue looks
+   * broken to everyone watching it.
+   *
+   * `task.decline` rather than `task.error`, deliberately. Both requeue immediately, but
+   * the server records an error as `device_execution_failed` and raises it to Sentry,
+   * and a planned restart is neither a failure nor something to page anyone about. A
+   * decline says what actually happened: this machine is not going to run that task.
+   */
+  let handingOff: Promise<void> | null = null
+  const handOff = (): Promise<void> => {
+    if (handingOff) return handingOff
+    handingOff = (async () => {
+      stopped = true
+      supersession.cancelPending()
+      const ws = current
+      const inFlight = [...running]
+      for (const [, r] of inFlight) {
+        clearInterval(r.renew)
+        r.finishTracking('interrupted')
+        r.controller.abort()
+      }
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        /**
+         * Withdraw consent *before* giving anything back. This order is the whole trick.
+         *
+         * The server finishes a declined task and then immediately looks for another to
+         * offer this same connection — which is still open and, for the moment, still
+         * willing. Declining first therefore handed the task straight back to the agent
+         * that was in the middle of dying: measured, the task was reassigned to the same
+         * host 200ms after being returned, sat there until the 45-second lease expired,
+         * and burned an extra attempt doing it. Three retries is the default, so a
+         * rolling restart of a fleet could exhaust a task's attempts on nothing but
+         * hand-offs.
+         *
+         * A paused connection is not offered work, so the decline has somewhere else to
+         * go.
+         */
+        try {
+          ws.send(JSON.stringify(envelope('consent.update', {
+            paused: true,
+            allowCompute: cfg.allowCompute,
+            allowBrowser: cfg.allowBrowser,
+            maxConcurrency: cfg.maxConcurrency,
+          })))
+        } catch { /* nothing to withdraw from */ }
+        for (const [taskId, r] of inFlight) {
+          try {
+            ws.send(JSON.stringify(envelope('task.decline',
+              { taskId, leaseId: r.leaseId, reason: 'agent-stopping' })))
+          } catch { /* the link is already gone; the lease will time out as before */ }
+        }
+        hostLog.info('agent.handing_off', { returned: inFlight.length })
+        await closePolitely(ws)
+      }
+      running.clear()
+      notify({ connection: 'offline', connectedSince: null, lastLostReason: 'stopping' })
+    })().catch(() => { /* a shutdown must not fail; the lease timeout is the fallback */ })
+    return handingOff
+  }
+
   open()
+  /**
+   * One graceful path, however the signal arrives.
+   *
+   * The window registers its own handler too, and registered it first — so the bare
+   * `process.exit(0)` that used to live here never ran in the app, and `docker stop`
+   * returned in 0.17s having told the server nothing. Both handlers now wait on the same
+   * memoised promise, so whichever order they fire in, the hand-off happens once.
+   */
   for (const sig of ['SIGINT', 'SIGTERM'] as const) {
-    process.on(sig, () => {
-      stopped = true; supersession.cancelPending()
-      for (const r of running.values()) r.finishTracking('interrupted')
-      process.exit(0)
-    })
+    process.on(sig, () => { void handOff().finally(() => process.exit(0)) })
   }
 
   return {
+    handOff,
+    /**
+     * Re-announce what this machine will accept.
+     *
+     * `kinds` is only sent at handshake, so a workload the owner just turned off would
+     * go on being offered until the next reconnect -- which for a stable machine means
+     * never. Closing cleanly lets the ordinary retry path redial within a second or two
+     * and republish, rather than adding a second way to establish a connection.
+     */
+    refresh: () => {
+      if (stopped) return
+      try { current?.close(1000, 'limits changed') } catch { /* already gone */ }
+    },
     stop: () => {
       stopped = true
       notify({ connection: 'offline', connectedSince: null })

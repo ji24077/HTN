@@ -106,7 +106,20 @@ cat <<BANNER
 
 BANNER
 
+# Trust forwarded headers from loopback only.
+#
+# This is the entry point that `scripts/share.ts` funnels, and Tailscale Funnel
+# terminates TLS then forwards plain HTTP from 127.0.0.1. Without this the server
+# believes it is serving http://, so every agent that pairs through the funnel is handed
+# a ws:// URL on port 80 and can never connect -- measured, with ECONNREFUSED on a
+# machine that had paired perfectly a second earlier.
+#
+# Loopback only: a machine on the LAN connects from its own address and cannot spoof
+# these headers. Anything already on this host can read the admin token beside this
+# script, so it gains nothing.
 exec env -u PUBLIC_ORIGIN \
+  TRUSTED_PROXY_IPS="${TRUSTED_PROXY_IPS:-127.0.0.1}" \
+  DWP_AGENT_IMAGE="${DWP_AGENT_IMAGE:-}" \
   DEMO_UI=true \
   LISTEN_HOST="${LISTEN_HOST:-127.0.0.1}" \
   LISTEN_PORT="$port" \

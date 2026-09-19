@@ -1,4 +1,6 @@
-import type { Task, Worker } from "../api/types";
+import { useState } from "react";
+import { setRuntimePreference } from "../api/client";
+import type { RuntimePreference, Task, Worker } from "../api/types";
 import { active, age, healthy, taskTitle, workerName } from "../lib/format";
 
 function MachineIcon() {
@@ -20,6 +22,88 @@ function MachineIcon() {
     </svg>
   );
 }
+
+/**
+ * Where this machine runs work, and whether an operator may change it.
+ *
+ * The GPU side is disabled unless the machine has said it has a device. That is the
+ * whole point of the control: a switch that can be set to something the machine cannot
+ * do is a switch that lies, and the operator finds out only when work starts failing.
+ * The machine's own `reason` becomes the tooltip, so "why is this greyed out" is
+ * answered in place rather than by reading logs on someone else's laptop.
+ *
+ * A machine that reported no accelerator at all -- every agent built before the field
+ * existed -- is not treated as having no GPU. It is treated as not having said, which is
+ * a different sentence and a different fix (pull a newer image).
+ */
+function RuntimeToggle({ worker }: { worker: Worker }) {
+  const accelerator = worker.capabilities.accelerator;
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // The server echoes the machine's answer into capabilities, so this follows the
+  // snapshot rather than local state: an optimistic flip would show a setting the
+  // machine may have already refused.
+  const current: RuntimePreference =
+    worker.capabilities.runtime_preference ?? "auto";
+  const silent = accelerator === undefined || accelerator === null;
+  const usable = !!accelerator?.available;
+  const why = silent
+    ? "This machine has not reported its devices. Its agent predates the setting — pull a newer image."
+    : accelerator?.reason || "";
+
+  const choose = async (next: RuntimePreference) => {
+    if (next === current || pending) return;
+    setPending(true);
+    setError(null);
+    try {
+      await setRuntimePreference(worker.id, next);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "could not set");
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <div className="runtime-toggle" onClick={(e) => e.stopPropagation()}>
+      <div className="runtime-choices" role="group" aria-label="Where work runs">
+        <button
+          type="button"
+          className={current === "cpu" ? "on" : ""}
+          aria-pressed={current === "cpu"}
+          disabled={pending}
+          onClick={() => choose("cpu")}
+          title="Keep all work on the CPU, even if a device is available"
+        >
+          CPU
+        </button>
+        <button
+          type="button"
+          className={current === "auto" ? "on" : ""}
+          aria-pressed={current === "auto"}
+          disabled={pending || !usable}
+          onClick={() => choose("auto")}
+          title={
+            usable
+              ? `Use ${accelerator?.device || "the best device"} when a workload can`
+              : why || "No device available on this machine"
+          }
+        >
+          GPU
+        </button>
+      </div>
+      <small className="runtime-why">
+        {error
+          ? error
+          : usable
+            ? accelerator?.device ||
+              `${worker.capabilities.runtime.toUpperCase()} available`
+            : why}
+      </small>
+    </div>
+  );
+}
+
 export function WorkerGrid({
   workers,
   tasks,
@@ -71,14 +155,25 @@ export function WorkerGrid({
               ? "Reconnecting"
               : "Offline";
           return (
-            <button
+            // A div rather than a button: the runtime control below is itself a
+            // button, and a button inside a button is invalid HTML that browsers
+            // resolve by dropping one of them. role/tabIndex/onKeyDown keep the card
+            // reachable and operable from the keyboard exactly as it was.
+            <div
               key={id}
-              type="button"
+              role="button"
+              tabIndex={0}
               className={`worker ${selected === id ? "selected" : ""} ${ready ? "" : "waiting"}`}
               data-worker={id}
               aria-pressed={selected === id}
               aria-label={`Send to ${workerName(id)}`}
               onClick={() => onSelect(id)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onSelect(id);
+                }
+              }}
             >
               <div className="worker-top">
                 <div className="machine-icon">
@@ -124,6 +219,7 @@ export function WorkerGrid({
                   );
                 })()}
               </div>
+              {worker && <RuntimeToggle worker={worker} />}
               <div className="worker-footer">
                 <div className="work-status">
                   <span>
@@ -145,7 +241,7 @@ export function WorkerGrid({
                 </div>
               </div>
               <span className="selected-mark" />
-            </button>
+            </div>
           );
         })}
       </div>

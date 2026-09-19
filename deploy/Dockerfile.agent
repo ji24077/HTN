@@ -1,0 +1,105 @@
+# The desktop agent, as an image.
+#
+# Compiling this agent per platform is what made adding a machine hard: a Mac produces a
+# different artefact from a Windows box, the optional runtimes cannot live inside a
+# single file at all, and every host then disagrees slightly about what it is running.
+# An image removes the whole category — one build, one set of bytes, one answer to "what
+# version is that machine on", and the same answer on a laptop in another country.
+#
+# Two things are deliberately NOT here:
+#   - No self-update. The image is the version (see runtime.ts). Updating is a pull.
+#   - No login service. The restart policy belongs to whoever runs the container.
+#
+# Build:  docker build -f deploy/Dockerfile.agent -t dwp-agent:latest .
+# Run:    docker run -d --restart unless-stopped \
+#           -v dwp-agent-data:/data -p 43117:43117 \
+#           -e DWP_INVITE='https://your-server/join?code=CODE' dwp-agent:latest
+
+# ---------------------------------------------------------------- dependencies
+FROM node:24-bookworm-slim AS deps
+ENV PNPM_HOME=/pnpm CI=1
+RUN corepack enable
+WORKDIR /app
+
+# Manifests first, so a source-only change does not re-resolve the dependency tree.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY packages/agent/package.json ./packages/agent/
+COPY packages/protocol/package.json ./packages/protocol/
+
+# --prod matches how a joining machine has always installed: it is the difference
+# between a ~40 MB tree and a ~350 MB one, and it leaves out the optional ML and browser
+# runtimes that the ml stage below adds back deliberately.
+# --ignore-scripts because nothing in this tree needs a postinstall, and a build that
+# runs arbitrary package scripts is a supply-chain hole with no upside here.
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
+    pnpm install --frozen-lockfile --prod --ignore-scripts
+
+# --------------------------------------------------------------------- runtime
+FROM node:24-bookworm-slim AS runtime
+
+# ca-certificates so an outbound wss:// to a real control plane can verify it; tini so a
+# docker stop reaches the agent as a signal it handles rather than a SIGKILL that
+# abandons a task mid-flight.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates tini \
+ && rm -rf /var/lib/apt/lists/*
+
+# `node` already exists at uid 1000 in this image. Reusing it rather than inventing
+# another user keeps the volume's ownership predictable for anyone who goes looking.
+WORKDIR /app
+COPY --from=deps --chown=node:node /app/node_modules ./node_modules
+COPY --from=deps --chown=node:node /app/packages/agent/node_modules ./packages/agent/node_modules
+COPY --from=deps --chown=node:node /app/packages/protocol/node_modules ./packages/protocol/node_modules
+COPY --chown=node:node package.json pnpm-workspace.yaml ./
+COPY --chown=node:node packages/protocol ./packages/protocol
+COPY --chown=node:node packages/agent ./packages/agent
+
+# /data is the whole of this machine's identity: its Ed25519 key, which network it
+# joined, whether it is paused, and what it has run. Mount a volume here or the
+# container is a different machine every time it is recreated.
+RUN mkdir -p /data && chown node:node /data && chmod 700 /data
+VOLUME ["/data"]
+
+ENV DWP_HOME=/data \
+    DWP_CONTAINER=1 \
+    DWP_GUI_HOST=0.0.0.0 \
+    DWP_GUI_PORT=43117 \
+    NODE_ENV=production \
+    NODE_OPTIONS=--enable-source-maps
+EXPOSE 43117
+
+USER node
+
+# The window answers only with the path token, which is in /data — so a healthcheck
+# cannot call it. Ask the agent's own liveness question instead: is something listening.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD node -e "require('net').connect(43117,'127.0.0.1').on('connect',()=>process.exit(0)).on('error',()=>process.exit(1))"
+
+ENTRYPOINT ["/usr/bin/tini", "--", "node", "packages/agent/src/index.ts"]
+# The window and the agent are one process: `gui --hidden` serves the page and connects.
+# Override with `run` for a container that should have no window at all.
+CMD ["gui", "--hidden"]
+
+# --------------------------------------------------------- optional ML workload
+# Built only when asked for: `--target ml`. ONNX Runtime is ~85 MB after pruning the
+# platform builds this image can never execute, which is a lot to make every machine
+# carry when echo and the walker need nothing at all.
+FROM runtime AS ml
+USER root
+# The same store the deps stage linked from. Without it pnpm finds node_modules pointing
+# at /pnpm/store while it means to use root's default, and refuses the whole tree with
+# ERR_PNPM_UNEXPECTED_STORE rather than relinking.
+ENV PNPM_HOME=/pnpm
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
+    corepack enable \
+ && cd /app/packages/agent \
+ && pnpm add --prod --ignore-scripts onnxruntime-node@1.30.0 \
+ && node -e "import('/app/packages/agent/src/workloads.ts').then(m=>console.log(m.pruneForeignBinaries()))" \
+ && chown -R node:node /app/packages/agent/node_modules /app/node_modules
+USER node
+
+# ------------------------------------------------------------------ the default
+# Last stage wins when no --target is given, and the default must be the small image.
+# Leaving `ml` last meant `docker build .` silently produced the 85-MB-heavier one --
+# and, before that, failed the build outright for everyone who only wanted echo.
+FROM runtime AS agent
