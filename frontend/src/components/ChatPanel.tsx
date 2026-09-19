@@ -12,6 +12,25 @@ const toolLabels: Record<string, string> = {
   list_workloads: "Inspect supported workloads",
 };
 
+/** Server turns plus the optimistic entry for a message the server has not stored yet. */
+function withPending(
+  serverTurns: ChatTurn[],
+  message: ChatMessage,
+): ChatTurn[] {
+  return serverTurns.some((turn) => turn.request_id === message.request_id)
+    ? serverTurns
+    : [...serverTurns, { ...message, status: "running", reply: "", tools: [] }];
+}
+
+/** Whether polling or "Check response" can still recover this message. */
+function retryable(cause: unknown): boolean {
+  if (!(cause instanceof ApiError)) return true;
+  if (cause.status === 503) return !/not configured/i.test(cause.message);
+  if (cause.status >= 500 || cause.status === 408 || cause.status === 429)
+    return true;
+  return cause.status === 409 && /still running/i.test(cause.message);
+}
+
 export function ChatPanel({ scope }: { scope: string }) {
   const storageKey = `dispatch-chat:${scope}`;
   const [conversation, setConversation] = useState("");
@@ -89,7 +108,8 @@ export function ChatPanel({ scope }: { scope: string }) {
 
   useEffect(() => {
     if (!pending || !conversation) return;
-    const requestId = pending.request_id;
+    const message = pending;
+    const requestId = message.request_id;
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
     async function update() {
@@ -97,7 +117,8 @@ export function ChatPanel({ scope }: { scope: string }) {
         const chat = await readChat(conversation, controller.signal);
         if (controller.signal.aborted || settledRequests.current.has(requestId))
           return;
-        setTurns(chat.turns);
+        // The POST may not have stored this turn yet; keep the optimistic entry.
+        setTurns(withPending(chat.turns, message));
         const result = chat.turns.find((turn) => turn.request_id === requestId);
         if (result && result.status !== "running") {
           settledRequests.current.add(result.request_id);
@@ -133,29 +154,39 @@ export function ChatPanel({ scope }: { scope: string }) {
     const controller = new AbortController();
     activeRequest.current = controller;
     const timer = setTimeout(() => controller.abort(), 120000);
-    setTurns((current) =>
-      current.some((turn) => turn.request_id === message.request_id)
-        ? current
-        : [...current, { ...message, status: "running", reply: "", tools: [] }],
-    );
+    setTurns((current) => withPending(current, message));
     try {
       const result = await sendChat(conversation, message, controller.signal);
       if (!mounted.current) return;
       settledRequests.current.add(result.request_id);
       setTurns((current) =>
-        current.map((turn) =>
-          turn.request_id === result.request_id ? result : turn,
-        ),
+        current.some((turn) => turn.request_id === result.request_id)
+          ? current.map((turn) =>
+              turn.request_id === result.request_id ? result : turn,
+            )
+          : [...current, result],
       );
       setPending(null);
       setDraft("");
     } catch (cause) {
-      if (mounted.current && !settledRequests.current.has(message.request_id))
+      if (mounted.current && !settledRequests.current.has(message.request_id)) {
+        if (!retryable(cause)) {
+          // The server rejected this message for good: stop polling, drop the
+          // optimistic turn, and give the text back so it can be edited.
+          setPending(null);
+          setTurns((current) =>
+            current.filter((turn) => turn.request_id !== message.request_id),
+          );
+          setDraft(message.message);
+          if (cause instanceof ApiError && cause.status === 503)
+            setEnabled(false);
+        }
         setError(
           cause instanceof Error && cause.name !== "AbortError"
             ? cause.message
             : "Connection interrupted. Check the response to recover this message.",
         );
+      }
     } finally {
       clearTimeout(timer);
       sending.current = false;

@@ -97,8 +97,9 @@ class AgentLoop:
         turn = state.turns[-1]
         definitions = tools.definitions()
         allowed = {definition["name"] for definition in definitions}
+        deadline = asyncio.timeout(self.timeout_seconds)
         try:
-            async with asyncio.timeout(self.timeout_seconds):
+            async with deadline:
                 for _ in range(self.max_steps):
                     if len(json_text(state.history).encode()) > MAX_HISTORY_BYTES:
                         finish_interrupted(
@@ -193,6 +194,10 @@ class AgentLoop:
                 f"The model request failed ({exc.code}). Completed tool actions are shown below.",
             )
         except TimeoutError:
+            # A database timeout inside a checkpoint is a persistence error, not the
+            # turn deadline; let it escape like any other checkpoint failure.
+            if not deadline.expired():
+                raise
             finish_interrupted(
                 state,
                 "This message reached its time limit. Check the tool activity before requesting more work.",

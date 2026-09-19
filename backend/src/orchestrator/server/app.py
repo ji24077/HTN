@@ -88,8 +88,14 @@ def create_app(surface: str = "combined") -> FastAPI:
             app.state.enrollment = enrollment
             app.state.chat_store = ChatStore(store.pool)
             if surface != "worker" and os.getenv("OPENAI_API_KEY"):
-                model_client = OpenAIClient.from_env()
-                app.state.chat_agent = AgentLoop(model_client)
+                try:
+                    model_client = OpenAIClient.from_env()
+                except ValueError as exc:
+                    # A partial or malformed OPENAI_* configuration disables chat;
+                    # the dashboard and worker gateway keep running.
+                    log.warning("chat disabled: %s", exc)
+                else:
+                    app.state.chat_agent = AgentLoop(model_client)
             if (
                 surface == "combined"
                 and not config.worker_tokens

@@ -99,6 +99,19 @@ class ClientTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(result["ok"])
             self.assertEqual(result["error"]["code"], code)
 
+    async def test_tool_subset_limits_definitions_and_dispatch(self):
+        def handler(_request):
+            self.fail("excluded tool reached network")
+
+        tools = AgentTools(await self.client(handler), ["get_task", "list_workers"])
+        self.assertEqual(
+            [tool["name"] for tool in tools.definitions()], ["list_workers", "get_task"]
+        )
+        result = await tools.call("wait_task", {"task_id": "test-001"})
+        self.assertEqual(result["error"]["code"], "unknown_tool")
+        with self.assertRaises(ValueError):
+            AgentTools(await self.client(handler), ["execute_shell"])
+
     async def test_wait_uses_stream_and_closes_it(self):
         calls = []
         # Comments, multiline data, and chunk boundaries are valid SSE.

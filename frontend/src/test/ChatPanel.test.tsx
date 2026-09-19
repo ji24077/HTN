@@ -145,6 +145,78 @@ describe("fleet assistant", () => {
     ).toHaveLength(1);
   });
 
+  it("keeps the optimistic turn while polling before the server stores it", async () => {
+    const normal = fetcher.getMockImplementation()!;
+    let resolvePost!: (turn: ChatTurn) => void;
+    fetcher.mockImplementation(async (path, options) => {
+      if (options?.method === "POST")
+        return new Promise<Response>((resolve) => {
+          resolvePost = (turn) => resolve(Response.json(turn));
+        });
+      return normal(path, options);
+    });
+    render(<ChatPanel scope="unit" />);
+    const input = screen.getByLabelText("Message the assistant");
+    await waitFor(() => expect(input).toBeEnabled());
+    await userEvent.type(input, "Run a connection test");
+    await userEvent.click(screen.getByRole("button", { name: "Send message" }));
+    // Let the poll fire while the server still reports no turns.
+    await waitFor(
+      () =>
+        expect(
+          fetcher.mock.calls.filter(([, options]) => !options?.method),
+        ).toHaveLength(2),
+      { timeout: 3000 },
+    );
+    expect(
+      screen.getByText("Run a connection test", { selector: "p" }),
+    ).toBeInTheDocument();
+    const body = fetcher.mock.calls.find(
+      ([, options]) => options?.method === "POST",
+    )![1]!.body as string;
+    await act(async () => resolvePost(completed(JSON.parse(body))));
+    expect(
+      await screen.findByText("Worker A is available."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Run a connection test", { selector: "p" }),
+    ).toBeInTheDocument();
+    expect(input).toBeEnabled();
+  });
+
+  it("stops polling and restores the draft when the server rejects a message", async () => {
+    const normal = fetcher.getMockImplementation()!;
+    fetcher.mockImplementation(async (path, options) => {
+      if (options?.method === "POST")
+        return Response.json(
+          { error: "This conversation is full. Please start a new chat." },
+          { status: 409 },
+        );
+      return normal(path, options);
+    });
+    render(<ChatPanel scope="unit" />);
+    const input = screen.getByLabelText("Message the assistant");
+    await waitFor(() => expect(input).toBeEnabled());
+    await userEvent.type(input, "One more question");
+    await userEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "This conversation is full",
+    );
+    expect(input).toBeEnabled();
+    expect(input).toHaveValue("One more question");
+    expect(
+      screen.queryByRole("button", { name: "Check response" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Working on your request…"),
+    ).not.toBeInTheDocument();
+    const polls = fetcher.mock.calls.filter(([, options]) => !options?.method);
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    expect(
+      fetcher.mock.calls.filter(([, options]) => !options?.method),
+    ).toHaveLength(polls.length);
+  });
+
   it("disables chat when the backend has no model client", async () => {
     fetcher.mockResolvedValue(Response.json({ enabled: false }));
     render(<ChatPanel scope="unit" />);

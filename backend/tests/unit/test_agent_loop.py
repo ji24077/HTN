@@ -162,6 +162,15 @@ class AgentLoopTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(turn.tools[0].result["error"]["code"], "outcome_unknown")
         tools.call.assert_awaited_once()
 
+    async def test_checkpoint_timeout_is_a_persistence_error_not_the_deadline(self):
+        state, tools = conversation(), FakeTools()
+        model = type("Model", (), {})()
+        model.respond = AsyncMock(return_value=calls(ToolCall("call-1", "submit_tasks", "{}")))
+        with self.assertRaises(TimeoutError):
+            await AgentLoop(model).run(state, tools, AsyncMock(side_effect=TimeoutError))
+        tools.call.assert_not_awaited()
+        self.assertEqual(state.turns[0].status, "running")
+
     async def test_process_interruption_closes_unexecuted_calls(self):
         state = conversation()
         state.history.extend(calls(ToolCall("call-1", "submit_tasks", "{}")).output)
