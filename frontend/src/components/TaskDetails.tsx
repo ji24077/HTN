@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import type { Task, ExecutionEvent } from "../api/types";
-import { executionEvents } from "../api/client";
+import { ApiError, executionEvents } from "../api/client";
 import { taskTitle } from "../lib/format";
+
+const SETTLED = new Set<Task["state"]>(["succeeded", "failed", "cancelled"]);
 export function TaskDetails({
   task,
   onClose,
@@ -14,6 +16,9 @@ export function TaskDetails({
   const taskId = task?.spec.id;
   const [events, setEvents] = useState<ExecutionEvent[]>([]);
   const [error, setError] = useState("");
+  // The parent streams task updates; read the latest state without restarting the poller.
+  const stateRef = useRef(task?.state);
+  stateRef.current = task?.state;
   useEffect(() => {
     setEvents([]);
     setError("");
@@ -22,6 +27,8 @@ export function TaskDetails({
     let timer: ReturnType<typeof setTimeout>;
     let cursor = 0;
     const poll = async () => {
+      // Only a page fetched after the task settled can be its final page.
+      const settled = stateRef.current !== undefined && SETTLED.has(stateRef.current);
       let more = false;
       try {
         const page = await executionEvents(taskId, cursor, controller.signal);
@@ -32,9 +39,15 @@ export function TaskDetails({
         more = page.has_more;
         setEvents((previous) => [...previous, ...page.events].slice(-2000));
         setError("");
-      } catch {
-        if (!controller.signal.aborted)
-          setError("Execution history unavailable; retrying…");
+        if (!more && settled) return;
+      } catch (caught) {
+        if (controller.signal.aborted) return;
+        if (caught instanceof ApiError && [401, 403].includes(caught.status)) {
+          // Retrying cannot help and would re-trigger session renewal every tick.
+          setError("Sign in again to view execution history.");
+          return;
+        }
+        setError("Execution history unavailable; retrying…");
       }
       if (!controller.signal.aborted) timer = setTimeout(poll, more ? 0 : 1500);
     };

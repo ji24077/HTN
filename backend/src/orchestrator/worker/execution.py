@@ -1,5 +1,6 @@
 """Callable progress reporter plus durable task-scoped stdout/stderr/step hooks."""
 
+import asyncio
 import hashlib
 import json
 import math
@@ -20,6 +21,9 @@ class ExecutionJournal:
         self.directory = root / hashlib.sha256(f"{server}\n{worker_id}".encode()).hexdigest()
         self.records = {}
         self.sent = {}
+        self.sizes = {}
+        self.dirty = set()
+        self.flush_handle = None
         try:
             self.directory.mkdir(parents=True, exist_ok=True, mode=0o700)
             paths = sorted(
@@ -34,13 +38,15 @@ class ExecutionJournal:
                     path.unlink()
                     continue
                 try:
-                    record = json.loads(path.read_text())
+                    text = path.read_text()
+                    record = json.loads(text)
                     if not isinstance(record["acked"], list):
                         continue
                     for item in record["events"]:
                         ExecutionEvent.model_validate(item)
                     key = (record["taskId"], record["attempt"])
                     self.records[key] = record
+                    self.sizes[key] = len(text.encode())
                     if record["events"] and record["events"][-1]["kind"] not in TERMINAL:
                         self.emit(
                             *key, "interrupted", {"message": "Runner restarted before completion"}
@@ -56,8 +62,10 @@ class ExecutionJournal:
         )
 
     def persist(self, record):
+        key = (record["taskId"], record["attempt"])
+        self.dirty.discard(key)
         try:
-            path = self.path((record["taskId"], record["attempt"]))
+            path = self.path(key)
             temporary = path.with_suffix(".tmp")
             with os.fdopen(
                 os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w"
@@ -66,6 +74,26 @@ class ExecutionJournal:
             temporary.replace(path)
         except OSError:
             pass  # Optional diagnostics cannot change a task's result.
+
+    def schedule_persist(self, key):
+        # Rewriting the whole journal per event is quadratic in a chatty task and
+        # blocks the event loop that renews leases; coalesce ordinary output.
+        self.dirty.add(key)
+        if self.flush_handle is not None:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self.persist_dirty()
+            return
+        self.flush_handle = loop.call_later(0.25, self.persist_dirty)
+
+    def persist_dirty(self):
+        self.flush_handle = None
+        for key in list(self.dirty):
+            if record := self.records.get(key):
+                self.persist(record)
+        self.dirty.clear()
 
     def emit(self, task_id, attempt, kind, data=None):
         key = (task_id, attempt)
@@ -79,6 +107,8 @@ class ExecutionJournal:
                 )
                 del self.records[oldest]
                 self.sent.pop(oldest, None)
+                self.sizes.pop(oldest, None)
+                self.dirty.discard(oldest)
                 try:
                     self.path(oldest).unlink(missing_ok=True)
                 except OSError:
@@ -88,10 +118,12 @@ class ExecutionJournal:
         if len(record["events"]) >= 999 or (record.get("truncated") and kind not in TERMINAL):
             return
         clean = scrub_execution(data or {})
-        if len(json_text(clean).encode()) > 8192:
+        size = len(json_text(clean).encode())
+        if size > 8192:
             clean = {"message": "Event exceeded 8 KiB", "truncated": True}
+            size = len(json_text(clean).encode())
         if kind not in TERMINAL and (
-            len(record["events"]) >= 996 or len(json_text(record)) > 1000 * 1024
+            len(record["events"]) >= 996 or self.sizes.get(key, 0) + size > 1000 * 1024
         ):
             kind, clean = (
                 "truncated",
@@ -101,8 +133,15 @@ class ExecutionJournal:
         item = ExecutionEvent(
             sequence=len(record["events"]) + 1, at=datetime.now(UTC), kind=kind, data=clean
         )
-        record["events"].append(item.model_dump(mode="json"))
-        self.persist(record)
+        encoded = item.model_dump(mode="json")
+        record["events"].append(encoded)
+        self.sizes[key] = self.sizes.get(key, 0) + len(json_text(encoded).encode())
+        # Durability matters most at the boundaries: the first event proves the
+        # attempt started, and terminal events settle it. Coalesce the rest.
+        if kind in TERMINAL or record.get("truncated") or len(record["events"]) == 1:
+            self.persist(record)
+        else:
+            self.schedule_persist(key)
 
     def next_batch(self):
         for key, record in self.records.items():

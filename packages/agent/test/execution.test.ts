@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ExecutionJournal } from '../src/execution.ts'
@@ -49,6 +49,24 @@ test('unacknowledged events survive restart, acknowledged events stay local, and
   const other = new ExecutionJournal('https://other.test', 'machine-1', dir)
   other.flush(() => assert.fail('events leaked to another server'))
   assert.equal(records()[0].events.length, 2)
+})
+
+test('ordinary output is coalesced on disk and the journal is bounded by bytes, not only count', async t => {
+  const { journal, records } = fixture(t)
+  const report = journal.reporter('task-1', 1)
+  journal.emit('task-1', 1, 'started')
+  report.stdout('x'.repeat(2048))
+  assert.deepEqual(records()[0].events.map((e: any) => e.kind), ['started'])
+  await new Promise(resolve => setTimeout(resolve, 400))
+  assert.deepEqual(records()[0].events.map((e: any) => e.kind), ['started', 'stdout'])
+  for (let i = 0; i < 700; i++) report.stdout('x'.repeat(2048))
+  journal.emit('task-1', 1, 'succeeded')
+  const events = records()[0].events
+  assert.equal(events.filter((e: any) => e.kind === 'truncated').length, 1)
+  assert.ok(events.length < 600)
+  assert.equal(events.at(-1).kind, 'succeeded')
+  const [file] = readdirSync(journal.directory).filter(f => f.endsWith('.json'))
+  assert.ok(statSync(join(journal.directory, file!)).size < 1100 * 1024)
 })
 
 test('output limits retain an explicit truncation marker and final status', t => {

@@ -62,6 +62,25 @@ class ExecutionTests(unittest.IsolatedAsyncioTestCase):
                 ExecutionJournal("https://other.test", "machine-1", root).next_batch()
             )
 
+    async def test_output_is_coalesced_on_disk_and_bounded_by_bytes(self):
+        with tempfile.TemporaryDirectory() as root:
+            journal = ExecutionJournal("fleet", "worker", root)
+            path = journal.path(("task-1", 1))
+            kinds = lambda: [e["kind"] for e in json.loads(path.read_text())["events"]]  # noqa: E731
+            journal.emit("task-1", 1, "started")
+            journal.emit("task-1", 1, "stdout", {"text": "x" * 2048})
+            self.assertEqual(kinds(), ["started"])
+            await asyncio.sleep(0.4)
+            self.assertEqual(kinds(), ["started", "stdout"])
+            for _ in range(700):
+                journal.emit("task-1", 1, "stdout", {"text": "x" * 2048})
+            journal.emit("task-1", 1, "succeeded")
+            events = kinds()
+            self.assertEqual(events.count("truncated"), 1)
+            self.assertLess(len(events), 600)
+            self.assertEqual(events[-1], "succeeded")
+            self.assertLess(path.stat().st_size, 1100 * 1024)
+
     async def test_interrupted_attempt_is_preserved_after_restart(self):
         with tempfile.TemporaryDirectory() as root:
             journal = ExecutionJournal("fleet", "worker", root)

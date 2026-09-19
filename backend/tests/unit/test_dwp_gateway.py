@@ -493,6 +493,46 @@ class GatewayTests(unittest.TestCase):
             self.assertTrue(socket.receive_json()["payload"]["rejected"])
         self.assertEqual(len(self.store.execution_batches), 1)
 
+    def test_unstorable_execution_events_never_close_the_task_connection(self):
+        with self.connect() as socket:
+            offer = self.start(socket)
+            socket.send_json(frame("task.accept", self.ref(offer)))
+            malformed = {
+                "taskId": offer["taskId"],
+                "attempt": offer["attempt"],
+                "events": [{"sequence": 5000, "at": "2026-09-19T12:00:00", "kind": "stdout"}],
+            }
+            socket.send_json(frame("task.events", malformed))
+            ack = socket.receive_json()
+            self.assertEqual(ack["type"], "task.events.ack")
+            self.assertEqual(
+                ack["payload"],
+                {
+                    "taskId": offer["taskId"],
+                    "attempt": offer["attempt"],
+                    "sequences": [5000],
+                    "rejected": True,
+                },
+            )
+            self.assertEqual(self.store.execution_batches, [])
+
+            async def busy(*args):
+                raise TimeoutError("advisory lock timeout")
+
+            self.store.append_execution_events = busy
+            valid = {
+                **malformed,
+                "events": [
+                    {"sequence": 1, "at": "2026-09-19T12:00:00Z", "kind": "stdout", "data": {}}
+                ],
+            }
+            socket.send_json(frame("task.events", valid))
+            # No acknowledgement: the device replays after its resend window.
+            socket.send_json(frame("lease.renew", self.ref(offer)))
+            self.send_result(socket, self.result(offer))
+            self.assertEqual(socket.receive_json()["type"], "task.offer")
+        self.assertEqual(len(self.store.finished), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

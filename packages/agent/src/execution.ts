@@ -27,6 +27,9 @@ export class ExecutionJournal {
   readonly directory: string
   private records = new Map<string, Record>()
   private inFlight = new Map<string, number>()
+  private sizes = new Map<string, number>()
+  private dirty = new Set<string>()
+  private flushTimer: ReturnType<typeof setTimeout> | undefined
   constructor(server: string, workerId: string, root = join(AGENT_HOME, 'executions')) {
     this.directory = join(root, createHash('sha256').update(`${server}\n${workerId}`).digest('hex'))
     try {
@@ -41,10 +44,12 @@ export class ExecutionJournal {
           unlinkSync(join(this.directory, name)); continue
         }
         try {
-          const record = JSON.parse(readFileSync(join(this.directory, name), 'utf8')) as Record
+          const text = readFileSync(join(this.directory, name), 'utf8')
+          const record = JSON.parse(text) as Record
           if (!Array.isArray(record.events) || !Array.isArray(record.acked) ||
               !record.events.every(e => ExecutionEvent.safeParse(e).success)) continue
           this.records.set(this.key(record.taskId, record.attempt), record)
+          this.sizes.set(this.key(record.taskId, record.attempt), Buffer.byteLength(text))
           const last = record.events.at(-1)
           if (last && !['succeeded', 'failed', 'cancelled', 'timed_out', 'interrupted'].includes(last.kind)) {
             this.emit(record.taskId, record.attempt, 'interrupted', { message: 'Runner restarted before recording completion' })
@@ -55,12 +60,27 @@ export class ExecutionJournal {
   }
   private key(taskId: string, attempt: number): string { return `${taskId}:${attempt}` }
   private persist(record: Record): void {
+    this.dirty.delete(this.key(record.taskId, record.attempt))
     try {
       const name = createHash('sha256').update(this.key(record.taskId, record.attempt)).digest('hex')
       const path = join(this.directory, `${name}.json`)
       writeFileSync(`${path}.tmp`, JSON.stringify(record), { mode: 0o600 })
       renameSync(`${path}.tmp`, path)
     } catch { /* Diagnostics must not turn a successful task into a failed task. */ }
+  }
+  /** Rewriting the whole journal per event is quadratic in a chatty task; coalesce ordinary output. */
+  private schedulePersist(key: string): void {
+    this.dirty.add(key)
+    if (this.flushTimer) return
+    this.flushTimer = setTimeout(() => {
+      this.flushTimer = undefined
+      for (const pending of this.dirty) {
+        const record = this.records.get(pending)
+        if (record) this.persist(record)
+      }
+      this.dirty.clear()
+    }, 250)
+    this.flushTimer.unref?.()
   }
   emit(taskId: string, attempt: number, kind: Entry['kind'], data: { [key: string]: unknown } = {}): void {
     const key = this.key(taskId, attempt)
@@ -72,6 +92,8 @@ export class ExecutionJournal {
           (a[1].events[0]?.at ?? '').localeCompare(b[1].events[0]?.at ?? ''))[0]![0]
         this.records.delete(oldest)
         this.inFlight.delete(oldest)
+        this.sizes.delete(oldest)
+        this.dirty.delete(oldest)
         try { unlinkSync(join(this.directory, `${createHash('sha256').update(oldest).digest('hex')}.json`)) } catch {}
       }
       record = { taskId, attempt, events: [], acked: [] }
@@ -81,13 +103,23 @@ export class ExecutionJournal {
     if (record.truncated && !terminal) return
     if (record.events.length >= 999 || (record.events.length >= 997 && !terminal)) return
     let clean = scrubTelemetry(data)
-    if (Buffer.byteLength(JSON.stringify(clean)) > 8192) clean = { message: 'Event exceeded 8 KiB', truncated: true }
-    if ((record.events.length === 996 || Buffer.byteLength(JSON.stringify(record)) > 1000 * 1024) && !terminal) {
+    let size = Buffer.byteLength(JSON.stringify(clean))
+    if (size > 8192) {
+      clean = { message: 'Event exceeded 8 KiB', truncated: true }
+      size = Buffer.byteLength(JSON.stringify(clean))
+    }
+    const bytes = this.sizes.get(key) ?? 0
+    if ((record.events.length === 996 || bytes + size > 1000 * 1024) && !terminal) {
       record.truncated = true
       kind = 'truncated'; clean = { message: 'Execution output limit reached; completion is still recorded' }
     }
-    record.events.push({ sequence: record.events.length + 1, at: new Date().toISOString(), kind, data: clean })
-    this.persist(record)
+    const entry: Entry = { sequence: record.events.length + 1, at: new Date().toISOString(), kind, data: clean }
+    record.events.push(entry)
+    this.sizes.set(key, bytes + Buffer.byteLength(JSON.stringify(entry)))
+    // Durability matters most at the boundaries: the first event proves the attempt
+    // started and terminal events settle it. Everything in between is coalesced.
+    if (terminal || record.truncated || record.events.length === 1) this.persist(record)
+    else this.schedulePersist(key)
   }
   reporter(taskId: string, attempt: number): ExecutionReporter {
     let lastProgress = -1

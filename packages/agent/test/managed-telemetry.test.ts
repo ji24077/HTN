@@ -70,14 +70,19 @@ test('reconnect config upgrades an existing profile, preserves local edits, rota
       const ignored = Sentry.getClient() === first;
       applyManagedTelemetry(config, {...${JSON.stringify(remote)},dsn:'https://next@example.invalid/456'});
       const rotated = Sentry.getClient().getOptions().dsn;
+      const count = () => [process.listenerCount('uncaughtException'), process.listenerCount('unhandledRejection')];
+      const listeners = count();
       applyManagedTelemetry(config, {...${JSON.stringify(remote)},dsn:null});
-      console.log(JSON.stringify({initial,ignored,rotated,disabled:!Sentry.isEnabled(),saved:loadConfig().telemetry}));
+      console.log(JSON.stringify({initial,ignored,rotated,listeners,afterDisable:count(),disabled:!Sentry.isEnabled(),saved:loadConfig().telemetry}));
     `)
     assert.equal(result.initial.allowCompute, false)
     assert.equal(result.initial.pendingInstall, 'new-release')
     assert.deepEqual(result.initial.telemetry, remote)
     assert.equal(result.ignored, true)
     assert.equal(result.rotated, 'https://next@example.invalid/456')
+    // Each rotation replaces the crash handlers instead of stacking another pair.
+    assert.deepEqual(result.listeners, [1, 1])
+    assert.deepEqual(result.afterDisable, [0, 0])
     assert.equal(result.disabled, true)
     assert.deepEqual(result.saved, { ...remote, dsn: null })
   })
@@ -117,4 +122,8 @@ test('explicit local configuration overrides managed settings, including opting 
   assert.equal(options.environment, 'local')
   assert.equal(options.release, 'local-v2')
   assert.equal(telemetryOptions({}, {...remote,dsn:'https://key:secret@example.invalid/1'}), null)
+  // A template .env with blank values must not override the build's release or managed environment.
+  const blank = telemetryOptions({SENTRY_DSN:'https://local@example.invalid/9',SENTRY_ENVIRONMENT:'',SENTRY_RELEASE:'',RELEASE:'1.4.0'}, remote)!
+  assert.equal(blank.environment, 'fleet-test')
+  assert.equal(blank.release, '1.4.0')
 })

@@ -1,5 +1,6 @@
 """Bounded, replayable execution diagnostics; task results remain independently fenced."""
 
+import functools
 import json
 from datetime import datetime
 from typing import Literal
@@ -56,5 +57,31 @@ class ExecutionBatch(Model):
     events: list[ExecutionEvent] = Field(min_length=1, max_length=8)
 
 
+@functools.cache
+def _scrubber() -> Scrubber:
+    # Scanning the environment per event is wasteful on the server's locked
+    # ingest path; credentials are configured at startup, so one scan suffices.
+    return Scrubber(secret_values())
+
+
 def scrub_execution(data):
-    return Scrubber(secret_values()).scrub(data)
+    return _scrubber().scrub(data)
+
+
+def rejected_ack(payload: object) -> dict | None:
+    """Acknowledge, as rejected, a batch that will never be stored.
+
+    Without an acknowledgement the device replays the same malformed batch
+    forever; with one it marks the sequences delivered and moves on.
+    """
+    if not isinstance(payload, dict) or not isinstance(payload.get("events"), list):
+        return None
+    try:
+        return {
+            "taskId": str(payload["taskId"]),
+            "attempt": int(payload["attempt"]),
+            "sequences": [int(item["sequence"]) for item in payload["events"]],
+            "rejected": True,
+        }
+    except (KeyError, TypeError, ValueError):
+        return None

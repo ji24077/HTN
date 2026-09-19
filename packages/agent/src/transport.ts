@@ -489,7 +489,10 @@ export function connect(
           })
           .catch((err: unknown) => {
             finishTracking(controller.signal.aborted ? 'cancelled' : 'failed', {
-              error: err instanceof Error ? { name: err.name, message: err.message, stack: err.stack } : String(err),
+              // Bounded so a deep async stack cannot push the one event operators need past the 8 KiB cap.
+              error: err instanceof Error
+                ? { name: err.name, message: err.message.slice(0, 2048), stack: err.stack?.slice(0, 4096) }
+                : String(err).slice(0, 2048),
             })
             if (!controller.signal.aborted) {
               captureWorkloadFailure(err, {

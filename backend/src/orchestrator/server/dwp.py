@@ -28,7 +28,6 @@ from ..shared.dwp import (
     verify_assertion,
     verify_result,
 )
-from ..shared.execution import ExecutionBatch
 from ..shared.protocol import (
     HEARTBEAT_INTERVAL,
     LEASE_SECONDS,
@@ -41,7 +40,15 @@ from ..shared.protocol import (
 )
 from ..shared.worker_telemetry import worker_telemetry
 from .auth import require_admin
-from .db.store import Conflict, EnrollmentLimit, NotFound, StaleAssignment, StaleSession, Store
+from .db.store import (
+    Conflict,
+    EnrollmentLimit,
+    NotFound,
+    StaleAssignment,
+    StaleSession,
+    Store,
+    ingest_execution_events,
+)
 from .dwp_assets import release_info
 
 log = logging.getLogger(__name__)
@@ -313,25 +320,9 @@ class Connection:
     async def message(self, frame: dict, raw_output: str | None):
         kind, payload = frame["type"], frame["payload"]
         if kind == "task.events":
-            batch = ExecutionBatch.model_validate(payload)
-            try:
-                sequences = await self.store.append_execution_events(
-                    self.worker_id, self.session, batch
-                )
-                rejected = False
-            except StaleAssignment:
-                sequences = [item.sequence for item in batch.events]
-                rejected = True
-            await send(
-                self.socket,
-                "task.events.ack",
-                {
-                    "taskId": batch.taskId,
-                    "attempt": batch.attempt,
-                    "sequences": sequences,
-                    "rejected": rejected,
-                },
-            )
+            ack = await ingest_execution_events(self.store, self.worker_id, self.session, payload)
+            if ack is not None:
+                await send(self.socket, "task.events.ack", ack)
             return
         if kind == "heartbeat":
             Heartbeat.model_validate(payload)

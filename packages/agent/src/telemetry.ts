@@ -56,8 +56,9 @@ export function telemetryOptions(env: NodeJS.ProcessEnv = process.env, saved?: u
   if (!dsn) return null
   return {
     dsn,
-    environment: env.SENTRY_ENVIRONMENT ?? remote?.environment ?? 'development',
-    release: env.SENTRY_RELEASE ?? env.RELEASE ?? remote?.release ?? undefined,
+    // Blank values (a template .env) fall through; only the DSN treats blank as a choice.
+    environment: env.SENTRY_ENVIRONMENT || remote?.environment || 'development',
+    release: env.SENTRY_RELEASE || env.RELEASE || remote?.release || undefined,
     sendDefaultPii: false,
     maxBreadcrumbs: 0,
     // The worker reports exceptions without recording task inputs or network bodies.
@@ -71,6 +72,30 @@ export function telemetryOptions(env: NodeJS.ProcessEnv = process.env, saved?: u
 
 let activeSettings: string | undefined
 
+const PROCESS_EVENTS = ['uncaughtException', 'unhandledRejection'] as const
+type ProcessListener = (...args: any[]) => void
+let installedListeners: Array<[typeof PROCESS_EVENTS[number], ProcessListener]> = []
+const emitter: NodeJS.EventEmitter = process
+
+/** Sentry registers crash handlers per client and never removes them; we do, so DSN rotation cannot stack them. */
+function removeProcessListeners(): void {
+  for (const [event, listener] of installedListeners) emitter.removeListener(event, listener)
+  installedListeners = []
+}
+
+function trackProcessListeners(init: () => void): void {
+  const before = new Map(PROCESS_EVENTS.map(event => [event, new Set(emitter.listeners(event))]))
+  try {
+    init()
+  } finally {
+    for (const event of PROCESS_EVENTS) {
+      for (const listener of emitter.listeners(event)) {
+        if (!before.get(event)!.has(listener)) installedListeners.push([event, listener as ProcessListener])
+      }
+    }
+  }
+}
+
 export function initTelemetry(saved?: unknown): boolean {
   const options = telemetryOptions(process.env, saved)
   const fingerprint = JSON.stringify(options ? [options.dsn, options.environment, options.release] : null)
@@ -78,13 +103,14 @@ export function initTelemetry(saved?: unknown): boolean {
   const previous = Sentry.getClient()
   Sentry.getCurrentScope().setClient(undefined)
   if (previous) void Promise.resolve(previous.close(2_000)).catch(() => {})
+  removeProcessListeners()
   activeSettings = undefined
   if (!options) {
     activeSettings = fingerprint
     return false
   }
   try {
-    Sentry.init(options)
+    trackProcessListeners(() => Sentry.init(options))
     activeSettings = fingerprint
     return true
   } catch {
