@@ -10,6 +10,8 @@
  * on any machine, which is what makes a fitness score comparable across a fleet.
  */
 
+import { dsin, dcos, dtanh, dlog, dsqrt } from './dmath.js'
+
 export const NUM_JOINTS = 4          // left hip, left knee, right hip, right knee
 export const OBS_SIZE = 14
 export const HIDDEN = 16
@@ -45,7 +47,7 @@ export function rng (seed) {
 /** Box-Muller, for mutation noise. */
 export function gaussian (next) {
   const u = Math.max(next(), 1e-9)
-  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * next())
+  return dsqrt(-2 * dlog(u)) * dcos(2 * Math.PI * next())
 }
 
 /** genome = parent + sigma * noise(seed). Seed 0 means "the parent itself". */
@@ -72,13 +74,13 @@ function policy (genome, obs, out) {
     let sum = 0
     for (let i = 0; i < OBS_SIZE; i++) sum += genome[p++] * obs[i]
     sum += genome[p++]
-    hidden[h] = Math.tanh(sum)
+    hidden[h] = dtanh(sum)
   }
   for (let j = 0; j < NUM_JOINTS; j++) {
     let sum = 0
     for (let h = 0; h < HIDDEN; h++) sum += genome[p++] * hidden[h]
     sum += genome[p++]
-    out[j] = Math.tanh(sum)
+    out[j] = dtanh(sum)
   }
 }
 
@@ -100,14 +102,14 @@ function footOf (s, side) {
   const hipAngle = s.j[side * 2]
   const kneeAngle = s.j[side * 2 + 1]
   const dx = (side === 0 ? -HIP_SPAN : HIP_SPAN) / 2
-  const hx = s.x + dx * Math.cos(s.th)
-  const hy = s.y + dx * Math.sin(s.th)
+  const hx = s.x + dx * dcos(s.th)
+  const hy = s.y + dx * dsin(s.th)
   const thighA = s.th + hipAngle
-  const kx = hx + THIGH * Math.sin(thighA)
-  const ky = hy - THIGH * Math.cos(thighA)
+  const kx = hx + THIGH * dsin(thighA)
+  const ky = hy - THIGH * dcos(thighA)
   const shinA = thighA + kneeAngle
-  const fx = kx + SHIN * Math.sin(shinA)
-  const fy = ky - SHIN * Math.cos(shinA)
+  const fx = kx + SHIN * dsin(shinA)
+  const fy = ky - SHIN * dcos(shinA)
   // A foot, not a point.
   //
   // With a single contact point the figure is an inverted pendulum balanced on a pin,
@@ -124,7 +126,7 @@ export function step (s, genome, targets) {
     s.jv[0] * 0.1, s.jv[1] * 0.1, s.jv[2] * 0.1, s.jv[3] * 0.1,
     // A phase clock: locomotion is rhythmic, and without a sense of time the controller
     // has to invent its own oscillator, which it rarely manages.
-    Math.sin(s.t * 6),
+    dsin(s.t * 6),
   ]
   policy(genome, obs, targets)
 
@@ -201,7 +203,8 @@ export function evaluate (genome, steps = 900) {
     step(s, genome, targets)
     if (!s.alive) break
     uprightTicks += 1
-    for (let j = 0; j < NUM_JOINTS; j++) effort += Math.abs(s.jv[j])
+    // Squared, not absolute: see the effort term below.
+    for (let j = 0; j < NUM_JOINTS; j++) effort += s.jv[j] * s.jv[j]
   }
 
   const distance = s.x
@@ -219,7 +222,23 @@ export function evaluate (genome, steps = 900) {
    * two-stage curriculum that emerges on its own: learn to stand, then learn to travel.
    */
   const survival = aliveFraction * aliveFraction
-  const fitness = aliveFraction * 15 + distance * 5 * survival - (effort / steps) * 0.02
+  /**
+   * The effort term is squared joint velocity, not absolute, and weighted to matter.
+   *
+   * With a linear term at 0.02 the penalty was measured at 0.7 points against 58.5 points
+   * of distance — about 1%, which is no constraint at all. What evolved was not a walk:
+   * the champion's joints sat at 8.9 rad/s each, and its *peak* summed joint speed (36.00)
+   * was within 1% of its *average* (35.72), meaning every joint was pinned to its speed
+   * limit for essentially all 1800 steps. It crossed the ground at 0.40 m/s — under a
+   * third of walking pace — by vibrating. Optimising exactly what was asked for.
+   *
+   * Squaring is what distinguishes the two cases. A saturated gait pays 12.8 points here
+   * while a smooth 2 rad/s gait pays 0.6 — a 20x separation that a linear term cannot
+   * produce at any coefficient, because linear scales both alike. Standing still still
+   * scores 15 and a shuffling traveller well above that, so this discourages frantic
+   * motion without reintroducing the stall that the survival term exists to prevent.
+   */
+  const fitness = aliveFraction * 15 + distance * 5 * survival - (effort / steps) * 0.04
   return {
     fitness: Number(fitness.toFixed(4)),
     distance: Number(distance.toFixed(3)),

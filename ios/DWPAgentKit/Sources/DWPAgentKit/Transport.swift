@@ -60,6 +60,9 @@ public actor AgentConnection {
     private var lastInbound = Date()
     private var running: [String: RunningTask] = [:]
     private var paused: Bool
+    /// The device's own verdict, kept separate from the owner's switch so that recovering
+    /// from a hot phone does not silently un-pause one the owner paused deliberately.
+    private var deviceFit = true
     private var loop: Task<Void, Never>?
 
     private struct RunningTask {
@@ -188,6 +191,7 @@ public actor AgentConnection {
         socket = task
         task.resume()
 
+        deviceFit = Capability.mobileState().fitForWork
         lastInbound = clock()
         connectedSince = clock()
         everConnected = true
@@ -221,7 +225,7 @@ public actor AgentConnection {
         while !Task.isCancelled {
             do {
                 let message = try await task.receive()
-                await noteInbound()
+                noteInbound()
                 switch message {
                 case .string(let text): await handle(Data(text.utf8))
                 case .data(let data): await handle(data)
@@ -251,10 +255,29 @@ public actor AgentConnection {
                 return "server went silent"
             }
 
+            let mobile = Capability.mobileState()
+
+            /**
+             * Withdraw from the rotation rather than declining offer by offer.
+             *
+             * Declining is the wrong mechanism here: the server releases the task and
+             * re-offers it immediately, so an unfit device spins in a decline loop that
+             * hammers the control service and burns exactly the battery Low Power Mode
+             * was asked to save. Consent already means "do not send me work", so say that
+             * once and say it again when the device recovers.
+             */
+            if mobile.fitForWork != deviceFit {
+                deviceFit = mobile.fitForWork
+                send("consent.update", consentJSON())
+                emit(deviceFit ? "device.rejoined" : "device.withdrew",
+                     deviceFit ? "ready for work again" : mobile.unfitReason)
+                if !deviceFit { abandonRunning() }
+            }
+
             send("heartbeat", .object([
                 ("freeRamMb", .int(Capability.availableMemoryMb)),
                 ("running", .int(running.count)),
-                ("mobile", Capability.mobileState().json),
+                ("mobile", mobile.json),
             ]))
 
             // Our own ping, so a server that has nothing to say is still distinguishable
@@ -311,16 +334,14 @@ public actor AgentConnection {
         if !config.allowCompute { return "compute-not-allowed" }
         if !Self.adapters.contains(offer.adapter) { return "no-such-adapter" }
         if running.count >= config.maxConcurrency { return "at-capacity" }
-        // The mobile-only check. Taking work this device cannot finish costs the job a
-        // full lease timeout; declining costs it an immediate requeue to someone else.
+        // A backstop, not the mechanism. Withdrawal happens through consent in the
+        // heartbeat; this only catches an offer already in flight when that was sent.
         let mobile = Capability.mobileState()
-        if !mobile.fitForWork {
-            return "device-not-fit(thermal=\(mobile.thermal),lowPower=\(mobile.lowPowerMode))"
-        }
+        if !mobile.fitForWork { return "device-not-fit(\(mobile.unfitReason))" }
         return nil
     }
 
-    public static let adapters = [EchoAdapter.name, InferenceAdapter.name]
+    public static let adapters = [EchoAdapter.name, InferenceAdapter.name, WalkerAdapter.name]
 
     private func accept(_ offer: TaskOffer) async {
         if let reason = eligibility(for: offer) {
@@ -384,6 +405,8 @@ public actor AgentConnection {
             switch offer.adapter {
             case InferenceAdapter.name:
                 output = try await InferenceAdapter.shared.run(offer.input, context: context)
+            case WalkerAdapter.name:
+                output = try await WalkerAdapter.run(offer.input, context: context)
             default:
                 output = try await EchoAdapter.run(offer.input, hostId: config.hostId)
             }
@@ -470,8 +493,10 @@ public actor AgentConnection {
         return record
     }
 
+    /// The server sees one flag. It is the union of the owner's switch and the device's
+    /// own readiness — both mean "do not send me work", and the server need not care which.
     private func consentJSON() -> JSONValue {
-        ConsentState(paused: paused, allowCompute: config.allowCompute,
+        ConsentState(paused: paused || !deviceFit, allowCompute: config.allowCompute,
                      allowBrowser: false, maxConcurrency: config.maxConcurrency).json
     }
 }

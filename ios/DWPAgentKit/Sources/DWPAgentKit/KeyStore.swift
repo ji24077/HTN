@@ -58,7 +58,14 @@ public struct FileKeyStore: KeyStore {
         } else if let override = ProcessInfo.processInfo.environment["DWP_HOME"] {
             self.home = URL(fileURLWithPath: override)
         } else {
+            #if os(macOS)
             self.home = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".dwp-ios")
+            #else
+            // Application Support rather than Documents: this is agent state, not
+            // something the owner should see in Files or have swept up by iCloud backup.
+            let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            self.home = base.appendingPathComponent("dwp-agent")
+            #endif
         }
     }
 

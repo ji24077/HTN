@@ -176,3 +176,32 @@ public struct InferenceInput: Sendable {
                               from: from, count: count)
     }
 }
+
+/**
+ * One slice of a generation: evaluate these candidate gaits.
+ *
+ * Only the parent genome and a list of seeds travel. Each host rebuilds the candidates
+ * itself from parent + seed, so a generation of hundreds costs one genome of bandwidth
+ * rather than hundreds — which matters more on a phone than anywhere else in the fleet.
+ */
+public struct WalkerInput: Sendable {
+    public let generation: Int
+    public let parent: [Double]
+    public let sigma: Double
+    public let seeds: [Int]
+    public let steps: Int
+
+    public static func parse(_ v: JSONValue) -> WalkerInput? {
+        guard let generation = v["generation"]?.intValue, generation >= 0,
+              let parentRaw = v["parent"]?.arrayValue,
+              let sigma = v["sigma"]?.doubleValue, sigma > 0,
+              let seedsRaw = v["seeds"]?.arrayValue,
+              let steps = v["steps"]?.intValue, steps > 0, steps <= 5000
+        else { return nil }
+        let parent = parentRaw.compactMap { $0.doubleValue }
+        let seeds = seedsRaw.compactMap { $0.intValue }
+        guard parent.count == parentRaw.count, seeds.count == seedsRaw.count else { return nil }
+        return WalkerInput(generation: generation, parent: parent, sigma: sigma,
+                           seeds: seeds, steps: steps)
+    }
+}

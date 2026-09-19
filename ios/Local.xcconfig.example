@@ -1,0 +1,10 @@
+// Copy to Local.xcconfig and fill in. That file is gitignored, and — unlike settings you
+// pick in Xcode's UI — it survives `xcodegen generate`, which rewrites the project.
+
+// Your Apple team. Xcode → Settings → Accounts shows it, or:
+//   security find-identity -v -p codesigning
+DWP_DEVELOPMENT_TEAM = ABCDE12345
+
+// Must be globally unique. A free Apple ID cannot register a bundle id someone else has
+// already taken, and "com.dwp.agent" is exactly the kind of name that is already gone.
+DWP_BUNDLE_ID = com.yourname.dwpagent

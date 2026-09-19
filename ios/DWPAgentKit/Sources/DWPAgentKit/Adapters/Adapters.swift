@@ -29,11 +29,17 @@ public struct ExecContext: Sendable {
 }
 
 public var deviceHostname: String {
+    #if os(iOS)
+    // The device model, not `ProcessInfo.hostName`. On a phone that property is either
+    // useless or actively wrong — in the Simulator it returns the Mac's hostname, which
+    // would put a laptop's name on results a phone computed. The model identifier is
+    // honest, stable, and not a name the owner chose, so it leaks nothing personal.
+    return Capability.deviceModel
+    #else
     let name = ProcessInfo.processInfo.hostName
     if name.isEmpty || name == "localhost" { return Capability.deviceModel }
-    // macOS reports "name.local"; the desktop agent's os.hostname() does the same, so
-    // this is left exactly as the platform gives it.
     return name
+    #endif
 }
 
 // ------------------------------------------------------------------------ echo

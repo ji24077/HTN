@@ -3,7 +3,21 @@ import Foundation
 import UIKit
 #endif
 
-public let agentVersion = "0.2.0-ios"
+/**
+ * This build's version, asserted rather than derived.
+ *
+ * The desktop agent reads its version from `package.json` at build time, because a
+ * hand-edited constant had already drifted once. Copying that here would be wrong: an
+ * installed iOS build legitimately lags the repo by days, so a phone reporting an older
+ * version than `package.json` is correct behaviour, not a bug — the handshake should say
+ * what the device is actually running.
+ *
+ * What must not happen is this constant being wrong for the build it shipped in, so
+ * `VersionTests` checks it against `packages/agent/package.json` at test time. The `-ios`
+ * suffix is deliberate: it distinguishes the two implementations in a handshake, so the
+ * test compares only the numeric prefix.
+ */
+public let agentVersion = "0.3.0-ios"
 
 /**
  * What this device is, and — the part that matters on a phone — what state it is in.
@@ -104,17 +118,49 @@ public enum Capability {
         public var batteryLevel: Double?
         public var charging: Bool?
         public var availableMemoryMb: Int
+        /**
+         * Whether the battery-and-power rules bind on this platform.
+         *
+         * They are a phone's rules. A Mac reports Low Power Mode too, but the desktop
+         * agent has never consulted it and a laptop plugged into a wall is not making the
+         * trade-off a phone is. Reporting the state either way is useful; enforcing it on
+         * a machine it was not written for just makes a test host refuse everything.
+         */
+        public var powerPolicyApplies: Bool
+
+        public init(thermal: String, lowPowerMode: Bool, batteryLevel: Double?,
+                    charging: Bool?, availableMemoryMb: Int, powerPolicyApplies: Bool = true) {
+            self.thermal = thermal
+            self.lowPowerMode = lowPowerMode
+            self.batteryLevel = batteryLevel
+            self.charging = charging
+            self.availableMemoryMb = availableMemoryMb
+            self.powerPolicyApplies = powerPolicyApplies
+        }
 
         /// Is it reasonable to accept sustained work right now?
         ///
-        /// Deliberately conservative: a phone that is hot, unplugged and nearly flat is a
-        /// host that will drop its task and annoy its owner, and a declined offer costs
-        /// the scheduler a requeue while an abandoned one costs a whole lease timeout.
+        /// Deliberately conservative: a phone that is hot, unplugged and nearly flat will
+        /// drop its task and annoy its owner. An abandoned task costs the job a whole
+        /// lease timeout, where staying out of the rotation costs it nothing.
         public var fitForWork: Bool {
+            // Overheating is a hardware fact on any platform, so this one always binds.
             if thermal == "critical" { return false }
+            guard powerPolicyApplies else { return true }
             if lowPowerMode { return false }
             if let charging, let batteryLevel, !charging, batteryLevel < 0.2 { return false }
             return true
+        }
+
+        /// Why the device is holding back, for the log and the dashboard.
+        public var unfitReason: String {
+            if thermal == "critical" { return "thermal=critical" }
+            guard powerPolicyApplies else { return "" }
+            if lowPowerMode { return "low-power-mode" }
+            if let charging, let batteryLevel, !charging, batteryLevel < 0.2 {
+                return "battery=\(Int(batteryLevel * 100))% and unplugged"
+            }
+            return ""
         }
 
         public var json: JSONValue {
@@ -124,6 +170,7 @@ public enum Capability {
                 ("availableMemoryMb", .int(availableMemoryMb)),
                 ("fitForWork", .bool(fitForWork)),
             ]
+            if !unfitReason.isEmpty { pairs.append(("unfitReason", .string(unfitReason))) }
             if let batteryLevel { pairs.append(("batteryLevel", .double(batteryLevel))) }
             if let charging { pairs.append(("charging", .bool(charging))) }
             return .object(pairs)
@@ -156,12 +203,23 @@ public enum Capability {
         }
         #endif
 
+        #if os(iOS)
+        let policyApplies = true
+        #else
+        let policyApplies = false
+        #endif
+
+        // A seam for the scenario suite: there is no way to make a test machine genuinely
+        // overheat, and "the device withdraws when it is unfit" is behaviour worth proving.
+        let forcedUnfit = ProcessInfo.processInfo.environment["DWP_FORCE_UNFIT"] == "1"
+
         return MobileState(
-            thermal: thermal,
+            thermal: forcedUnfit ? "critical" : thermal,
             lowPowerMode: ProcessInfo.processInfo.isLowPowerModeEnabled,
             batteryLevel: level,
             charging: charging,
-            availableMemoryMb: availableMemoryMb
+            availableMemoryMb: availableMemoryMb,
+            powerPolicyApplies: policyApplies
         )
     }
 }

@@ -54,47 +54,66 @@ public enum JSONValue: Sendable, Equatable {
  */
 public func jsNumber(_ d: Double) -> String {
     if d.isNaN || d.isInfinite { return "null" }   // JSON.stringify writes null for both
-    if d == 0 { return d.sign == .minus ? "0" : "0" }  // JS prints 0 for -0 inside JSON
+    if d == 0 { return "0" }                       // and 0 for -0
 
-    // Integral and within the range JS prints without an exponent.
-    if d == d.rounded(), abs(d) < 1e21 {
+    // Integers the format represents exactly. Above 2^53 this shortcut is wrong: the
+    // exact stored value of 1.2345678901234568e20 is 123456789012345683968, while
+    // JavaScript prints the shortest decimal that round-trips, 123456789012345680000.
+    // Printing the exact one is not a rounding nit — it is a different hash.
+    if d == d.rounded(), abs(d) < 9_007_199_254_740_992 {
         if let exact = Int64(exactly: d.rounded()) { return String(exact) }
     }
 
-    var s = "\(d)"
-    // Swift writes "1e-05"; JavaScript writes "0.00001" until 1e-7, then "1e-7".
-    if s.contains("e") {
-        s = jsExponential(d, swiftDescription: s)
-    } else if s.hasSuffix(".0") {
-        s.removeLast(2)
+    let swiftShortest = "\(d)"
+    guard swiftShortest.contains("e") else {
+        var plain = swiftShortest
+        if plain.hasSuffix(".0") { plain.removeLast(2) }
+        return plain
     }
-    return s
+    return jsFromShortest(swiftShortest)
 }
 
-private func jsExponential(_ d: Double, swiftDescription: String) -> String {
-    let magnitude = abs(d)
-    // JS uses plain decimal notation in this band; Swift may not.
-    if magnitude >= 1e-6 && magnitude < 1e21 {
-        var plain = String(format: "%.20f", d)
-        while plain.hasSuffix("0") { plain.removeLast() }
-        if plain.hasSuffix(".") { plain.removeLast() }
-        // Confirm the plain form still round-trips before preferring it.
-        if let back = Double(plain), back == d { return plain }
+/**
+ * ECMAScript's `Number::toString`, applied to Swift's shortest round-trip digits.
+ *
+ * Swift and JavaScript agree on *which* digits are shortest; they disagree about when to
+ * write them as plain decimal and when to use an exponent. This is that decision, taken
+ * from the spec rather than guessed: `n` is the position of the decimal point and `k` the
+ * number of significant digits.
+ */
+private func jsFromShortest(_ description: String) -> String {
+    let halves = description.split(separator: "e", maxSplits: 1)
+    guard halves.count == 2, let exponent = Int(halves[1]) else { return description }
+
+    var mantissa = String(halves[0])
+    let negative = mantissa.hasPrefix("-")
+    if negative { mantissa.removeFirst() }
+
+    var digits = mantissa
+    var pointPosition = mantissa.count
+    if let dot = mantissa.firstIndex(of: ".") {
+        pointPosition = mantissa.distance(from: mantissa.startIndex, to: dot)
+        digits = mantissa.replacingOccurrences(of: ".", with: "")
     }
-    // Normalise Swift's "1e-05" / "1e+21" to JS's "1e-5" / "1e+21".
-    var s = swiftDescription
-    if let eIndex = s.firstIndex(of: "e") {
-        let mantissa = String(s[s.startIndex..<eIndex])
-        var exponent = String(s[s.index(after: eIndex)...])
-        var sign = "+"
-        if exponent.hasPrefix("-") { sign = "-"; exponent.removeFirst() }
-        else if exponent.hasPrefix("+") { exponent.removeFirst() }
-        while exponent.count > 1 && exponent.hasPrefix("0") { exponent.removeFirst() }
-        var m = mantissa
-        if m.hasSuffix(".0") { m.removeLast(2) }
-        s = "\(m)e\(sign)\(exponent)"
+    while digits.count > 1 && digits.hasSuffix("0") { digits.removeLast() }
+
+    let n = pointPosition + exponent   // value == 0.<digits> x 10^n
+    let k = digits.count
+
+    var out: String
+    if k <= n && n <= 21 {
+        out = digits + String(repeating: "0", count: n - k)
+    } else if 0 < n && n <= 21 {
+        let split = digits.index(digits.startIndex, offsetBy: n)
+        out = String(digits[..<split]) + "." + String(digits[split...])
+    } else if -6 < n && n <= 0 {
+        out = "0." + String(repeating: "0", count: -n) + digits
+    } else {
+        let e = n - 1
+        let mantissaText = k == 1 ? digits : String(digits.first!) + "." + String(digits.dropFirst())
+        out = "\(mantissaText)e\(e >= 0 ? "+" : "-")\(abs(e))"
     }
-    return s
+    return negative ? "-" + out : out
 }
 
 /// Escape a string the way `JSON.stringify` does: control characters only, plus `"` and `\`.
@@ -293,7 +312,8 @@ private struct JSONParser {
             guard i + 1 < bytes.count, bytes[i] == UInt8(ascii: "\\"), bytes[i + 1] == UInt8(ascii: "u") else {
                 return Unicode.Scalar(0xFFFD)
             }
-            i += 2
+            // Step over the backslash only: readHex4 expects to start on the "u".
+            i += 1
             guard let low = readHex4(), low >= 0xDC00, low <= 0xDFFF else { return Unicode.Scalar(0xFFFD) }
             let combined = 0x10000 + ((high - 0xD800) << 10) + (low - 0xDC00)
             return Unicode.Scalar(combined) ?? Unicode.Scalar(0xFFFD)

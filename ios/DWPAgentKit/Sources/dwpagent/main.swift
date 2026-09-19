@@ -109,6 +109,50 @@ case "selftest-json":
     guard let value = JSONValue.parse(input) else { fail("could not parse stdin as JSON") }
     print(value.stringify())
 
+/// Verify dmath against vectors the JS reference produced, and say only ok or the first
+/// disagreement — printing 4000 bit patterns back would bury the answer.
+case "selftest-dmath":
+    var bad: String? = nil
+    var seen = 0
+    for line in (try String(data: FileHandle.standardInput.readDataToEndOfFile(), encoding: .utf8) ?? "")
+        .split(separator: "\n") {
+        let f = line.split(separator: " ").compactMap { UInt64($0) }
+        guard f.count == 5 else { continue }
+        seen += 1
+        let x = Double(bitPattern: f[0])
+        let checks: [(String, UInt64, UInt64)] = [
+            ("sin", JSMath.sin(x).bitPattern, f[1]),
+            ("cos", JSMath.cos(x).bitPattern, f[2]),
+            ("tanh", JSMath.tanh(x / 20).bitPattern, f[3]),
+            ("log", JSMath.log(abs(x) + 1e-9).bitPattern, f[4]),
+        ]
+        for (name, got, want) in checks where got != want {
+            if bad == nil {
+                bad = "\(name)(\(x)): swift \(Double(bitPattern: got)) vs js \(Double(bitPattern: want))"
+            }
+        }
+    }
+    print(bad ?? (seen > 0 ? "ok" : "no vectors on stdin"))
+
+/// Score genomes the JS reference also scores, so divergence can be measured rather than assumed.
+case "selftest-walker":
+    let steps = Int(flag("steps") ?? "1800") ?? 1800
+    var out: [JSONValue] = []
+    for line in (try String(data: FileHandle.standardInput.readDataToEndOfFile(), encoding: .utf8) ?? "")
+        .split(separator: "\n") {
+        guard let v = JSONValue.parse(Data(line.utf8)),
+              let parent = v["parent"]?.arrayValue?.compactMap({ $0.doubleValue }),
+              let sigma = v["sigma"]?.doubleValue,
+              let seed = v["seed"]?.intValue else { continue }
+        let g = Walker.perturb(parent: parent, sigma: sigma, seed: seed)
+        let r = Walker.evaluate(g, steps: steps)
+        out.append(.object([
+            ("seed", .int(seed)), ("fitness", .double(r.fitness)),
+            ("distance", .double(r.distance)), ("ticks", .int(r.ticks)), ("fell", .bool(r.fell)),
+        ]))
+    }
+    print(JSONValue.array(out).stringify())
+
 default:
     print("""
     dwpagent — the iOS agent core, on the command line

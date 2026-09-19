@@ -22,3 +22,4 @@ ios/DWPAgent.xcodeproj/
 ios/Local.xcconfig
 ios/.build-device/
 *.tsbuildinfo
+ios/DWPAgentKit/.swiftpm/
