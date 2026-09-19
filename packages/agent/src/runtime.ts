@@ -21,7 +21,7 @@
  * thing worse than guessing wrong is guessing wrong with no way to say so.
  */
 import { existsSync, readFileSync } from 'node:fs'
-import { hostname } from 'node:os'
+import { hostname, totalmem } from 'node:os'
 
 /** Loopback names a browser on the host can legitimately use to reach a published port. */
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '::1', '[::1]'])
@@ -140,6 +140,92 @@ export function supervisorNote(): string {
     ? 'This agent runs in a container. It restarts when the container runtime restarts it '
       + '— set that with `restart: unless-stopped` in your compose file.'
     : 'Starts by itself after a restart, with no window open.'
+}
+
+/**
+ * What this container is actually allowed to use, as opposed to what the host has.
+ *
+ * `os.cpus()` and `os.totalmem()` read the host's /proc, which Docker does not
+ * virtualise — so a container capped at 1.5 CPUs and 512 MB cheerfully told the
+ * scheduler it had 15 cores and 12 GB. Measured on this machine: every agent in a
+ * four-container fleet reported identical host figures while each was limited to a
+ * fraction of it. A scheduler that scores machines on those numbers would send the
+ * biggest slices to the smallest containers.
+ *
+ * cgroup v2 first, because that is what any current Docker uses; v1 after, for older
+ * hosts. Absent or unlimited reads as null, and the caller keeps the host's figure —
+ * which is correct for a container run with no limits at all.
+ */
+export type ContainerLimits = { cpus: number | null; memoryBytes: number | null }
+
+function readTrimmed(path: string): string | null {
+  try {
+    const text = readFileSync(path, 'utf8').trim()
+    return text === '' ? null : text
+  } catch {
+    return null
+  }
+}
+
+export function containerLimits(): ContainerLimits {
+  if (!isContainer()) return { cpus: null, memoryBytes: null }
+  return { cpus: cpuQuota(), memoryBytes: memoryLimit() }
+}
+
+function cpuQuota(): number | null {
+  // v2: "<quota> <period>", or "max <period>" when uncapped.
+  const v2 = readTrimmed('/sys/fs/cgroup/cpu.max')
+  if (v2) {
+    const [quota, period] = v2.split(/\s+/)
+    if (quota && quota !== 'max' && period) {
+      const q = Number(quota)
+      const p = Number(period)
+      if (Number.isFinite(q) && Number.isFinite(p) && q > 0 && p > 0) return q / p
+    }
+    return null
+  }
+  // v1: a quota of -1 means uncapped.
+  const q = Number(readTrimmed('/sys/fs/cgroup/cpu/cpu.cfs_quota_us'))
+  const p = Number(readTrimmed('/sys/fs/cgroup/cpu/cpu.cfs_period_us'))
+  if (Number.isFinite(q) && Number.isFinite(p) && q > 0 && p > 0) return q / p
+  return null
+}
+
+function memoryLimit(): number | null {
+  const raw = readTrimmed('/sys/fs/cgroup/memory.max')
+    ?? readTrimmed('/sys/fs/cgroup/memory/limit_in_bytes')
+  if (raw === null || raw === 'max') return null
+  const bytes = Number(raw)
+  /**
+   * An "unlimited" cgroup reports a number near 2^63, not the word `max`, on plenty of
+   * runtimes. Treating that as a real limit would have the agent claim nine exabytes of
+   * memory, so anything at or above the host's own total is no limit at all.
+   */
+  if (!Number.isFinite(bytes) || bytes <= 0 || bytes >= totalmem()) return null
+  return bytes
+}
+
+/** How much of the memory limit is still free, for a container that has one. */
+export function containerFreeBytes(): number | null {
+  const limit = memoryLimit()
+  if (limit === null) return null
+  const used = Number(readTrimmed('/sys/fs/cgroup/memory.current')
+    ?? readTrimmed('/sys/fs/cgroup/memory/usage_in_bytes'))
+  if (!Number.isFinite(used) || used < 0) return null
+  return Math.max(0, limit - used)
+}
+
+/**
+ * Which image this container came from, if the operator said.
+ *
+ * Docker does not tell a container its own image, so this can only ever be what the
+ * compose file passed in. Worth having anyway: it is the answer to "what version is that
+ * machine running", and without it a container reports the release version it was handed
+ * when it paired — a number describing the *server*, not the image it is executing.
+ */
+export function imageReference(): string | null {
+  const image = process.env.DWP_IMAGE?.trim()
+  return image && isContainer() ? image : null
 }
 
 /** Identity of the container, for a window that has to say which one it is showing. */

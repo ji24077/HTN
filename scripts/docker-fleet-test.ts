@@ -542,6 +542,81 @@ async function main(): Promise<void> {
   }, { timeoutMs: 20_000 })
   check(resumed.paused === false, `${paused.name} accepts work again`)
 
+  /**
+   * A stopping container must hand its work back, not merely disappear.
+   *
+   * This is the check that matters for `docker compose up -d`, which is now the ordinary
+   * way to deploy: it stops every agent at once. An agent that just exits leaves each
+   * task it held untouchable for the 45-second lease, so a fleet-wide restart stalls the
+   * whole queue — and, before the hand-off was ordered correctly, the server handed the
+   * task straight back to the same dying agent and burned a retry doing it.
+   */
+  step('Stopping a container while it holds work')
+  {
+    const signalJob = `signal-${randomUUID().slice(0, 8)}`
+    const signalId = `${signalJob}-000`
+    await submit([echoTask(signalId, signalJob, randomBytes(8).toString('hex'))])
+    // A long sleep, so the task is unambiguously in flight when the signal lands.
+    await submit([{
+      id: `${signalJob}-hold`, job_id: signalJob, kind: 'echo',
+      payload: { nonce: 'holding', sleepMs: 20_000 },
+      requirements: { runtime: 'cpu', vram_mib: 0 },
+      max_attempts: 3, timeout_seconds: 300,
+    }])
+    const holdId = `${signalJob}-hold`
+
+    const holder = await waitFor('the long task to start running', async () => {
+      const t = await fullTask(holdId).catch(() => null)
+      return t && t.state === 'running' && t.worker_id ? t : null
+    }, { timeoutMs: 60_000, everyMs: 500 })
+    const victim = agents.find(a => a.hostId === holder.worker_id)
+    check(victim !== undefined, 'found which container picked the task up', victim?.name ?? '?')
+
+    const stoppedAt = Date.now()
+    await docker(['stop', '-t', '30', victim!.name])
+    const stopMs = Date.now() - stoppedAt
+    const exit = (await docker(['inspect', victim!.name, '--format', '{{.State.ExitCode}}'])).stdout.trim()
+    // 137 is SIGKILL: the signal was ignored and Docker lost patience.
+    check(exit === '0', 'exited cleanly on SIGTERM rather than being killed', `exit ${exit} in ${stopMs}ms`)
+    check(stopMs < 10_000, 'stopped without waiting out the kill timeout', `${stopMs}ms`)
+    check(/agent.handing_off/.test((await docker(['logs', victim!.name])).stderr
+      + (await docker(['logs', victim!.name])).stdout), 'it logged handing its work back')
+
+    /**
+     * Requeued in seconds, not in a lease. The old behaviour parked the task for 45s;
+     * a generous ceiling here still fails loudly if the hand-off ever stops working.
+     */
+    const released = await waitFor('the task to be released', async () => {
+      const t = await fullTask(holdId)
+      return t.state === 'queued' || (t.worker_id && t.worker_id !== victim!.hostId) ? t : null
+    }, { timeoutMs: 40_000, everyMs: 500 })
+    const releaseMs = Date.now() - stoppedAt
+    check(releaseMs < 15_000, 'the work was released promptly, not held for the lease',
+      `${(releaseMs / 1000).toFixed(1)}s`)
+
+    const settled = await awaitTasks(new Set([signalId, holdId]), 180_000)
+    const hold = settled.get(holdId)!
+    check(succeeded(hold), 'the handed-back task completed on another machine',
+      `${hold.state} on ${String(hold.worker_id).slice(0, 8)} at generation ${hold.generation}`)
+    /**
+     * It must not have bounced back to the machine that was shutting down. That is what
+     * happened when the decline went out before consent was withdrawn, and it cost a
+     * retry as well as the wait.
+     */
+    check(hold.worker_id !== victim!.hostId, 'it did not go back to the container that was stopping')
+    check((hold.generation ?? 0) <= 2, 'it took one retry, not several',
+      `generation ${hold.generation}`)
+
+    await docker(['start', victim!.name])
+    const revived = await waitFor('the stopped container to come back', async () => {
+      const s2 = await guiState(victim!).catch(() => null)
+      return s2 && s2.connection === 'online' ? s2 : null
+    }, { timeoutMs: 120_000 })
+    check(revived.hostId === victim!.hostId, 'it came back as the same machine',
+      String(revived.hostId).slice(0, 8))
+    check(revived.paused === false, 'and accepting work again, not still paused from the hand-off')
+  }
+
   if (!SKIP_CHAOS) {
     /**
      * Kill a container while it holds work, and check the network does not lose it.
@@ -561,6 +636,16 @@ async function main(): Promise<void> {
     await submit(chaosBatch)
     await sleep(2_500)
     const victim = agents[agents.length - 1]!
+    /**
+     * What this machine had recorded before it was killed.
+     *
+     * The check after the restart used to be "it has some history", which passes or
+     * fails on whether the scheduler happened to send this particular container any work
+     * — nothing to do with what is being tested. Preservation is the actual claim, so
+     * compare against the count taken here. `record()` uses appendFileSync, so anything
+     * already finished is on disk and a SIGKILL cannot take it back.
+     */
+    const before = (await guiState(victim)).history?.summary?.runs ?? 0
     await docker(['kill', victim.name])
     pass(`killed ${victim.name} while the fleet was busy`)
     const after = await awaitTasks(chaosIds, 300_000)
@@ -576,8 +661,9 @@ async function main(): Promise<void> {
     }, { timeoutMs: 120_000 })
     check(back.hostId === victim.hostId, 'same host id after a restart — the volume carried its identity',
       String(back.hostId).slice(0, 8))
-    check((back.history?.summary?.runs ?? 0) > 0, 'its history survived the restart',
-      `${back.history?.summary?.runs} runs`)
+    const afterRuns = back.history?.summary?.runs ?? 0
+    check(afterRuns >= before, 'its history survived being killed',
+      `${before} runs before, ${afterRuns} after`)
   }
 
   step('Result')

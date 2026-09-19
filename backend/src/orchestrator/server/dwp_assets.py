@@ -153,11 +153,22 @@ async def workloads():
     return {"inference": inference}
 
 
+def agent_image() -> str:
+    """Which published image a new machine should run.
+
+    Configurable because a fork publishes to its own registry, and a default that names
+    somebody else's would send every new machine to an image its operator does not
+    control.
+    """
+    return os.environ.get("DWP_AGENT_IMAGE", "ghcr.io/ji24077/dwp-agent:latest")
+
+
 @router.get("/join", response_class=HTMLResponse)
 async def join(request: Request):
     origin = request.app.state.config.public_origin or str(request.base_url).rstrip("/")
     # No invite codes are embedded in HTML or third-party URLs. The app reads its own link.
     safe_origin = html.escape(origin, quote=True)
+    safe_image = html.escape(agent_image(), quote=True)
     index = read_index(True)
     links = []
     if index:
@@ -175,14 +186,68 @@ async def join(request: Request):
     return HTMLResponse(
         '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width">'
         "<title>Connect a device · Dispatch</title><style>body{font:17px/1.6 system-ui;max-width:680px;margin:64px auto;padding:24px;color:#242621;background:#f7f7f2}code{word-break:break-all}a{color:inherit}</style>"
-        "<h1>Connect your device</h1><p>Open the desktop worker or iOS app and paste the invite link from your fleet dashboard. Invitations expire after ten minutes and work once.</p>"
+        "<h1>Connect your device</h1>"
+        # Docker first, and with the invite already in the command. Every other option on
+        # this page asks the reader to fetch something and then find where to paste a
+        # code; this one is a line they can paste into a terminal on any operating
+        # system. The code is filled in by the script below rather than rendered here, so
+        # it never enters this HTML, a proxy cache, or a server log.
+        + "<h2>Run it in Docker (recommended)</h2>"
+        + "<p>One command, the same on macOS, Windows and Linux. Nothing is compiled and no port needs opening \u2014 this machine dials out.</p>"
+        + '<pre id="dockercmd" style="background:#ecece4;padding:16px;border-radius:8px;overflow-x:auto;white-space:pre-wrap"></pre>'
+        + '<p><button id="copy" style="font:inherit;padding:8px 14px;border-radius:8px;border:1px solid #242621;background:#fff;cursor:pointer">Copy</button> <span id="copied" hidden></span></p>'
+        + "<p>The window is then at <code>http://127.0.0.1:43117/</code> on that machine. Keep the <code>-v</code> volume: it holds the machine\u2019s identity and its record of what it has run.</p>"
+        + "<h2>Desktop or iOS app</h2><p>Open the desktop worker or iOS app and paste the invite link from your fleet dashboard. Invitations expire after ten minutes and work once.</p>"
         + downloads
         + "<h2>From the repository</h2><p>Install dependencies with <code>pnpm install --frozen-lockfile</code>, then open <code>pnpm agent gui</code> and paste your invite link.</p>"
         + f"<p>Server: <code>{safe_origin}</code></p><p>The iOS app must stay in the foreground to accept new work. Desktop downloads are unsigned at the operating-system level; application updates are verified against the release signing key.</p>"
-        + '<p><a href="/">Back to your fleet</a></p></html>',
+        + '<p><a href="/">Back to your fleet</a></p>'
+        # Read the code out of this page's own address. A pairing code is [0-9a-f]{32};
+        # anything else is shown as a placeholder rather than pasted into a command line.
+        #
+        # Deliberately one long line rather than a backslash-continued block. Backslash
+        # continuation is POSIX shell syntax: pasted into PowerShell, which is where a
+        # Windows contributor will paste it, every line after the first is a separate
+        # broken command. A single line wraps visually and runs everywhere.
+        + "<script>(function(){"
+        + "var c=new URLSearchParams(location.search).get('code')||'';"
+        + "if(!/^[0-9a-fA-F]{32}$/.test(c))c='YOUR-INVITE-CODE';"
+        + "var cmd='docker run -d --restart unless-stopped"
+        + " -v dwp-agent-data:/data -p 127.0.0.1:43117:43117"
+        + f" -e DWP_INVITE=\"{safe_origin}/join?code='+c+'\" {safe_image}';"
+        + "var pre=document.getElementById('dockercmd');pre.textContent=cmd;"
+        # navigator.clipboard does not exist on an insecure origin, and writeText can be
+        # refused even where it does. Both were silent: the button did nothing at all,
+        # which is worse than not having one. Select the command instead so Ctrl-C still
+        # works, and say which of the two happened.
+        + "function done(t){var n=document.getElementById('copied');"
+        + "n.textContent=t;n.hidden=false;setTimeout(function(){n.hidden=true},3000)}"
+        + "function select(){try{var r=document.createRange();r.selectNodeContents(pre);"
+        + "var s=getSelection();s.removeAllRanges();s.addRange(r);"
+        + "done('Selected \u2014 press Ctrl-C (Cmd-C on a Mac) to copy.')}"
+        + "catch(e){done('Select the command above and copy it.')}}"
+        # Race the write against a timer. writeText does not merely fail when the page
+        # is not the visible tab -- it never settles at all, so neither callback runs and
+        # the button sits there having done nothing, with nothing in the console either.
+        # Measured: pending after 1.5s with visibilityState 'hidden'.
+        + "document.getElementById('copy').onclick=function(){"
+        + "if(!navigator.clipboard||!navigator.clipboard.writeText){select();return}"
+        + "var settled=false;"
+        + "var giveUp=setTimeout(function(){if(!settled){settled=true;select()}},600);"
+        + "navigator.clipboard.writeText(cmd).then(function(){"
+        + "if(settled)return;settled=true;clearTimeout(giveUp);done('Copied.')},"
+        + "function(){if(settled)return;settled=true;clearTimeout(giveUp);select()})};"
+        + "})();</script></html>",
         headers={
             "Referrer-Policy": "no-referrer",
             "Cache-Control": "no-store",
             "X-Content-Type-Options": "nosniff",
+            # This page needs nothing from anywhere, and now carries one inline script
+            # that reads the invite code out of the address bar. Say so explicitly rather
+            # than leaving the page open to whatever a proxy or extension injects.
+            "Content-Security-Policy": (
+                "default-src 'none'; style-src 'unsafe-inline'; "
+                "script-src 'unsafe-inline'; form-action 'none'; base-uri 'none'"
+            ),
         },
     )

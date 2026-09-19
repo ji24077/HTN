@@ -15,6 +15,72 @@ docker run -d --name dwp-agent --restart unless-stopped \
 That is the whole thing. The container joins, connects, and starts accepting work. The
 window is at `http://127.0.0.1:43117/` — open it and the agent tells you the rest.
 
+## How another machine gets the image
+
+Someone joining does not have this repository and should not need it. They need two
+things: the image, and an invite.
+
+**The image is published to a registry.** `.github/workflows/agent-image.yml` builds it
+for `linux/amd64` and `linux/arm64` on every push to `main` and pushes it to
+`ghcr.io/<owner>/dwp-agent`. Both architectures are required, not a nicety: a
+single-arch image does not fail helpfully on the wrong CPU — Docker Desktop runs it
+under emulation at a fraction of the speed, which reads as "that machine is slow"
+rather than "that image is for a different processor".
+
+To publish by hand, or from a fork:
+
+```sh
+echo <a GitHub token with write:packages> | docker login ghcr.io -u <you> --password-stdin
+node scripts/publish-image.ts                 # builds both arches, pushes, prints the digest
+node scripts/publish-image.ts --dry-run       # build both, push nothing
+```
+
+It works out the registry from the repository's git remote, so a fork publishes to its
+own namespace rather than to someone else's. Three tags go out each time: `latest` for
+the docs, the version for an operator who wants to pin, and the commit SHA so a running
+container can be traced back to a line of code.
+
+**The invite carries the command.** The `/join?code=…` page every invite link points at
+now leads with the Docker command, with that invite already substituted in, and a copy
+button. So the whole of "how do I add my machine" is: open the link you were sent, copy
+one line, paste it into a terminal. The code is filled in by the page's own script from
+its address bar rather than rendered into the HTML, so it stays out of server logs and
+proxy caches. The command is deliberately one long line — backslash continuations are
+POSIX shell syntax and would break every line after the first when pasted into
+PowerShell, which is exactly where a Windows contributor will paste it.
+
+Set `DWP_AGENT_IMAGE` on the control service if you publish somewhere other than the
+default, so that page names your image rather than the default one.
+
+**For someone who prefers a compose file**, `deploy/compose.agent.remote.yaml` pulls the
+published image and needs nothing else from this repository:
+
+```sh
+curl -O https://raw.githubusercontent.com/ji24077/HTN/main/deploy/compose.agent.remote.yaml
+DWP_INVITE='https://your-control-service/join?code=CODE' \
+  docker compose -f compose.agent.remote.yaml up -d
+```
+
+## What the rest of the fleet sees
+
+Nothing about a containerised machine looks different from anywhere else, which is the
+point — the container is a packaging decision, not a protocol one.
+
+- **On the fleet dashboard**, it is an ordinary worker: its label, the adapters it can
+  run, its CPU and RAM, whether it is alive, and every task it has been given. The
+  scheduler does not know or care that it is a container.
+- **On the machine itself**, the window at `http://127.0.0.1:43117/` shows the same app
+  as a laptop install: connection status, what is running right now, the "Recent work"
+  panel with its timeline and per-adapter totals, and the pause switch. It adds one row
+  — `Runs in`, naming the image and container — and swaps the login-service and update
+  rows for what is true in a container.
+- **From another machine**, nothing. The window is published to the host's loopback by
+  default and gated by a path token. Add a name to `DWP_GUI_ALLOWED_HOSTS` and publish
+  the port more widely only if you actually want that.
+
+Results are signed by a key that never leaves `/data`, so a container proves which
+machine ran a task in exactly the way a laptop does.
+
 ## Why this replaced the compiled binaries
 
 The agent used to ship as five cross-compiled executables plus two desktop app bundles,
@@ -130,6 +196,84 @@ stays unprivileged.
 
 If the control service already has a public HTTPS address, you need none of this.
 
+## Updates, and how they are gated
+
+**No device ever rebuilds anything.** One build produces one multi-architecture image;
+every machine pulls the same bytes and runs them. That is the difference from the binary
+story, where a release meant five compiles, two app bundles, and a signed manifest, and
+"is that machine on the new version" was a question with three possible answers.
+
+Nor is there a build per architecture *for the operator*: `linux/amd64` and `linux/arm64`
+go out under one tag, and Docker picks the right one on each machine. A contributor on an
+Apple laptop and one on a cloud VM run `docker pull` on the same name.
+
+**A containerised agent never updates itself.** This is deliberate (see above), and it is
+also what makes updates gateable: nothing changes on a machine until someone pulls. The
+gate is which reference the machine is pointed at.
+
+| You point a machine at | It moves when | Use it for |
+|---|---|---|
+| `dwp-agent:latest` with `pull_policy: always` | every `docker compose up -d` | a lab, or your own machines |
+| `dwp-agent:0.4.0` | you edit the file | a fleet you want to move deliberately |
+| `dwp-agent@sha256:…` | you edit the file | production, and anything you need to be certain about |
+
+`node scripts/publish-image.ts` prints the digest for exactly this reason. A tag can be
+moved by whoever can push to the registry; a digest names specific bytes and cannot.
+Pinning by digest is the container equivalent of the pinned release-signing key the
+binary path used — the guarantee is "these exact bytes", arrived at differently.
+
+For a staged rollout, publish a second tag and point some machines at it:
+
+```sh
+docker buildx imagetools create -t ghcr.io/<owner>/dwp-agent:canary ghcr.io/<owner>/dwp-agent:latest
+# a week later, if nothing broke
+docker buildx imagetools create -t ghcr.io/<owner>/dwp-agent:stable ghcr.io/<owner>/dwp-agent:canary
+```
+
+That retags without rebuilding, so `stable` is provably the same bytes that ran as
+`canary`.
+
+**Seeing what each machine is on.** Every agent reports its image as its version, so the
+fleet dashboard answers "who is still on the old one" directly:
+
+```sh
+curl -sH "authorization: Bearer $ADMIN_TOKEN" $SERVER/v1/workers \
+  | python3 -c 'import sys,json;[print(w["id"][:8], w["capabilities"]["machine"]["agent_version"]) for w in json.load(sys.stdin)]'
+```
+
+This is why `DWP_IMAGE` is set in the compose files. Docker does not tell a container
+what image it came from, so without it the agent has nothing truthful to report — and it
+used to report the release version the *server* was offering when it paired, which is a
+fact about the server and identical on every container regardless of what it was running.
+
+**If a machine's owner wants updates to be automatic**, that is their choice to make on
+their machine, not something the fleet does to them. A cron entry or a systemd timer
+running `docker compose pull && docker compose up -d` is enough; so is
+[Watchtower](https://containrrr.dev/watchtower/) if they prefer something with a UI.
+Work in flight is handed back rather than lost, so this is safe to run unattended.
+
+## What a container reports about itself
+
+A container is limited by its cgroup, and `/proc` inside it is the host's. So
+`os.cpus()` and `os.totalmem()` describe the machine the container is on, not the
+container — an agent capped at `--cpus 1.5 --memory 512m` reported 15 cores and 12 GB
+until this was fixed, which is what a scheduler would have used to decide how much work
+it could take.
+
+The agent now reads `cpu.max` and `memory.max` from the cgroup (v2, falling back to v1)
+and reports those, falling back to the host's figures when the container genuinely has no
+limit:
+
+| Container | Reports |
+|---|---|
+| `--cpus 1.5 --memory 512m` | 2 cores, 512 MB total, free memory from `memory.current` |
+| `--cpus 4 --memory 2g` | 4 cores, 2048 MB |
+| no limits | the host's cores and memory, which is the truth |
+
+A fractional CPU quota is rounded rather than floored, because `--cpus 1.5` is
+meaningfully more than one core's worth of work and flooring would make every
+fractionally limited machine look like the smallest possible worker.
+
 ## Optional workloads
 
 The default image runs `echo` and `walker_evolution`, which are pure JavaScript and need
@@ -176,6 +320,10 @@ containers with nothing but an invite each, and then checks the claims that matt
   name the same machine — the check that would catch two connections getting crossed
 - each container's own window agrees with the server about how many runs it did
 - pausing stops work and resuming restarts it
+- stopping a container hands its work back rather than abandoning it: `docker stop`
+  exits cleanly in under a second, the task is requeued in well under a second instead
+  of waiting out its 45-second lease, and it does not come back to the machine that is
+  shutting down
 - killing a container mid-flight loses no tasks, and restarting it brings back the same
   machine with its history intact
 
@@ -183,3 +331,27 @@ Useful flags: `--agents N`, `--tasks M`, `--skip-build`, `--skip-chaos`, `--keep
 everything running to poke at it).
 
 Measured on one laptop: 8 containers, 300 tasks, all verified, 41 tasks/second.
+
+## Stopping and updating
+
+`docker stop`, `docker compose down`, and the stop half of `docker compose up -d` all
+send SIGTERM. The agent answers it by withdrawing consent, handing back whatever it is
+holding, and closing the connection — measured at under 300ms, with the task picked up
+by another machine within a second.
+
+That ordering matters and was got wrong first. Declining the task *before* withdrawing
+consent handed it straight back to the agent that was in the middle of dying: the server
+finishes a declined task and immediately looks for another to offer the same open
+connection. The task was reassigned to the same host 200ms after being returned, sat
+there until the 45-second lease expired, and burned one of its three attempts doing it.
+A fleet-wide restart could have exhausted a task's retries on hand-offs alone.
+
+So updating a fleet is just:
+
+```sh
+docker compose -f deploy/compose.agent.remote.yaml pull
+docker compose -f deploy/compose.agent.remote.yaml up -d
+```
+
+Work in flight moves to another machine rather than stalling, and each container comes
+back as the same machine with its history intact.

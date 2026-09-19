@@ -1,0 +1,51 @@
+# Join the network with no checkout of this repository.
+#
+#   curl -O https://raw.githubusercontent.com/ji24077/HTN/main/deploy/compose.agent.remote.yaml
+#   DWP_INVITE='https://your-control-service/join?code=CODE' \
+#     docker compose -f compose.agent.remote.yaml up -d
+#
+# This is the file for everyone who is not developing the agent. It pulls a published
+# image rather than building one, so it needs nothing from this repository but itself —
+# which is the difference between "run one command" and "clone a monorepo, install pnpm,
+# and build".
+#
+# deploy/compose.agent.yaml is the same deployment with `build:` instead, for working on
+# the agent itself.
+name: dwp-agent
+
+services:
+  agent:
+    image: ${DWP_AGENT_IMAGE:-ghcr.io/ji24077/dwp-agent:latest}
+    # Pull a newer image on `docker compose up` rather than sitting on a stale one. The
+    # agent cannot update itself in a container by design, so this is the update path.
+    pull_policy: always
+    restart: unless-stopped
+    environment:
+      DWP_INVITE: ${DWP_INVITE:-}
+      DWP_SERVER: ${DWP_SERVER:-}
+      DWP_CODE: ${DWP_CODE:-}
+      DWP_LABEL: ${DWP_LABEL:-}
+      DWP_IMAGE: ${DWP_AGENT_IMAGE:-ghcr.io/ji24077/dwp-agent:latest}
+      DWP_GUI_ALLOWED_HOSTS: ${DWP_GUI_ALLOWED_HOSTS:-}
+    ports:
+      - "127.0.0.1:${DWP_GUI_PUBLISH_PORT:-43117}:43117"
+    volumes:
+      # This machine's identity and its record of what it has run. Recreating the
+      # container without this makes a different machine that has to be invited again.
+      - agent-data:/data
+    # Long enough for the agent to hand back the task it is holding before it goes; it
+    # normally takes well under a second, and Docker's default 10s already covers it.
+    stop_grace_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: ${DWP_CPUS:-2.0}
+          memory: ${DWP_MEMORY:-1g}
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+volumes:
+  agent-data:

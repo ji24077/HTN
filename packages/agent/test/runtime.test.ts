@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { hostname } from 'node:os'
-import { guiBindHost, guiPort, hostAllowed, isContainer, shouldOpenWindow, supervisorNote } from '../src/runtime.ts'
+import {
+  containerFreeBytes, containerLimits, guiBindHost, guiPort, hostAllowed, imageReference,
+  isContainer, shouldOpenWindow, supervisorNote,
+} from '../src/runtime.ts'
+import { probe } from '../src/capability.ts'
 
 /**
  * Every test here drives the explicit override rather than the filesystem sniff.
@@ -108,4 +112,48 @@ test('extra hosts are opt-in, by name, and never implied', () => {
 test('the window is told who keeps this agent alive', () => {
   withEnv({ DWP_CONTAINER: '1' }, () => assert.match(supervisorNote(), /container runtime restarts it/))
   withEnv({ DWP_CONTAINER: '0' }, () => assert.match(supervisorNote(), /restart, with no window open/))
+})
+
+test('a container with no limits keeps the host figures', () => {
+  // The cgroup files do not exist on macOS, so this also covers "cannot read them".
+  withEnv({ DWP_CONTAINER: '0' }, () => {
+    const limits = containerLimits()
+    assert.equal(limits.cpus, null)
+    assert.equal(limits.memoryBytes, null)
+    assert.equal(containerFreeBytes(), null)
+  })
+})
+
+test('the image is reported only when the operator declared one, and only in a container', () => {
+  withEnv({ DWP_CONTAINER: '1', DWP_IMAGE: 'ghcr.io/example/dwp-agent:1.2.3' }, () => {
+    assert.equal(imageReference(), 'ghcr.io/example/dwp-agent:1.2.3')
+  })
+  withEnv({ DWP_CONTAINER: '1', DWP_IMAGE: '   ' }, () => assert.equal(imageReference(), null))
+  withEnv({ DWP_CONTAINER: '1', DWP_IMAGE: undefined }, () => assert.equal(imageReference(), null))
+  // On a laptop the variable means nothing and must not be reported as a version.
+  withEnv({ DWP_CONTAINER: '0', DWP_IMAGE: 'ghcr.io/example/dwp-agent:1.2.3' }, () => {
+    assert.equal(imageReference(), null)
+  })
+})
+
+test('a container reports its image as its version, never the server release it paired against', () => {
+  withEnv({ DWP_CONTAINER: '1', DWP_IMAGE: 'ghcr.io/example/dwp-agent:1.2.3' }, () => {
+    // The release argument is what the *server* was offering; a container never runs it.
+    assert.equal(probe(['echo'], '0.4.0+f4e80599').agentVersion, 'ghcr.io/example/dwp-agent:1.2.3')
+  })
+  withEnv({ DWP_CONTAINER: '1', DWP_IMAGE: undefined }, () => {
+    assert.match(probe(['echo'], '0.4.0+f4e80599').agentVersion, /set DWP_IMAGE/)
+  })
+  withEnv({ DWP_CONTAINER: '0', DWP_IMAGE: undefined }, () => {
+    assert.equal(probe(['echo'], '0.4.0+f4e80599').agentVersion, '0.4.0+f4e80599')
+  })
+})
+
+test('capability stays within what the protocol accepts', () => {
+  withEnv({ DWP_CONTAINER: '0' }, () => {
+    const cap = probe(['echo', 'walker_evolution'])
+    assert.ok(Number.isInteger(cap.logicalCores) && cap.logicalCores > 0, 'cores must be a positive integer')
+    assert.ok(Number.isInteger(cap.totalRamMb) && cap.totalRamMb > 0, 'total RAM must be a positive integer')
+    assert.ok(Number.isInteger(cap.freeRamMb) && cap.freeRamMb >= 0, 'free RAM must be a non-negative integer')
+  })
 })

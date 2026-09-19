@@ -48,9 +48,13 @@ docker run -d --restart unless-stopped -v dwp-agent-data:/data -p 127.0.0.1:4311
 Nothing is compiled per platform and nothing needs a port open: the agent dials out, so
 a machine in another country joins the same way one in the next room does. The window at
 `http://127.0.0.1:43117/` is the same desktop app as before — status, recent work, the
-pause switch — served by the agent process itself. See
-[the agent as a container](docs/docker-agent.md) for several agents on one host,
-optional ML workloads, and putting the container on a tailnet.
+pause switch — served by the agent process itself.
+
+Whoever you invite does not need this repository. The image is published to
+`ghcr.io/<owner>/dwp-agent` by `.github/workflows/agent-image.yml`, and the `/join` page
+their invite link points at gives them that command with their code already in it. See
+[the agent as a container](docs/docker-agent.md) for publishing, several agents on one
+host, optional ML workloads, and putting the container on a tailnet.
 
 ## Project layout
 

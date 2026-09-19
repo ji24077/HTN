@@ -1,4 +1,4 @@
-import { freemem } from 'node:os'
+import { setTimeout as sleep } from 'node:timers/promises'
 import WebSocket from 'ws'
 import {
   decode, envelope, mintAssertion, signAttestation, hashOutput, resultTooLarge, JSON_LIMIT,
@@ -11,7 +11,7 @@ import { fallbackLookup, dnsFallbackEnabled, installDnsFallback, directDial } fr
 import { applyUpdate, restartIntoNewVersion } from './update.ts'
 import { AGENT_VERSION, isCompiledBinary } from './paths.ts'
 import { isContainer } from './runtime.ts'
-import { probe } from './capability.ts'
+import { freeRamMb, probe } from './capability.ts'
 import { isPaused, type AgentConfig } from './config.ts'
 import { runEcho } from './adapters/echo.ts'
 import { runInference } from './adapters/inference.ts'
@@ -102,6 +102,41 @@ export type AgentHandle = {
   retryNow(): void
   /** Stop for good: no more work, no reconnection. Used when leaving a network. */
   stop(): void
+  /**
+   * Give back any work in flight, then close the connection — for a process that is
+   * about to disappear. Resolves once the server has been told or the attempt has run
+   * out of time, whichever comes first, and never rejects.
+   */
+  handOff(): Promise<void>
+}
+
+/**
+ * How long a shutdown may spend being polite.
+ *
+ * `docker stop` allows ten seconds before SIGKILL, and a person pressing Ctrl-C expects
+ * the prompt back. Three seconds is long enough for a decline frame and a close
+ * handshake on any working link, and short enough that a dead link does not turn a stop
+ * into a hang.
+ */
+const HAND_OFF_BUDGET_MS = 3_000
+
+/**
+ * Let what we just queued actually leave, then close, then stop waiting.
+ *
+ * `ws.send` only buffers; returning immediately after it means the process exits with
+ * the decline frames still in the socket, which is the same as never having sent them.
+ * Every wait here is bounded, because the case this runs in is a machine on its way out
+ * and a shutdown that hangs is worse than one that gives up.
+ */
+async function closePolitely(ws: WebSocket): Promise<void> {
+  const deadline = Date.now() + HAND_OFF_BUDGET_MS
+  while (ws.bufferedAmount > 0 && Date.now() < deadline) await sleep(25)
+  await new Promise<void>(resolve => {
+    const finish = (): void => { clearTimeout(timer); resolve() }
+    const timer = setTimeout(finish, Math.max(100, deadline - Date.now()))
+    ws.once('close', finish)
+    try { ws.close(1001, 'agent stopping') } catch { finish() }
+  })
 }
 
 export function connect(
@@ -366,7 +401,8 @@ export function connect(
             for (const [taskId, r] of running) { r.controller.abort(); clearInterval(r.renew); running.delete(taskId) }
           }
         }
-        send('heartbeat', { freeRamMb: Math.round(freemem() / 1024 / 1024), running: running.size })
+        // The container's free memory, not the host's — the same correction probe() makes.
+        send('heartbeat', { freeRamMb: freeRamMb(), running: running.size })
         // Our own ping, so a server that stops responding is detectable even when it
         // has nothing to say to us.
         if (ws.readyState === WebSocket.OPEN) { try { ws.ping() } catch {} }
@@ -725,16 +761,88 @@ export function connect(
     })
   }
 
+  /**
+   * Hand work back before this process goes away.
+   *
+   * Without this, a stopping agent simply vanished: the socket dropped, the server
+   * marked the host unhealthy, and the task it was holding sat untouchable until its
+   * 45-second lease expired. One machine restarting is a shrug. A fleet restarting —
+   * which is exactly what `docker compose up -d` does, and now the ordinary way to
+   * deploy — stalls every task in flight for those 45 seconds, and the queue looks
+   * broken to everyone watching it.
+   *
+   * `task.decline` rather than `task.error`, deliberately. Both requeue immediately, but
+   * the server records an error as `device_execution_failed` and raises it to Sentry,
+   * and a planned restart is neither a failure nor something to page anyone about. A
+   * decline says what actually happened: this machine is not going to run that task.
+   */
+  let handingOff: Promise<void> | null = null
+  const handOff = (): Promise<void> => {
+    if (handingOff) return handingOff
+    handingOff = (async () => {
+      stopped = true
+      supersession.cancelPending()
+      const ws = current
+      const inFlight = [...running]
+      for (const [, r] of inFlight) {
+        clearInterval(r.renew)
+        r.finishTracking('interrupted')
+        r.controller.abort()
+      }
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        /**
+         * Withdraw consent *before* giving anything back. This order is the whole trick.
+         *
+         * The server finishes a declined task and then immediately looks for another to
+         * offer this same connection — which is still open and, for the moment, still
+         * willing. Declining first therefore handed the task straight back to the agent
+         * that was in the middle of dying: measured, the task was reassigned to the same
+         * host 200ms after being returned, sat there until the 45-second lease expired,
+         * and burned an extra attempt doing it. Three retries is the default, so a
+         * rolling restart of a fleet could exhaust a task's attempts on nothing but
+         * hand-offs.
+         *
+         * A paused connection is not offered work, so the decline has somewhere else to
+         * go.
+         */
+        try {
+          ws.send(JSON.stringify(envelope('consent.update', {
+            paused: true,
+            allowCompute: cfg.allowCompute,
+            allowBrowser: cfg.allowBrowser,
+            maxConcurrency: cfg.maxConcurrency,
+          })))
+        } catch { /* nothing to withdraw from */ }
+        for (const [taskId, r] of inFlight) {
+          try {
+            ws.send(JSON.stringify(envelope('task.decline',
+              { taskId, leaseId: r.leaseId, reason: 'agent-stopping' })))
+          } catch { /* the link is already gone; the lease will time out as before */ }
+        }
+        hostLog.info('agent.handing_off', { returned: inFlight.length })
+        await closePolitely(ws)
+      }
+      running.clear()
+      notify({ connection: 'offline', connectedSince: null, lastLostReason: 'stopping' })
+    })().catch(() => { /* a shutdown must not fail; the lease timeout is the fallback */ })
+    return handingOff
+  }
+
   open()
+  /**
+   * One graceful path, however the signal arrives.
+   *
+   * The window registers its own handler too, and registered it first — so the bare
+   * `process.exit(0)` that used to live here never ran in the app, and `docker stop`
+   * returned in 0.17s having told the server nothing. Both handlers now wait on the same
+   * memoised promise, so whichever order they fire in, the hand-off happens once.
+   */
   for (const sig of ['SIGINT', 'SIGTERM'] as const) {
-    process.on(sig, () => {
-      stopped = true; supersession.cancelPending()
-      for (const r of running.values()) r.finishTracking('interrupted')
-      process.exit(0)
-    })
+    process.on(sig, () => { void handOff().finally(() => process.exit(0)) })
   }
 
   return {
+    handOff,
     stop: () => {
       stopped = true
       notify({ connection: 'offline', connectedSince: null })

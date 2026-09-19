@@ -1141,8 +1141,22 @@ export async function runGui(opts: GuiOptions): Promise<void> {
   const url = `http://127.0.0.1:${bound}/${token}/`
   log.info('gui.listening', { port: bound, bindHost, container: isContainer(), hidden: opts.hidden, paired: config !== null })
 
+  /**
+   * Stop by handing work back, not by vanishing.
+   *
+   * This used to be a bare `process.exit(0)`, and because it is registered before the
+   * connection exists it also pre-empted the agent's own handler — so `docker stop`
+   * returned in under a fifth of a second with the server still believing this machine
+   * held its task, which then sat idle until its 45-second lease expired. A second
+   * signal still exits at once, for anyone who means it.
+   */
+  let stopping = false
   for (const signal of ['SIGINT', 'SIGTERM'] as const) {
-    process.on(signal, () => process.exit(0))
+    process.on(signal, () => {
+      if (stopping) process.exit(0)
+      stopping = true
+      void (agent?.handOff() ?? Promise.resolve()).finally(() => process.exit(0))
+    })
   }
 
   /**
