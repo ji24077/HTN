@@ -470,14 +470,21 @@ def build_app():
     def generate_streaming(req: GenerateRequest):
         from fastapi.responses import StreamingResponse
 
+        # A streaming response cannot change its status once headers are out,
+        # and the generator body does not run until the first next() — which
+        # happens after they are. So an error here cannot become a 409; if it
+        # escapes at all it surfaces as an ASGI 500 with a stack trace in the
+        # log and a dead stream in the browser. Catching it and emitting a
+        # done-frame is what makes the failure legible to the page.
         def frames():
-            for payload in generate_stream(**req.model_dump()):
-                yield f"data: {payload}\n\n"
+            try:
+                for payload in generate_stream(**req.model_dump()):
+                    yield f"data: {payload}\n\n"
+            except JobError as e:
+                yield f"data: {json.dumps({'done': True, 'error': str(e)})}\n\n"
+            except Exception as e:  # noqa: BLE001 — a dead stream tells the user nothing
+                yield f"data: {json.dumps({'done': True, 'error': f'{type(e).__name__}: {e}'})}\n\n"
 
-        # A JobError here would already have been raised by the generator's
-        # first next(), which FastAPI turns into a 500. Streaming responses
-        # cannot change status mid-flight, so the no-model case is reported as
-        # a done-frame carrying `error` rather than as an HTTP code.
         return StreamingResponse(
             frames(),
             media_type="text/event-stream",

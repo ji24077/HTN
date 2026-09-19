@@ -166,3 +166,22 @@ def test_request_models_match_the_runner_signatures_they_splat_into():
         params = inspect.signature(func).parameters
         missing = sorted(set(model.model_fields) - set(params))
         assert not missing, f"{func.__name__} is missing {missing}"
+
+
+def test_streaming_route_reports_errors_as_a_frame_not_a_500():
+    """With no model loaded the stream must still be readable.
+
+    The route cannot answer 409: StreamingResponse sends headers before the
+    generator body runs, so an exception raised on the first next() escapes as
+    an ASGI error — a stack trace in the log and a stream that simply stops in
+    the browser, with nothing on the page saying why.
+    """
+    client = TestClient(build_app())
+
+    r = client.post("/api/generate/stream", json={"sentence": "x", "max_new_tokens": 16})
+
+    assert r.status_code == 200
+    frames = [json.loads(ln[6:]) for ln in r.text.splitlines() if ln.startswith("data: ")]
+    assert frames, "the stream carried no frames at all"
+    assert frames[-1]["done"] is True
+    assert "no model is loaded" in frames[-1]["error"]
