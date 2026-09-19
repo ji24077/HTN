@@ -58,6 +58,44 @@ chmod 600 "$TOKEN_FILE"
 token=$(cat "$TOKEN_FILE")
 
 port=${LISTEN_PORT:-8080}
+
+# An already-running instance is the common case, not an error worth a stack trace.
+#
+# uvicorn reports this as "[Errno 48] address already in use" *after* printing
+# "Application startup complete", so it reads as a server that started and then broke.
+# It did not start at all, and the one already listening is almost always an older copy
+# of this same service that nobody remembers leaving running.
+holder=$(lsof -nP -iTCP:"$port" -sTCP:LISTEN -t 2>/dev/null | head -1 || true)
+if [ -n "$holder" ]; then
+  what=$(ps -o command= -p "$holder" 2>/dev/null | cut -c1-90)
+  if [ "${1:-}" = "--replace" ]; then
+    echo "  Stopping the copy already on port $port (pid $holder)"
+    kill "$holder" 2>/dev/null || true
+    for _ in $(seq 1 25); do
+      lsof -nP -iTCP:"$port" -sTCP:LISTEN -t >/dev/null 2>&1 || break
+      sleep 0.2
+    done
+    if lsof -nP -iTCP:"$port" -sTCP:LISTEN -t >/dev/null 2>&1; then
+      echo "  It did not stop. Kill it by hand:  kill -9 $holder" >&2
+      exit 1
+    fi
+  else
+    cat >&2 <<STOP
+
+  Port $port is already held by pid $holder:
+      $what
+
+  That is probably an older copy of this service. To stop it and take over:
+
+      ./scripts/start-fleet.sh --replace
+
+  Paired machines reconnect by themselves within about 30 seconds.
+
+STOP
+    exit 1
+  fi
+fi
+
 cat <<BANNER
 
   Dashboard   http://127.0.0.1:${port}/
