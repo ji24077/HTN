@@ -2,10 +2,23 @@ export interface Requirements {
   runtime: "cpu" | "cuda" | "mps";
   vram_mib: number;
 }
+/** What a worker *is*, as opposed to what it can run. Every field is optional: a
+ *  client that predates this, or a platform that cannot answer, still registers. */
+export interface Machine {
+  os?: string | null;
+  arch?: string | null;
+  cpu_model?: string | null;
+  logical_cores?: number | null;
+  total_ram_mb?: number | null;
+  /** The release this machine is running. A value with no "+" is the bare compile-time
+   *  stamp, which means the machine has never installed a release. */
+  agent_version?: string | null;
+  max_concurrency?: number | null;
+}
 export interface Worker {
   id: string;
   session_id: string;
-  capabilities: Requirements & { kinds: string[] };
+  capabilities: Requirements & { kinds: string[]; machine?: Machine | null };
   state: "alive" | "unhealthy" | "offline";
   last_seen: string;
   paused: boolean;

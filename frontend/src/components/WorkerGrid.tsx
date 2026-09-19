@@ -103,6 +103,26 @@ export function WorkerGrid({
                       : "CPU"}
                 </span>
                 <span className="tag">1 execution slot</span>
+                {(() => {
+                  const version = worker?.capabilities.machine?.agent_version;
+                  if (!version) return null;
+                  // A release string carries a content hash after "+". A bare version is
+                  // the compile-time stamp, identical in every build, which is what a
+                  // machine reports when it has never installed a release.
+                  const updated = version.includes("+");
+                  return (
+                    <span
+                      className={`tag ${updated ? "" : "stale"}`}
+                      title={
+                        updated
+                          ? `Running release ${version}`
+                          : `Reporting the build stamp ${version} — this machine has never installed a release, so it cannot auto-update`
+                      }
+                    >
+                      {updated ? version : `${version} (not updated)`}
+                    </span>
+                  );
+                })()}
               </div>
               <div className="worker-footer">
                 <div className="work-status">

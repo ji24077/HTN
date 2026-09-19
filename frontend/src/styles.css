@@ -713,6 +713,13 @@ h1 {
   padding: 3px 6px;
   color: var(--muted);
 }
+/* A machine still reporting its build stamp has never installed a release, so it is
+   not merely behind -- it cannot update itself until someone pins a key on it. */
+.tag.stale {
+  color: #8a5a00;
+  border-color: #e3c489;
+  background: #fdf5e6;
+}
 .worker-footer {
   border-top: 1px solid var(--line);
   padding-top: 13px;
