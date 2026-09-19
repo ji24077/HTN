@@ -22,7 +22,7 @@ import { randomBytes, randomUUID } from 'node:crypto'
 import { promisify } from 'node:util'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { existsSync } from 'node:fs'
-import { perturb, evaluate } from '@dwp/protocol/walker.js'
+import { perturb, evaluate, randomGenome, GENOME_SIZE } from '@dwp/protocol/walker.js'
 
 const exec = promisify(execFile)
 
@@ -237,7 +237,16 @@ type Task = {
   generation?: number
 }
 
-const WALKER_PARENT = Array.from({ length: 64 }, (_, i) => Math.sin(i) * 0.3)
+/**
+ * A genome the walker can actually evaluate.
+ *
+ * This was 64 hand-made numbers, and GENOME_SIZE is 308. The simulation read past the
+ * end of the array, every weight came out undefined, and fitness was NaN — on the agent
+ * and here alike. Which is precisely why it went unnoticed: `Math.abs(NaN - NaN)` is
+ * NaN, `NaN > 1e-9` is false, so the comparison below reported a match on two values
+ * that were not numbers. The check passed 150 times without once comparing a result.
+ */
+const WALKER_PARENT = randomGenome(20260919)
 const WALKER_SIGMA = 0.12
 const WALKER_STEPS = 220
 
@@ -477,6 +486,25 @@ async function main(): Promise<void> {
         const expected = evaluate(perturb(WALKER_PARENT, WALKER_SIGMA, seed), WALKER_STEPS)
         const got = (out?.results ?? []).find((r: any) => r.seed === seed)
         if (!got) { ok = false; fail(`${id} omitted seed ${seed}`); break }
+        /**
+         * Insist on real numbers before comparing them.
+         *
+         * Without this the comparison cannot fail on a pair of non-numbers: NaN is not
+         * greater than the tolerance, and JSON turns NaN into null on the way here, so a
+         * silently broken simulation reads as a perfect match. Reject the shape first,
+         * then the value.
+         */
+        if (typeof got.fitness !== 'number' || !Number.isFinite(got.fitness)) {
+          ok = false
+          fail(`${id} seed ${seed} returned no usable fitness`, JSON.stringify(got.fitness))
+          break
+        }
+        if (!Number.isFinite(expected.fitness)) {
+          ok = false
+          fail(`${id} seed ${seed}: the local recomputation is not a number`,
+            'the test fixture is wrong, not the agent')
+          break
+        }
         if (Math.abs(got.fitness - expected.fitness) > 1e-9 || got.fell !== expected.fell) {
           ok = false
           fail(`${id} seed ${seed} disagrees`, `container ${got.fitness} vs local ${expected.fitness}`)

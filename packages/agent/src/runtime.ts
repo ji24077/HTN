@@ -228,6 +228,22 @@ export function imageReference(): string | null {
   return image && isContainer() ? image : null
 }
 
+/**
+ * The address the window is reachable at from outside this container.
+ *
+ * A container cannot discover its own published port — Docker maps it in the host's
+ * network namespace and tells the process nothing. So the agent printed its *internal*
+ * port, and anyone who had remapped it (because something already held 43117, which is
+ * the common case on a machine that also runs the desktop app) was handed a URL that
+ * does not work, with no hint that the real one differs.
+ *
+ * Whoever wrote the `-p` flag knows the answer, so they can pass it in.
+ */
+export function guiPublicOrigin(): string | null {
+  const origin = process.env.DWP_GUI_PUBLIC_ORIGIN?.trim().replace(/\/+$/, '')
+  return origin && origin !== '' ? origin : null
+}
+
 /** Identity of the container, for a window that has to say which one it is showing. */
 export function containerIdentity(): { id: string; image: string | null } | null {
   if (!isContainer()) return null

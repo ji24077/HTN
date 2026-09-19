@@ -26,7 +26,8 @@ import { clearConfig, isPaused, loadConfig, setPaused, type AgentConfig } from '
 import { ensureKeypair } from './keys.ts'
 import { pairHost, parseInvite, autoEnrol } from './pair.ts'
 import {
-  containerIdentity, guiBindHost, guiPort, hostAllowed, isContainer, shouldOpenWindow, supervisorNote,
+  containerIdentity, guiBindHost, guiPort, guiPublicOrigin, hostAllowed, isContainer,
+  shouldOpenWindow, supervisorNote,
 } from './runtime.ts'
 import { connect, type AgentHandle, type AgentState } from './transport.ts'
 import * as history from './history.ts'
@@ -1138,7 +1139,11 @@ export async function runGui(opts: GuiOptions): Promise<void> {
   }
 
   writeLock({ port: bound, token, pid: process.pid, startedAt: new Date().toISOString(), version: AGENT_VERSION })
-  const url = `http://127.0.0.1:${bound}/${token}/`
+  /**
+   * What to print. Inside a container the bound port is the *container's*, which is not
+   * where anyone can reach it if the operator mapped it to a different host port.
+   */
+  const url = `${guiPublicOrigin() ?? `http://127.0.0.1:${bound}`}/${token}/`
   log.info('gui.listening', { port: bound, bindHost, container: isContainer(), hidden: opts.hidden, paired: config !== null })
 
   /**
@@ -1176,6 +1181,10 @@ export async function runGui(opts: GuiOptions): Promise<void> {
 
   if (opts.hidden) {
     console.log(`  DWP Agent running in the background. Window: ${url}`)
+    if (isContainer() && !guiPublicOrigin()) {
+      console.log(`  (that is this container's own port ${bound}; on the host it is whatever`
+        + ` you mapped it to, e.g. -p 127.0.0.1:43118:${bound} means http://127.0.0.1:43118/${token}/)`)
+    }
   } else {
     openWindow(url)
     console.log(`\n  DWP Agent\n  ${url}\n\n` +

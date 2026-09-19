@@ -32,6 +32,15 @@ const opt = (name: string, fallback: string): string => {
 const LOCAL = opt('server', process.env.DWP_CONTROL ?? 'http://127.0.0.1:8080')
 const COUNT = Math.max(1, Number(opt('count', '1')))
 const LABEL = opt('label', '')
+/**
+ * Which host port the window is published on.
+ *
+ * Not always 43117: anything already running the desktop agent holds that, and the
+ * container then fails to start with "address already in use". Changing only the host
+ * half is the fix, and the agent is told about it so the URL it prints is the one that
+ * actually works.
+ */
+const GUI_PORT = opt('gui-port', '43117')
 const IMAGE = opt('image', process.env.DWP_AGENT_IMAGE ?? 'ghcr.io/notjackl3/dwp-agent:latest')
 const TOKEN_FILE = process.env.DWP_ADMIN_TOKEN_FILE ?? join(homedir(), '.dwp', 'admin-token')
 
@@ -145,16 +154,21 @@ async function main(): Promise<void> {
     console.log(`  Machine ${i} of ${COUNT}${label ? ` — ${label}` : ''}. Paste this on that computer:\n`)
     // One line. Backslash continuations are POSIX-only and break in PowerShell, which is
     // where a Windows machine's owner will paste this.
-    console.log(`      docker run -d --name dwp-agent --restart unless-stopped`
-      + ` -v dwp-agent-data:/data -p 127.0.0.1:43117:43117`
+    const name = COUNT === 1 ? 'dwp-agent' : `dwp-agent-${i}`
+    const guiPort = Number(GUI_PORT) + (i - 1)
+    console.log(`      docker run -d --name ${name} --restart unless-stopped`
+      + ` -v ${name}-data:/data -p 127.0.0.1:${guiPort}:43117`
       + ` -e DWP_INVITE="${origin}/join?code=${code}"`
       + (label ? ` -e DWP_LABEL="${label}"` : '')
+      + ` -e DWP_GUI_PUBLIC_ORIGIN="http://127.0.0.1:${guiPort}"`
       + ` -e DWP_IMAGE="${IMAGE}" ${IMAGE}\n`)
+    console.log(`      window on that machine:  http://127.0.0.1:${guiPort}/`)
+    console.log(`      if that port is taken:   add --gui-port <free port> and run this again\n`)
   }
   console.log(`  ${'─'.repeat(72)}\n`)
   console.log(`  Each invite works once and expires in ten minutes.`)
-  console.log(`  On that machine the window is then at  http://127.0.0.1:43117/`)
-  console.log(`  Watch them arrive here:                ${LOCAL}\n`)
+  console.log(`  The window needs its path token, which that machine prints:  docker logs dwp-agent`)
+  console.log(`  Watch them arrive here:  ${LOCAL}\n`)
 }
 
 main().catch((err: unknown) => die(err instanceof Error ? err.message : String(err)))
