@@ -32,6 +32,8 @@ from typing import Any
 
 from dotenv import dotenv_values
 
+from gpushare.agent.profiles import profile_for
+
 ROOT = Path(__file__).resolve().parents[3]
 STATE_ROOT = ROOT / ".gpushare"
 JOB_ROOT = STATE_ROOT / "jobs"
@@ -770,7 +772,7 @@ def _require_idle_gpu(job: Job, info: dict[str, Any]) -> None:
 
 
 def _setup_pod(job: Job, info: dict[str, Any], vendor: str) -> None:
-    extra = "rocm" if vendor == "amd" else "cuda"
+    extra = profile_for(vendor).project_extra
     bootstrap = (
         "command -v uv >/dev/null 2>&1 || python3 -m pip install --user uv; "
         'export PATH="$HOME/.local/bin:$PATH"; '
@@ -790,12 +792,12 @@ def _serve_python(vendor: str) -> str:
     NVIDIA keeps `uv run`, which is what the working demo uses; there is no
     reason to move it and a live path to break if it moves.
     """
-    return ".migration-venv/bin/python" if vendor == "amd" else "uv run python"
+    return profile_for(vendor).serve_python
 
 
 def _setup_migration_pod(job: Job, info: dict[str, Any], vendor: str) -> None:
     """Isolated matched versions; never resolve the regular CUDA/ROCm lock."""
-    wheel = "rocm7.1" if vendor == "amd" else "cu128"
+    wheel = profile_for(vendor).wheel_index
     commands = [
         ["python3", "-m", "venv", ".migration-venv"],
         [
