@@ -10,6 +10,12 @@ import { settleJob } from './scheduler.ts'
 import { RateLimiter } from './ratelimit.ts'
 import { joinPage } from './joinpage.ts'
 import { snapshot } from './diagnostics.ts'
+import { readArtifact, manifest } from './artifacts.ts'
+import { latestRelease, releaseBundle } from './releases.ts'
+import { dashboardHtml } from './dashboard.ts'
+import { loginHtml } from './loginpage.ts'
+import { walkerHtml } from './walkerpage.ts'
+import { verifyAssertion } from '@dwp/protocol'
 import { log } from './logger.ts'
 
 const SESSION_COOKIE = 'dwp_session'
@@ -51,6 +57,119 @@ export function buildServer(): FastifyInstance {
 
   app.get('/health', async () => ({ ok: true, publicOrigin: config.publicOrigin }))
 
+  /** What model and inputs this server is currently offering, for the dashboard. */
+  /**
+   * Experiment state: a scratchpad for work that spans many jobs.
+   *
+   * The driver script owns the algorithm; the platform just stores where it has got to,
+   * so the dashboard can render progress without knowing anything about evolution.
+   */
+  app.get('/experiments/:name', async (req, reply) => {
+    const { name } = z.object({ name: z.string().max(64) }).parse(req.params)
+    const { rows } = await pool.query<{ state: unknown; updated_at: string }>(
+      `select state, updated_at from experiments where name = $1`, [name])
+    if (!rows[0]) return reply.code(404).send({ error: 'not-found' })
+    return { name, ...rows[0] }
+  })
+
+  app.post('/experiments/:name', async req => {
+    const user = await requireUser(req)
+    const { name } = z.object({ name: z.string().max(64) }).parse(req.params)
+    const state = z.record(z.string(), z.unknown()).parse(req.body)
+    await pool.query(
+      `insert into experiments(name, owner_id, state) values ($1,$2,$3)
+       on conflict (name) do update set state = $3, updated_at = now()`,
+      [name, user.id, JSON.stringify(state)])
+    return { ok: true }
+  })
+
+  /**
+   * The current agent release. Public because it is signed and contains no secret — an
+   * agent needs to see it before it has any reason to authenticate.
+   */
+  app.get('/release/latest', async (_req, reply) => {
+    const release = latestRelease()
+    return release ? release : reply.code(404).send({ error: 'no-release' })
+  })
+
+  /** The bundle itself, to enrolled hosts only. */
+  app.get('/release/:sha256', async (req, reply) => {
+    const auth = req.headers.authorization
+    const token = auth?.startsWith('Bearer ') ? auth.slice(7) : undefined
+    if (!token) return reply.code(401).send({ error: 'missing-assertion' })
+
+    const claimed = (() => {
+      try { return JSON.parse(Buffer.from(token.split('.')[1] ?? '', 'base64url').toString('utf8')).iss as string }
+      catch { return undefined }
+    })()
+    if (!claimed) return reply.code(401).send({ error: 'malformed' })
+
+    const { rows } = await pool.query<{ public_key: string; revoked_at: string | null }>(
+      `select public_key, revoked_at from hosts where id = $1`, [claimed])
+    const host = rows[0]
+    const result = verifyAssertion(token, () => (host?.revoked_at ? undefined : host?.public_key), () => false)
+    if (!result.ok) return reply.code(401).send({ error: result.reason })
+
+    const { sha256 } = z.object({ sha256: z.string().length(64) }).parse(req.params)
+    const bytes = releaseBundle(sha256)
+    if (!bytes) return reply.code(404).send({ error: 'not-found' })
+
+    await record({ hostId: result.hostId, actor: 'agent', category: 'lifecycle',
+      type: 'release.downloaded', payload: { sha256: sha256.slice(0, 12) } })
+
+    return reply.type('application/gzip')
+      .header('content-length', String(bytes.length))
+      .header('cache-control', 'public, max-age=31536000, immutable')
+      .send(bytes)
+  })
+
+  app.get('/manifest', async (_req, reply) => {
+    const m = manifest()
+    return m ? m : reply.code(404).send({ error: 'no-fixtures' })
+  })
+
+  /**
+   * Serve a pinned artifact to an enrolled host.
+   *
+   * Authenticated with the same short-lived assertion the WebSocket uses, so a public
+   * address does not mean a public file server. Hosts fetch each artifact once and cache
+   * it by hash.
+   */
+  app.get('/artifacts/:sha256', async (req, reply) => {
+    const auth = req.headers.authorization
+    const token = auth?.startsWith('Bearer ') ? auth.slice(7) : undefined
+    if (!token) return reply.code(401).send({ error: 'missing-assertion' })
+
+    const claimed = (() => {
+      try { return JSON.parse(Buffer.from(token.split('.')[1] ?? '', 'base64url').toString('utf8')).iss as string }
+      catch { return undefined }
+    })()
+    if (!claimed) return reply.code(401).send({ error: 'malformed' })
+
+    const { rows } = await pool.query<{ public_key: string; revoked_at: string | null }>(
+      `select public_key, revoked_at from hosts where id = $1`, [claimed])
+    const host = rows[0]
+    // Artifact fetches are frequent, so they do not share the WebSocket's replay cache —
+    // a host legitimately mints several assertions in quick succession here.
+    const result = verifyAssertion(token, () => (host?.revoked_at ? undefined : host?.public_key), () => false)
+    if (!result.ok) {
+      await record({ actor: 'control', category: 'security', type: 'artifact.auth_rejected',
+        payload: { reason: result.reason } })
+      return reply.code(401).send({ error: result.reason })
+    }
+
+    const { sha256 } = z.object({ sha256: z.string().length(64) }).parse(req.params)
+    const artifact = readArtifact(sha256)
+    if (!artifact) return reply.code(404).send({ error: 'not-found' })
+
+    return reply
+      .type('application/octet-stream')
+      .header('content-length', String(artifact.bytes.length))
+      // Content-addressed, so it can never go stale.
+      .header('cache-control', 'public, max-age=31536000, immutable')
+      .send(artifact.bytes)
+  })
+
   /**
    * The page a friend opens to join. Public by design: it carries no secret of its own,
    * only the server address and instructions. The pairing code arrives in the link the
@@ -91,6 +210,105 @@ export function buildServer(): FastifyInstance {
   })
 
   app.get('/me', async req => ({ user: await requireUser(req) }))
+
+  /**
+   * The same physics the agents ran, served to the browser.
+   *
+   * One source of truth: a replay drawn by a second implementation would diverge from
+   * the run that was actually scored.
+   */
+  app.get('/walker.js', async (_req, reply) => {
+    const path = new URL('../../protocol/src/walker.js', import.meta.url)
+    const { readFile } = await import('node:fs/promises')
+    return reply.type('application/javascript; charset=utf-8')
+      .header('cache-control', 'no-cache')
+      .send(await readFile(path, 'utf8'))
+  })
+
+  app.get('/walker', async (req, reply) => {
+    const user = await userForToken(cookie(req, SESSION_COOKIE))
+    if (!user) return reply.redirect('/login', 302)
+    return reply.type('text/html; charset=utf-8').send(walkerHtml())
+  })
+
+  app.get('/login', async (_req, reply) =>
+    reply.type('text/html; charset=utf-8').send(loginHtml()))
+
+  /** Send a signed-out browser to the sign-in form rather than a bare 401. */
+  app.get('/dashboard', async (req, reply) => {
+    const user = await userForToken(cookie(req, SESSION_COOKIE))
+    if (!user) return reply.redirect('/login', 302)
+    return reply.type('text/html; charset=utf-8').send(dashboardHtml())
+  })
+
+  /** Everything the dashboard needs, in one round trip. */
+  app.get('/dashboard/data', async req => {
+    const user = await requireUser(req)
+
+    const { rows: hosts } = await pool.query(
+      `select id, label, online, paused, revoked_at, os, arch, logical_cores, total_ram_mb,
+              last_heartbeat_at, agent_version
+         from hosts where owner_id = $1 order by online desc, label`, [user.id])
+
+    const { rows: jobs } = await pool.query<{
+      id: string; adapter: string; status: string; total_items: number
+      created_at: string; done: string; in_flight: string
+    }>(
+      `select j.id, j.adapter, j.status, j.total_items, j.created_at,
+              (select count(*) from tasks t where t.job_id = j.id and t.state = 'succeeded') as done,
+              (select count(*) from tasks t where t.job_id = j.id
+                 and t.state in ('offered','leased','running')) as in_flight
+         from jobs j where j.owner_id = $1 order by j.created_at desc limit 8`, [user.id])
+
+    // Which computer did how much of each job — the point of the whole system.
+    const { rows: splits } = await pool.query<{ job_id: string; label: string; n: string }>(
+      `select t.job_id, h.label, count(*)::text as n
+         from tasks t join hosts h on h.id = t.assigned_host_id
+        where t.state = 'succeeded' and t.job_id = any($1::uuid[])
+        group by t.job_id, h.label order by count(*) desc`,
+      [jobs.map(j => j.id)])
+
+    const { rows: events } = await pool.query(
+      `select e.type, e.server_ts, h.label,
+              coalesce(e.payload->>'reason', e.payload->>'errorClass', e.payload->>'closeCode', '') as detail
+         from run_events e left join hosts h on h.id = e.host_id
+        where e.category in ('presence','security','lifecycle','result')
+        order by e.seq desc limit 25`)
+
+    // Accuracy comes straight out of the stored inference outputs.
+    const { rows: acc } = await pool.query<{ items: string; correct: string }>(
+      `select coalesce(sum((output->>'count')::int),0)::text as items,
+              coalesce(sum((output->>'correct')::int),0)::text as correct
+         from tasks t join jobs j on j.id = t.job_id
+        where j.owner_id = $1 and j.adapter = 'cpu_inference_batch' and t.state = 'succeeded'`, [user.id])
+
+    const { rows: totals } = await pool.query<{ done: string }>(
+      `select count(*)::text as done from tasks t join jobs j on j.id = t.job_id
+        where j.owner_id = $1 and t.state = 'succeeded'`, [user.id])
+
+    const items = Number(acc[0]?.items ?? 0)
+    const correct = Number(acc[0]?.correct ?? 0)
+
+    return {
+      publicOrigin: config.publicOrigin,
+      summary: {
+        online: hosts.filter(h => h.online).length,
+        enrolled: hosts.filter(h => !h.revoked_at).length,
+        tasksDone: Number(totals[0]?.done ?? 0),
+        jobs: jobs.length,
+        inferred: items,
+        accuracy: items > 0 ? Number(((100 * correct) / items).toFixed(1)) : null,
+      },
+      hosts,
+      jobs: jobs.map(j => ({
+        ...j,
+        done: Number(j.done),
+        inFlight: Number(j.in_flight),
+        split: splits.filter(s => s.job_id === j.id).map(s => ({ label: s.label, n: Number(s.n) })),
+      })),
+      events,
+    }
+  })
 
   /**
    * Live connection health: who is connected, who keeps dropping, and why auth failed.
@@ -137,7 +355,16 @@ export function buildServer(): FastifyInstance {
       await record({ actor: 'control', category: 'security', type: 'pair.rejected', payload: { reason: result.reason } })
       return reply.code(400).send({ error: result.reason })
     }
-    return { hostId: result.hostId, label: result.label, wsUrl: `${config.publicOrigin.replace(/^http/, 'ws')}/agent/connect` }
+    // Pin the release key at pairing. Trusting a key that arrives with a later release
+    // would make the signature meaningless — this is the one moment trust is established.
+    const release = latestRelease()
+    return {
+      hostId: result.hostId,
+      label: result.label,
+      wsUrl: `${config.publicOrigin.replace(/^http/, 'ws')}/agent/connect`,
+      releaseKey: release?.publicKey ?? null,
+      releaseVersion: release?.manifest.version ?? null,
+    }
   })
 
   app.get('/hosts', async req => {
@@ -163,12 +390,18 @@ export function buildServer(): FastifyInstance {
   app.post('/jobs', async (req, reply) => {
     const user = await requireUser(req)
     const body = z.object({
-      adapter: z.literal('echo'),
+      adapter: z.enum(['echo', 'cpu_inference_batch', 'walker_evolution']),
       // 'each' pins one task per online host — the shape that proves each host ran its own work.
       mode: z.enum(['each', 'queue']).default('each'),
-      hostId: z.uuid().optional(),
       count: z.number().int().positive().max(10_000).default(1),
       sleepMs: z.number().int().nonnegative().max(60_000).default(0),
+      hostId: z.uuid().optional(),
+      /** cpu_inference_batch: how many digits each task covers. */
+      batchSize: z.number().int().positive().max(2_000).default(100),
+      /** Run the whole set this many times, for a job long enough to watch. */
+      repeat: z.number().int().positive().max(200).default(1),
+      /** walker_evolution: the slices to evaluate, built by the driver script. */
+      tasks: z.array(z.record(z.string(), z.unknown())).max(500).optional(),
     }).parse(req.body)
 
     const { rows: hostRows } = await pool.query<{ id: string }>(
@@ -178,25 +411,73 @@ export function buildServer(): FastifyInstance {
         order by created_at`, [user.id, body.hostId ?? null])
     if (hostRows.length === 0) return reply.code(409).send({ error: 'no-eligible-hosts' })
 
-    const inputs = body.mode === 'each'
-      ? hostRows.flatMap(h => Array.from({ length: body.count }, () => ({ pin: h.id })))
-      : Array.from({ length: body.count }, () => ({ pin: null as string | null }))
+    type Item = { pin: string | null; input: Record<string, unknown> }
+    let items: Item[]
+    let manifestHash: string | null = null
+
+    if (body.adapter === 'walker_evolution') {
+      if (!body.tasks?.length) return reply.code(400).send({ error: 'no-tasks' })
+      items = body.tasks.map(input => ({ pin: null, input }))
+    } else if (body.adapter === 'cpu_inference_batch') {
+      const m = manifest() as {
+        model?: { hash?: string; inputName?: string; outputName?: string }
+        inputs?: { hash?: string; count?: number }
+      } | null
+      if (!m?.model?.hash || !m.inputs?.hash) {
+        return reply.code(409).send({ error: 'no-fixtures', hint: 'run: node scripts/build-fixtures.ts' })
+      }
+
+      const available = m.inputs.count ?? 0
+      const wanted = Math.min(body.count, available)
+      if (wanted === 0) return reply.code(400).send({ error: 'no-inputs' })
+
+      // Split the batch into independent slices. Never split one inference across
+      // machines — parallelism is across items, which is the only safe kind.
+      items = []
+      for (let pass = 0; pass < body.repeat; pass++) {
+        for (let from = 0; from < wanted; from += body.batchSize) {
+          items.push({
+            pin: null,
+            input: {
+              modelHash: m.model.hash,
+              inputsHash: m.inputs.hash,
+              inputName: m.model.inputName ?? 'Input3',
+              outputName: m.model.outputName ?? 'Plus214_Output_0',
+              from,
+              count: Math.min(body.batchSize, wanted - from),
+              preprocessing: 'v1',
+            },
+          })
+        }
+      }
+      manifestHash = m.inputs.hash
+    } else {
+      items = body.mode === 'each'
+        ? hostRows.flatMap(h => Array.from({ length: body.count }, () => ({
+            pin: h.id, input: { nonce: crypto.randomUUID(), sleepMs: body.sleepMs },
+          })))
+        : Array.from({ length: body.count }, () => ({
+            pin: null, input: { nonce: crypto.randomUUID(), sleepMs: body.sleepMs },
+          }))
+    }
 
     const job = await pool.query<{ id: string }>(
-      `insert into jobs(owner_id, adapter, total_items, started_at, constraints)
-       values ($1,$2,$3,now(),$4) returning id`,
-      [user.id, body.adapter, inputs.length, JSON.stringify({ mode: body.mode, sleepMs: body.sleepMs })])
+      `insert into jobs(owner_id, adapter, total_items, started_at, constraints, manifest_hash)
+       values ($1,$2,$3,now(),$4,$5) returning id`,
+      [user.id, body.adapter, items.length,
+       JSON.stringify({ mode: body.mode, sleepMs: body.sleepMs, batchSize: body.batchSize }),
+       manifestHash])
     const jobId = job.rows[0]!.id
 
-    for (const [seq, item] of inputs.entries()) {
+    for (const [seq, item] of items.entries()) {
       await pool.query(`insert into tasks(job_id, seq, input, pin_host_id) values ($1,$2,$3,$4)`,
-        [jobId, seq, JSON.stringify({ nonce: crypto.randomUUID(), sleepMs: body.sleepMs }), item.pin])
+        [jobId, seq, JSON.stringify(item.input), item.pin])
     }
     await record({ jobId, actor: 'user', category: 'lifecycle', type: 'job.created',
-      payload: { adapter: body.adapter, items: inputs.length, mode: body.mode } })
+      payload: { adapter: body.adapter, items: items.length, mode: body.mode } })
 
     void dispatchAll()
-    return reply.code(201).send({ jobId, totalItems: inputs.length, hosts: hostRows.length })
+    return reply.code(201).send({ jobId, totalItems: items.length, hosts: hostRows.length })
   })
 
   app.get('/jobs/:id', async req => {

@@ -29,6 +29,8 @@ export function joinPage(origin: string, code?: string): string {
   ol{margin:0;padding-left:1.2em}
   li{margin:8px 0}
   code{background:var(--code);padding:1px 5px;border-radius:3px;font:13px ui-monospace,monospace}
+  p.os{margin:14px 0 0;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink2);font-weight:600}
+  p.os:first-of-type{margin-top:0}
   .warn{border-left:3px solid var(--accent);font-size:14.5px;color:var(--ink2)}
   .warn b{color:var(--ink)}
   footer{color:var(--ink2);font-size:13px;margin-top:24px;text-align:center}
@@ -49,9 +51,13 @@ ${known ? 'network' : 'network'}. It takes two commands. You stay in control and
 
 <div class="card">
   <h2>2 &middot; Connect &mdash; one command</h2>
+  <p class="os">macOS or Linux</p>
   <pre>./scripts/join.sh ${o} ${c}</pre>
-  <p style="margin:12px 0 0;color:var(--ink2);font-size:14px">This checks what you need,
-  installs it, connects, and starts taking work.</p>
+  <p class="os">Windows (PowerShell)</p>
+  <pre>.\\scripts\\join.ps1 ${o} ${c}</pre>
+  <p style="margin:12px 0 0;color:var(--ink2);font-size:14px">Either one checks what you
+  need, installs it, connects, and starts taking work. Run only the line for your
+  computer.</p>
 </div>
 
 <div class="card">

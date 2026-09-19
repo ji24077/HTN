@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./walker.js": "./src/walker.js"
   },
   "dependencies": {
     "zod": "4.6.5"

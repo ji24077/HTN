@@ -21,9 +21,13 @@ export async function pair(server: string, code: string, label?: string): Promis
     // what they can do about it — this is the first thing anyone joining ever sees go
     // wrong, and usually the only error they will ever read.
     const diagnosis = await diagnoseOrigin(origin)
+    // PowerShell and cmd have no inline `KEY=value command` form, so the suggestion has
+    // to be written the way the machine reading it can actually run.
+    const retry = process.platform === 'win32'
+      ? `$env:DWP_DNS_FALLBACK='1'; pnpm agent pair --server ${origin} --code ${code}`
+      : `DWP_DNS_FALLBACK=1 pnpm agent pair --server ${origin} --code ${code}`
     const hint = diagnosis.cause === 'dns-local-only' && !dnsFallbackEnabled()
-      ? `\n  Or retry with the built-in workaround:\n` +
-        `      DWP_DNS_FALLBACK=1 pnpm agent pair --server ${origin} --code ${code}\n`
+      ? `\n  Or retry with the built-in workaround:\n      ${retry}\n`
       : ''
     console.error(`\nCould not reach the server.\n\n  ${diagnosis.message}\n${hint}`)
     process.exit(1)
@@ -43,11 +47,23 @@ export async function pair(server: string, code: string, label?: string): Promis
     process.exit(1)
   }
 
-  const { hostId, label: assigned, wsUrl } = await res.json() as { hostId: string; label: string; wsUrl: string }
+  const { hostId, label: assigned, wsUrl, releaseKey, releaseVersion } = await res.json() as {
+    hostId: string; label: string; wsUrl: string
+    releaseKey?: string | null; releaseVersion?: string | null
+  }
   saveConfig({
     server: origin, wsUrl, hostId, label: assigned,
     allowCompute: true, allowBrowser: false, maxConcurrency: 2,
+    // Pinned once, here. Every future update is checked against this and nothing else.
+    releaseKey: releaseKey ?? null,
+    installedRelease: releaseVersion ?? null,
+    autoUpdate: true,
   })
   console.log(`Paired as "${assigned}"\n  host id : ${hostId}\n  control : ${origin}`)
+  if (releaseKey) {
+    console.log(`  updates : signed by ${releaseKey.slice(0, 20)}… (pinned)`)
+  } else {
+    console.log(`  updates : this server offers no signed releases, so updates stay manual`)
+  }
   console.log(`\nStart it with:  pnpm agent run`)
 }

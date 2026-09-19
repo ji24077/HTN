@@ -9,6 +9,7 @@ import { config } from './config.ts'
 import { record } from './events.ts'
 import { claimFor, markLeased, renewLease, releaseOffer, settleJob } from './scheduler.ts'
 import { log } from './logger.ts'
+import { latestRelease } from './releases.ts'
 import { noteConnection, noteDisconnection, noteAuthFailure } from './diagnostics.ts'
 
 type Conn = {
@@ -202,8 +203,12 @@ async function onMessage(conn: Conn, raw: Buffer): Promise<void> {
       )
       await record({ hostId: conn.hostId, actor: 'agent', category: 'presence', type: 'host.hello',
         payload: { os: c.os, arch: c.arch, cores: c.logicalCores, adapters: c.adapters } })
-      send(conn, 'hello.ack', { hostId: conn.hostId, serverTime: new Date().toISOString(),
-        heartbeatSeconds: config.heartbeatSeconds }, msg.id)
+      send(conn, 'hello.ack', {
+        hostId: conn.hostId,
+        serverTime: new Date().toISOString(),
+        heartbeatSeconds: config.heartbeatSeconds,
+        releaseVersion: latestRelease()?.manifest.version ?? null,
+      }, msg.id)
       await dispatchTo(conn)
       return
     }

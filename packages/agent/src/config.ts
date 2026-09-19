@@ -9,6 +9,15 @@ export type AgentConfig = {
   allowCompute: boolean
   allowBrowser: boolean
   maxConcurrency: number
+  /**
+   * The operator's release signing key, pinned at pairing.
+   *
+   * Updates are verified against this and nothing else. Accepting a key that arrives
+   * alongside a release would let whoever served the release also vouch for it.
+   */
+  releaseKey?: string | null
+  installedRelease?: string | null
+  autoUpdate?: boolean
 }
 
 export function loadConfig(): AgentConfig | null {

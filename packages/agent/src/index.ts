@@ -4,6 +4,7 @@ import { connect } from './transport.ts'
 import { pair } from './pair.ts'
 import { probe } from './capability.ts'
 import { browserProbe } from './adapters/browser.ts'
+import { applyUpdate, currentVersion } from './update.ts'
 import { AGENT_HOME, AGENT_VERSION } from './paths.ts'
 
 const [command, ...rest] = process.argv.slice(2)
@@ -65,6 +66,22 @@ switch (command) {
     break
   }
 
+  case 'update': {
+    const cfg = requireConfig()
+    const { privateKey } = ensureKeypair()
+    console.log(`  currently on ${currentVersion() ?? 'an unknown version'}; checking ${cfg.server}…`)
+    const result = await applyUpdate(cfg, privateKey, { force: flag('force') !== undefined })
+    if (result.status === 'updated') {
+      console.log(`\n  Updated ${result.from ?? 'unknown'} -> ${result.to}\n  Start it again with:  pnpm agent run\n`)
+    } else if (result.status === 'current') {
+      console.log(`\n  Already on ${result.version}. Nothing to do.\n`)
+    } else {
+      console.error(`\n  ${result.status === 'refused' ? 'Refused' : 'Could not update'}: ${result.reason}\n`)
+      process.exit(1)
+    }
+    break
+  }
+
   case 'pause':
   case 'resume': {
     setPaused(command === 'pause')
@@ -97,6 +114,7 @@ switch (command) {
   pair --server <url> --code <CODE> [--label <name>]   enroll this computer
   run [--allow-browser]                                 connect and accept work
   set-server --server <url>                             point at a new server address
+  update [--force]                                      install the latest signed release
   pause | resume                                        local kill switch (works offline)
   status                                                show identity and capability
   browser-probe [--url <url>]                           launch Chromium and report observed egress

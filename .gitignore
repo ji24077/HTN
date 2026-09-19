@@ -8,3 +8,4 @@ dist/
 /packages/*/node_modules/
 .dwp-tunnel.log
 .dwp/
+releases/

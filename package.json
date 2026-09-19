@@ -20,7 +20,9 @@
     "sim": "node sim/run.ts",
     "sim:edge": "node sim/edge-cases.ts",
     "invite": "node scripts/invite.ts",
-    "doctor": "node scripts/doctor.ts"
+    "doctor": "node scripts/doctor.ts",
+    "walker": "node scripts/evolve-walker.ts",
+    "release": "node scripts/publish-release.ts"
   },
   "devDependencies": {
     "typescript": "7.0.2",

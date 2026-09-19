@@ -59,7 +59,13 @@ export const ConsentUpdate = ConsentState
 
 // ------------------------------------------------------------ control → agent
 
-export const HelloAck = z.object({ hostId: z.string(), serverTime: z.string(), heartbeatSeconds: z.number() })
+export const HelloAck = z.object({
+  hostId: z.string(),
+  serverTime: z.string(),
+  heartbeatSeconds: z.number(),
+  /** The release the server is currently offering, so agents can notice they are behind. */
+  releaseVersion: z.string().nullable().default(null),
+})
 export const TaskOffer = z.object({
   taskId: z.string(),
   jobId: z.string(),
@@ -87,6 +93,74 @@ export const EchoOutput = z.object({
 })
 export type EchoInput = z.infer<typeof EchoInput>
 export type EchoOutput = z.infer<typeof EchoOutput>
+
+/**
+ * A slice of a batch inference job.
+ *
+ * The host is told which model and inputs to use by hash, and which items of that input
+ * set are its share. It never receives the data inline — it fetches and verifies the
+ * artifacts itself, so every host provably ran the same model over the same bytes.
+ */
+export const InferenceInput = z.object({
+  modelHash: z.string().length(64),
+  inputsHash: z.string().length(64),
+  inputName: z.string(),
+  outputName: z.string(),
+  /** Index of the first item of this slice, and how many items it covers. */
+  from: z.number().int().nonnegative(),
+  count: z.number().int().positive(),
+  preprocessing: z.literal('v1'),
+})
+export type InferenceInput = z.infer<typeof InferenceInput>
+
+export const InferenceOutput = z.object({
+  from: z.number().int().nonnegative(),
+  count: z.number().int().positive(),
+  /** Predicted class per item, in slice order. */
+  predictions: z.array(z.number().int()),
+  /** Correct predictions, from the labels shipped with the inputs. */
+  correct: z.number().int().nonnegative(),
+  /** Sum of each item's top logit — a cheap fingerprint for cross-host agreement. */
+  logitChecksum: z.number(),
+  hostId: z.string(),
+  hostname: z.string(),
+  modelLoadMs: z.number(),
+  inferenceMs: z.number(),
+  itemsPerSecond: z.number(),
+})
+export type InferenceOutput = z.infer<typeof InferenceOutput>
+
+/**
+ * One slice of a generation: evaluate these candidate gaits.
+ *
+ * Only the parent genome and a list of seeds travel over the wire. Each host rebuilds the
+ * candidates itself from parent + seed, so a generation of hundreds costs one genome of
+ * bandwidth rather than hundreds, and any host can reproduce any candidate exactly.
+ */
+export const WalkerInput = z.object({
+  generation: z.number().int().nonnegative(),
+  parent: z.array(z.number()),
+  sigma: z.number().positive(),
+  seeds: z.array(z.number().int()),
+  steps: z.number().int().positive().max(5000),
+})
+export type WalkerInput = z.infer<typeof WalkerInput>
+
+export const WalkerOutput = z.object({
+  generation: z.number().int().nonnegative(),
+  results: z.array(z.object({
+    seed: z.number().int(),
+    fitness: z.number(),
+    distance: z.number(),
+    ticks: z.number().int(),
+    fell: z.boolean(),
+  })),
+  hostId: z.string(),
+  hostname: z.string(),
+  evalMs: z.number(),
+  evalsPerSecond: z.number(),
+})
+export type WalkerOutput = z.infer<typeof WalkerOutput>
 
 export const AGENT_TO_CONTROL = {
   hello: Hello,

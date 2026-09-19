@@ -11,6 +11,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { lookup } from 'node:dns/promises'
 import { probeUrl } from './lib/net-probe.ts'
+import { IS_WINDOWS, cloudflaredInstallHint, copyEnvHint, envPrefix, portHolderHint } from './lib/platform.ts'
 
 const GREEN = '\x1b[32m', RED = '\x1b[31m', YEL = '\x1b[33m', DIM = '\x1b[2m', BOLD = '\x1b[1m', RESET = '\x1b[0m'
 const PORT = Number(process.env.PORT ?? 8787)
@@ -21,7 +22,13 @@ const warn = (name: string, fix: string): void => console.log(`  ${YEL}warn${RES
 const bad = (name: string, fix: string): void => { problems += 1; console.log(`  ${RED}FAIL${RESET}  ${name}\n        ${fix}`) }
 
 const has = (cmd: string, args: string[] = ['--version']): string | null => {
-  try { return execFileSync(cmd, args, { stdio: 'pipe' }).toString().trim().split('\n')[0]! } catch { return null }
+  try {
+    // On Windows, pnpm and cloudflared are usually .cmd shims. Node refuses to spawn
+    // .cmd/.bat without a shell and CreateProcess only appends .exe, so a bare
+    // execFileSync reports a working install as missing — this check would tell a
+    // Windows user to install pnpm on a machine where pnpm is what invoked it.
+    return execFileSync(cmd, args, { stdio: 'pipe', shell: IS_WINDOWS }).toString().trim().split('\n')[0]!
+  } catch { return null }
 }
 
 console.log(`\n${BOLD}Checking this machine${RESET}\n`)
@@ -37,7 +44,7 @@ pnpm ? ok('pnpm', pnpm) : bad('pnpm is not installed', 'npm i -g pnpm')
 
 const cf = has('cloudflared', ['--version'])
 cf ? ok('cloudflared', cf) : warn('cloudflared is not installed',
-  'Needed only for `pnpm share`. Install: brew install cloudflared — or bring your own address with --url')
+  `Needed only for \`pnpm share\`. Install: ${cloudflaredInstallHint()} — or bring your own address with --url`)
 
 // ----------------------------------------------------------------- database
 const docker = has('docker')
@@ -56,7 +63,7 @@ if (!docker) {
 
 // --------------------------------------------------------------- credentials
 if (!existsSync('.env')) {
-  warn('no .env file yet', 'cp .env.example .env — or just run `pnpm share`, which creates one')
+  warn('no .env file yet', `${copyEnvHint()} — or just run \`pnpm share\`, which creates one`)
 } else {
   const env = readFileSync('.env', 'utf8')
   const password = /^BOOTSTRAP_PASSWORD=(.*)$/m.exec(env)?.[1] ?? ''
@@ -85,7 +92,7 @@ if (portFree) {
     ok(`a server is already running on ${PORT}`, running?.publicOrigin ?? '')
   } catch {
     bad(`port ${PORT} is taken by something else`,
-      `lsof -nP -iTCP:${PORT} -sTCP:LISTEN   — or use PORT=8788 pnpm share`)
+      `${portHolderHint(PORT)}   — or use a different PORT`)
   }
 }
 
@@ -127,7 +134,8 @@ if (running?.publicOrigin && !running.publicOrigin.includes('localhost')) {
     ok('your public address', `${running.publicOrigin} is reachable`)
   } else if (probe.ok) {
     warn(`${running.publicOrigin} works, but this machine cannot resolve it`,
-      'It is fine for everyone else. Agents here need DWP_DNS_FALLBACK=1; your browser may fail to open it.')
+      'It is fine for everyone else; your browser here may fail to open it.\n        ' +
+      `Agents on this machine need: ${envPrefix('DWP_DNS_FALLBACK', '1', 'pnpm agent run')}`)
   } else {
     bad(`your public address is not answering`, `${probe.error ?? `HTTP ${probe.status}`}\n        Restart with: pnpm share`)
   }

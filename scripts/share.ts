@@ -18,10 +18,12 @@ import { randomBytes } from 'node:crypto'
 import { createInterface } from 'node:readline'
 import { createServer } from 'node:net'
 import { probeUrl } from './lib/net-probe.ts'
+import { cloudflaredInstallHint, envPrefix, portHolderHint, resolveCommand, stopChild, stopServerHint } from './lib/platform.ts'
 
 const ENV_PATH = '.env'
 const PORT = Number(process.env.PORT ?? 8787)
 const children: ChildProcess[] = []
+let stopping = false
 
 /**
  * --url lets you bring your own public address instead of a throwaway tunnel.
@@ -39,7 +41,10 @@ const manualUrl = (() => {
 })()
 
 function shutdown(code = 0): never {
-  for (const c of children) { try { c.kill('SIGTERM') } catch {} }
+  stopping = true
+  // POSIX gets the same SIGTERM as before; Windows has none to deliver and leaves
+  // grandchildren running, so stopChild takes the tree there instead.
+  for (const c of children) stopChild(c)
   process.exit(code)
 }
 for (const sig of ['SIGINT', 'SIGTERM'] as const) process.on(sig, () => shutdown(0))
@@ -104,11 +109,11 @@ async function assertPortFree(port: number): Promise<void> {
   Port ${port} is already in use — most likely a server from a previous run.
 
   Find and stop it:
-      lsof -nP -iTCP:${port} -sTCP:LISTEN
-      pkill -f 'packages/control/src/index.ts'
+      ${portHolderHint(port)}
+      ${stopServerHint()}
 
   Or use a different port:
-      PORT=8788 node scripts/share.ts
+      ${envPrefix('PORT', '8788', 'node scripts/share.ts')}
 `)
     process.exit(1)
   }
@@ -123,7 +128,9 @@ async function openQuickTunnel(): Promise<string> {
   console.log('  Opening a public tunnel to this machine...')
   const tunnelLog = createWriteStream(TUNNEL_LOG, { flags: 'w' })
 
-  const tunnel = spawn('cloudflared', ['tunnel', '--no-autoupdate', '--url', `http://127.0.0.1:${PORT}`], {
+  // resolveCommand is an identity everywhere but Windows, where a bare name reaches
+  // neither a .cmd shim nor a PATH-resolved .exe.
+  const tunnel = spawn(resolveCommand('cloudflared'), ['tunnel', '--no-autoupdate', '--url', `http://127.0.0.1:${PORT}`], {
     stdio: ['ignore', 'pipe', 'pipe'],
   })
   children.push(tunnel)
@@ -132,7 +139,7 @@ async function openQuickTunnel(): Promise<string> {
 
   tunnel.on('error', (err: NodeJS.ErrnoException) => {
     if (err.code === 'ENOENT') {
-      console.error('\n  cloudflared is not installed.\n\n    brew install cloudflared\n')
+      console.error(`\n  cloudflared is not installed.\n\n    ${cloudflaredInstallHint()}\n`)
     } else {
       console.error('\n  Could not start the tunnel:', err.message, '\n')
     }
@@ -165,12 +172,38 @@ if (manualUrl) {
 // reachable by anyone until Cloudflare finishes registering the route — which is the
 // slow part, and is what the wait below is for.
 
-const control = spawn(process.execPath, ['--env-file-if-exists=.env', 'packages/control/src/index.ts'], {
-  stdio: ['ignore', 'inherit', 'inherit'],
-  env: { ...process.env, PUBLIC_ORIGIN: publicOrigin, PORT: String(PORT), BIND_HOST: '127.0.0.1' },
-})
-children.push(control)
-control.on('exit', c => shutdown(c ?? 0))
+/**
+ * Supervise the server rather than dying with it.
+ *
+ * The tunnel owns the public address, and agents remember the address they paired with.
+ * Tearing the tunnel down because the server stopped means every friend's agent breaks
+ * over something as ordinary as a restart or a crash — which is exactly what happened
+ * the first time the server was restarted with a real second machine connected.
+ *
+ * So: keep the tunnel, restart the server underneath it, and the address survives.
+ */
+let control: ChildProcess
+let restarts = 0
+
+function startControl(): void {
+  control = spawn(process.execPath, ['--env-file-if-exists=.env', 'packages/control/src/index.ts'], {
+    stdio: ['ignore', 'inherit', 'inherit'],
+    env: { ...process.env, PUBLIC_ORIGIN: publicOrigin, PORT: String(PORT), BIND_HOST: '127.0.0.1' },
+  })
+  children.push(control)
+
+  control.on('exit', code => {
+    if (stopping) return
+    restarts += 1
+    if (restarts > 10) {
+      console.error(`\n  The server has exited ${restarts} times. Stopping rather than looping.\n`)
+      shutdown(code ?? 1)
+    }
+    console.log(`\n  Server exited (code ${code}); restarting — the address stays the same.\n`)
+    setTimeout(startControl, 1000)
+  })
+}
+startControl()
 
 // Wait for the whole path — DNS, Cloudflare edge, tunnel, service — to actually work.
 // A quick tunnel's hostname routinely takes 30-60s to become resolvable, so this is

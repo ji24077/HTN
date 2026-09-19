@@ -8,13 +8,16 @@ import type { KeyObject } from 'node:crypto'
 import { createLogger } from '@dwp/protocol'
 import { diagnoseOrigin } from '@dwp/protocol'
 import { fallbackLookup, dnsFallbackEnabled, installDnsFallback } from './resolver.ts'
+import { applyUpdate, restartIntoNewVersion } from './update.ts'
 import { probe } from './capability.ts'
 import { isPaused, type AgentConfig } from './config.ts'
 import { runEcho } from './adapters/echo.ts'
+import { runInference } from './adapters/inference.ts'
+import { runWalker } from './adapters/walker.ts'
 
 const log = createLogger({ component: 'agent' })
 
-const ADAPTERS = ['echo']
+const ADAPTERS = ['echo', 'cpu_inference_batch', 'walker_evolution']
 // Fallbacks only. The server announces the real cadence at handshake, and a lease
 // duration with every offer; a hardcoded agent-side interval would silently drift out
 // of agreement with the server the moment either is tuned.
@@ -139,6 +142,29 @@ export function connect(cfg: AgentConfig, privateKey: KeyObject): void {
             heartbeatMs = ack.data.heartbeatSeconds * 1000
             startHeartbeat()
           }
+          /**
+           * The server announces what it is offering; the agent decides whether to take
+           * it, and verifies the signature itself. Updating while holding work would
+           * abandon it mid-flight, so wait until the machine is idle.
+           */
+          const offered = ack.data.releaseVersion
+          if (offered && cfg.autoUpdate !== false && offered !== cfg.installedRelease && running.size === 0) {
+            hostLog.info('update.available', { have: cfg.installedRelease ?? null, offered })
+            void applyUpdate(cfg, privateKey).then(result => {
+              if (result.status === 'updated') {
+                console.log(`\n  Updated to ${result.to}. Restarting.\n`)
+                stopped = true
+                try { ws.close(1000, 'updating') } catch {}
+                setTimeout(restartIntoNewVersion, 500)
+              } else if (result.status === 'refused') {
+                hostLog.error('update.refused', { reason: result.reason })
+                console.error(`\n  Refused an update: ${result.reason}\n`)
+              } else if (result.status === 'unavailable') {
+                hostLog.warn('update.unavailable', { reason: result.reason })
+              }
+            }).catch((err: unknown) => hostLog.warn('update.failed', { err }))
+          }
+
           // Clock skew shows up here first, and misattributed timings later.
           const skewMs = Date.now() - Date.parse(ack.data.serverTime)
           hostLog.info('handshake.complete', { serverSkewMs: skewMs })
@@ -187,8 +213,18 @@ export function connect(cfg: AgentConfig, privateKey: KeyObject): void {
         const startedAt = new Date().toISOString()
         const t0 = performance.now()
         const wallClock = setTimeout(() => controller.abort(), offer.wallClockMs)
+        void wallClock
 
-        void runEcho(offer.input, cfg.hostId, controller.signal)
+        const work =
+          offer.adapter === 'cpu_inference_batch'
+            ? runInference(offer.input, {
+                hostId: cfg.hostId, server: cfg.server, privateKey, signal: controller.signal,
+              })
+          : offer.adapter === 'walker_evolution'
+            ? runWalker(offer.input, cfg.hostId, controller.signal)
+          : runEcho(offer.input, cfg.hostId, controller.signal)
+
+        void work
           .then(output => {
             const finishedAt = new Date().toISOString()
             const outputHash = hashOutput(output)
