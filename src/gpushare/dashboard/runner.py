@@ -457,34 +457,130 @@ def _sync_project(job: Job, info: dict[str, Any]) -> None:
 # plus a multi-GB prefix KV cache and leaves nothing behind.
 GPU_BUSY_GB = 2.0
 
+# train.py's default; placement has to assume it because TrainRequest does not
+# expose seq_len, and memory scales with it.
+TRAIN_SEQ_LEN = 192
+
+# The memory half of the cost model came in 1.4% under a measured 13.80 GB peak
+# — far better than its time half, which was out by nearly 7x. Still a margin:
+# one agreement on one config is not a guarantee, and being wrong here means an
+# OOM two minutes in rather than a slightly late ETA.
+VRAM_MARGIN = 1.20
+
+
+def _free_vram_gb(info: dict[str, Any]) -> float:
+    out = _capture(
+        _ssh_args(info, "nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits")
+    )
+    return min((int(x) for x in re.findall(r"\d+", out)), default=0) / 1024
+
+
+def _gpu_occupants(info: dict[str, Any]) -> str:
+    try:
+        return (
+            _capture(
+                _ssh_args(
+                    info,
+                    "nvidia-smi --query-compute-apps=pid,used_memory --format=csv,noheader",
+                )
+            )
+            .strip()
+            .replace("\n", "; ")
+        )
+    except Exception:  # noqa: BLE001 — the reason to move on is the memory, not the listing
+        return ""
+
+
+def predicted_train_vram_gb(
+    *, dtype: str, attention: str, micro_batch: int, grad_accum: int
+) -> float:
+    """What this training config will need, from the shared cost model.
+
+    Built through JobConfig rather than by reaching into the formula, so a
+    change to how peak memory is computed cannot silently stop applying to
+    placement.
+    """
+    from gpushare.agent.calibrate import COLD_START, DEFAULTS
+    from gpushare.agent.simulate import predict_peak_vram_gb
+    from gpushare.agent.specs import MODELS
+    from gpushare.contracts import JobConfig
+
+    cfg = JobConfig(
+        job_id="placement",
+        model="qwen2.5-0.5b",
+        total_steps=1,
+        seq_len=TRAIN_SEQ_LEN,
+        dtype=dtype,
+        attention=attention,
+        micro_batch=micro_batch,
+        grad_accum=grad_accum,
+        H=190,
+        workers=["w0"],
+        global_batch_tokens=micro_batch * grad_accum * TRAIN_SEQ_LEN,
+    )
+    cal = DEFAULTS.get("ada_24gb", COLD_START)
+    return predict_peak_vram_gb(cfg=cfg, model=MODELS["qwen2.5-0.5b"], cal=cal) * VRAM_MARGIN
+
+
+def _place(job: Job, *, need_gb: float, preferred_pod_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Pick a pod with room, preferring the one that was asked for.
+
+    Placement is the product: the point of pooling GPUs is that a job lands
+    where it fits without a person tracking who is holding what. Refusing and
+    naming the occupant, which is what this did before, still left the person
+    to do the choosing.
+
+    Free memory is read off each GPU rather than tracked here. Our own record of
+    what is loaded lives in process memory and does not survive a dashboard
+    restart, and it cannot see anything we did not start — a stale server from
+    an earlier session was found holding 17.1 GB this way.
+    """
+    pods = {p["id"]: p for p in list_pods() if p.get("status") == "running"}
+    if preferred_pod_id not in pods:
+        raise JobError(f"pod {preferred_pod_id} is not running")
+
+    order = [preferred_pod_id] + sorted(
+        (i for i in pods if i != preferred_pod_id),
+        key=lambda i: pods[i].get("cost_per_hour") or 0.0,
+    )
+    surveyed: list[str] = []
+    for pod_id in order:
+        pod = pods[pod_id]
+        try:
+            info = _ssh_info(pod_id)
+            free = _free_vram_gb(info)
+        except Exception as e:  # noqa: BLE001 — an unreachable pod is a candidate we skip
+            surveyed.append(f"{pod['name']}: unreachable ({type(e).__name__})")
+            continue
+        if free >= need_gb:
+            where = "as requested" if pod_id == preferred_pod_id else "moved from the requested pod"
+            JOBS.log(job, f"placing on {pod['name']}: {free:.1f} GB free, needs {need_gb:.1f} GB ({where})")
+            return pod, info
+        surveyed.append(f"{pod['name']}: {free:.1f} GB free{(' — ' + o) if (o := _gpu_occupants(info)) else ''}")
+
+    raise JobError(
+        f"no pod has room for this job (needs {need_gb:.1f} GB). "
+        + " | ".join(surveyed)
+        + " — stop an inference server, or rent another pod"
+    )
+
 
 def _require_idle_gpu(job: Job, info: dict[str, Any]) -> None:
-    """Refuse a GPU-hungry job on an occupied card, before doing any work.
+    """Refuse rather than relocate. For jobs pinned to one pod's disk.
 
-    Checking our own `_serve` dict is not enough and was tried: it lives in
-    process memory, so after a dashboard restart the pod is still serving while
-    the dashboard believes nothing is loaded. Asking the GPU is the only answer
-    that survives a restart — and it also catches occupants we did not start.
-
-    Placed ahead of the rsync and the uv sync on purpose. The failure it
-    replaces was an OOM traceback roughly two minutes in, which reads as "the
-    training code is broken" rather than "this card is busy".
+    Inference optimisation reads the checkpoint that training left on that
+    machine, so moving it elsewhere would fail later and more confusingly than
+    stopping here.
     """
-    out = _capture(_ssh_args(info, "nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits"))
-    used_mb = max((int(x) for x in re.findall(r"\d+", out)), default=0)
-    if used_mb / 1024 < GPU_BUSY_GB:
+    free = _free_vram_gb(info)
+    if free >= GPU_BUSY_GB:
         return
-    who = ""
-    try:
-        who = _capture(
-            _ssh_args(info, "nvidia-smi --query-compute-apps=pid,used_memory --format=csv,noheader")
-        ).strip().replace("\n", "; ")
-    except Exception:  # noqa: BLE001 — the reason to stop is the memory, not the listing
-        pass
+    who = _gpu_occupants(info)
     raise JobError(
-        f"the GPU already has {used_mb / 1024:.1f} GB in use"
+        f"this pod has only {free:.1f} GB free"
         + (f" ({who})" if who else "")
-        + " — stop the inference server on this pod, or pick a different pod"
+        + " and its checkpoint cannot be used from another pod"
+        " — stop the inference server here first"
     )
 
 
@@ -622,11 +718,15 @@ def start_training(
     }
 
     def work(job: Job) -> dict[str, Any]:
-        JOBS.update(job, "resolving RunPod", 3)
-        pod = _pod(pod_id)
-        info = _ssh_info(pod_id)
-        JOBS.update(job, "checking the GPU is free", 5)
-        _require_idle_gpu(job, info)
+        JOBS.update(job, "choosing a GPU with room", 3)
+        need = predicted_train_vram_gb(
+            dtype=dtype, attention=attention, micro_batch=micro_batch, grad_accum=grad_accum
+        )
+        pod, info = _place(job, need_gb=need, preferred_pod_id=pod_id)
+        # Everything downstream keys off where the job actually landed, not
+        # where it was asked to go — including the record of which machine holds
+        # the checkpoint, which serving reads back.
+        placed_id = pod["id"]
         JOBS.update(job, "syncing code and data", 8)
         _sync_project(job, info)
         JOBS.update(job, "preparing GPU environment", 15)
@@ -722,7 +822,7 @@ def start_training(
         _write_latest(
             {
                 "job_id": job.id,
-                "pod_id": pod_id,
+                "pod_id": placed_id,
                 "pod": pod,
                 "local_dir": str(local),
                 "remote_checkpoint": ckpt_dir,
@@ -748,9 +848,14 @@ def _checkpoint_for(pod_id: str) -> dict[str, Any]:
 
 def start_training_optimization(*, pod_id: str) -> Job:
     def work(job: Job) -> dict[str, Any]:
-        pod, info = _pod(pod_id), _ssh_info(pod_id)
-        JOBS.update(job, "checking the GPU is free", 5)
-        _require_idle_gpu(job, info)
+        JOBS.update(job, "choosing a GPU with room", 3)
+        pod, info = _place(
+            job,
+            need_gb=predicted_train_vram_gb(
+                dtype="bf16", attention="sdpa", micro_batch=16, grad_accum=1
+            ),
+            preferred_pod_id=pod_id,
+        )
         JOBS.update(job, "syncing benchmark", 8)
         _sync_project(job, info)
         JOBS.update(job, "preparing GPU environment", 15)

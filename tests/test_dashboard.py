@@ -187,29 +187,75 @@ def test_streaming_route_reports_errors_as_a_frame_not_a_500():
     assert "no model is loaded" in frames[-1]["error"]
 
 
-def test_busy_gpu_is_refused_before_any_work(monkeypatch):
-    """A card with a resident model must stop the job at the door.
+def test_a_full_gpu_sends_the_job_to_one_with_room(monkeypatch):
+    """Placement, not refusal. Pooling GPUs is the point of the product.
 
-    The real failure this replaces took about two minutes — rsync, uv sync,
-    model download — and ended in a CUDA OOM traceback, which reads as broken
-    training code rather than an occupied GPU.
+    The requested pod is tried first; when it cannot fit the job the run moves
+    rather than failing, and the job records where it actually landed — serving
+    reads that back to find the checkpoint, so a stale id would look for the
+    weights on the wrong machine.
     """
-    calls = []
-    monkeypatch.setattr(runner, "_ssh_args", lambda info, cmd: ["ssh", cmd])
+    free = {"busy": 0.9, "roomy": 23.0}
     monkeypatch.setattr(
         runner,
-        "_capture",
-        lambda args, **kw: (calls.append(args[1]), "22631" if "memory.used" in args[1] else "3910603, 22631 MiB")[1],
+        "list_pods",
+        lambda: [
+            {"id": "busy", "name": "serving-pod", "status": "running", "cost_per_hour": 0.50},
+            {"id": "roomy", "name": "idle-pod", "status": "running", "cost_per_hour": 0.74},
+        ],
     )
+    monkeypatch.setattr(runner, "_ssh_info", lambda pid: {"pod": pid})
+    monkeypatch.setattr(runner, "_free_vram_gb", lambda info: free[info["pod"]])
+    logged: list[str] = []
+    monkeypatch.setattr(runner.JOBS, "log", lambda job, text: logged.append(text))
+
+    pod, _ = runner._place(object(), need_gb=16.0, preferred_pod_id="busy")
+
+    assert pod["id"] == "roomy"
+    assert "moved from the requested pod" in logged[-1]
+
+    # The requested pod wins when it fits, even though it is not the emptiest.
+    pod, _ = runner._place(object(), need_gb=0.5, preferred_pod_id="busy")
+    assert pod["id"] == "busy"
+    assert "as requested" in logged[-1]
+
+
+def test_placement_reports_every_pod_it_tried_when_none_fit(monkeypatch):
+    monkeypatch.setattr(
+        runner,
+        "list_pods",
+        lambda: [{"id": "a", "name": "pod-a", "status": "running", "cost_per_hour": 0.5}],
+    )
+    monkeypatch.setattr(runner, "_ssh_info", lambda pid: {"pod": pid})
+    monkeypatch.setattr(runner, "_free_vram_gb", lambda info: 1.2)
+    monkeypatch.setattr(runner, "_gpu_occupants", lambda info: "3910603, 23178 MiB")
 
     try:
-        runner._require_idle_gpu(object(), {"ip": "x", "port": 1, "key": "k"})
+        runner._place(object(), need_gb=16.0, preferred_pod_id="a")
     except runner.JobError as e:
-        assert "22.1 GB in use" in str(e)
-        assert "different pod" in str(e)
+        assert "pod-a: 1.2 GB free" in str(e)
+        assert "3910603" in str(e), "the occupant has to be named or there is nothing to act on"
     else:
-        raise AssertionError("an occupied GPU was allowed through")
+        raise AssertionError("placement accepted a pod with no room")
 
-    # An idle card must not be refused.
-    monkeypatch.setattr(runner, "_capture", lambda args, **kw: "412")
-    runner._require_idle_gpu(object(), {"ip": "x", "port": 1, "key": "k"})
+
+def test_pinned_jobs_refuse_instead_of_moving(monkeypatch):
+    """Inference optimisation reads a checkpoint off one pod's disk."""
+    monkeypatch.setattr(runner, "_free_vram_gb", lambda info: 0.4)
+    monkeypatch.setattr(runner, "_gpu_occupants", lambda info: "3910603, 23178 MiB")
+
+    try:
+        runner._require_idle_gpu(object(), {})
+    except runner.JobError as e:
+        assert "cannot be used from another pod" in str(e)
+    else:
+        raise AssertionError("a pinned job was allowed onto a full GPU")
+
+
+def test_predicted_training_vram_is_near_the_measured_peak():
+    """13.80 GB was measured on a 4090 for this exact config."""
+    need = runner.predicted_train_vram_gb(
+        dtype="bf16", attention="sdpa", micro_batch=16, grad_accum=1
+    )
+
+    assert 13.8 <= need <= 13.8 * runner.VRAM_MARGIN * 1.2, need
