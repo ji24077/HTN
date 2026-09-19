@@ -171,7 +171,7 @@ def test_request_models_match_the_runner_signatures_they_splat_into():
         assert not missing, f"{func.__name__} is missing {missing}"
 
 
-def test_streaming_route_reports_errors_as_a_frame_not_a_500():
+def test_streaming_route_reports_errors_as_a_frame_not_a_500(monkeypatch):
     """With no model loaded the stream must still be readable.
 
     The route cannot answer 409: StreamingResponse sends headers before the
@@ -179,6 +179,10 @@ def test_streaming_route_reports_errors_as_a_frame_not_a_500():
     an ASGI error — a stack trace in the log and a stream that simply stops in
     the browser, with nothing on the page saying why.
     """
+    # build_app() adopts a model that is still resident, so without this the
+    # test passes or fails depending on whether a pod happens to be serving.
+    monkeypatch.setattr(runner, "_server_health", lambda timeout=3.0: None)
+    monkeypatch.setattr(runner, "_serve", {})
     client = TestClient(build_app())
 
     r = client.post("/api/generate/stream", json={"sentence": "x", "max_new_tokens": 16})
