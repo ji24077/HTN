@@ -18,6 +18,7 @@ class WorkerConfig:
     token: str
     capabilities: Capabilities
     paused: bool = False
+    transport: str = "direct"
 
     @classmethod
     def from_env(cls, kind: str) -> "WorkerConfig":
@@ -34,6 +35,9 @@ class WorkerConfig:
         paused = os.getenv("WORKER_PAUSED", "false").lower()
         if paused not in {"true", "false"}:
             raise ValueError("WORKER_PAUSED must be true or false")
+        transport = os.getenv("WORKER_TRANSPORT", "direct")
+        if transport not in {"direct", "tailscale"}:
+            raise ValueError("WORKER_TRANSPORT must be direct or tailscale")
         return cls(
             url=url,
             worker_id=TypeAdapter(Identifier).validate_python(os.environ["WORKER_ID"]),
@@ -44,4 +48,5 @@ class WorkerConfig:
                 kinds=[kind],
             ),
             paused=paused == "true",
+            transport=transport,
         )

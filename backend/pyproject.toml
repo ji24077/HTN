@@ -15,6 +15,7 @@ dependencies = [
 ]
 
 [project.scripts]
+orchestrator-backend = "orchestrator.server.bundle:main"
 orchestrator-server = "orchestrator.server.app:main"
 orchestrator-public = "orchestrator.server.app:public_main"
 orchestrator-worker-gateway = "orchestrator.server.app:worker_main"

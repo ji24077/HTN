@@ -33,15 +33,35 @@ async function rawRequest<T>(
 }
 
 let authClient: Promise<SupabaseClient> | undefined;
+let recoveringPassword = false;
+let signingOut = false;
+
+function clearAuthRedirect() {
+  recoveringPassword = false;
+  window.history.replaceState(null, "", window.location.pathname);
+}
+
+export class AuthLinkError extends Error {}
+
 function supabase(): Promise<SupabaseClient> {
   if (!authClient) {
     authClient = rawRequest<{ url: string; publishableKey: string }>(
       "/auth/config",
     )
-      .then(({ url, publishableKey }) => {
-        const client = createClient(url, publishableKey);
-        client.auth.onAuthStateChange((event) => {
+      .then(async ({ url, publishableKey }) => {
+        const client = createClient(url, publishableKey, {
+          auth: { flowType: "pkce" },
+        });
+        const { data: listener } = client.auth.onAuthStateChange((event) => {
+          if (event === "PASSWORD_RECOVERY") {
+            recoveringPassword = true;
+            // Keep recovery visible across reloads after the SDK consumes the link.
+            window.history.replaceState(null, "", "?auth=recovery");
+            window.dispatchEvent(new Event("password-recovery"));
+          }
           if (event === "SIGNED_OUT") {
+            clearAuthRedirect();
+            if (signingOut) return;
             // Defer work outside the SDK's auth callback lock.
             setTimeout(() => {
               void rawRequest("/auth/session", { method: "DELETE" }).catch(
@@ -51,6 +71,13 @@ function supabase(): Promise<SupabaseClient> {
             }, 0);
           }
         });
+        const { error } = await client.auth.initialize();
+        if (error) {
+          listener.subscription.unsubscribe();
+          throw new AuthLinkError(
+            "Could not verify this email link. Please request a new one and open it in the same browser.",
+          );
+        }
         return client;
       })
       .catch((error) => {
@@ -105,19 +132,73 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
 export async function openSession(
   signal: AbortSignal,
-): Promise<{ mode: "demo" | "public" }> {
+): Promise<{ mode: "demo" | "public" | "recovery"; email?: string }> {
+  const params = new URLSearchParams(window.location.hash.slice(1));
+  const query = new URLSearchParams(window.location.search);
+  if (params.has("error") || query.has("error")) {
+    throw new AuthLinkError(
+      "This email link is invalid or has expired. Please request a new one.",
+    );
+  }
+  // Consume confirmation links even when the browser still has another
+  // account's (possibly denied) API cookie.
+  if (query.has("code") || params.has("access_token")) {
+    const client = await supabase();
+    const { data, error } = await client.auth.getSession();
+    if (error || !data.session) {
+      throw new AuthLinkError(
+        "Could not verify this email link. Please request a new one.",
+      );
+    }
+    if (
+      !recoveringPassword &&
+      query.get("auth") !== "recovery" &&
+      params.get("type") !== "recovery"
+    ) {
+      await exchange(data.session.access_token);
+    }
+  }
+  if (
+    recoveringPassword ||
+    query.get("auth") === "recovery" ||
+    params.get("type") === "recovery"
+  ) {
+    const client = await supabase();
+    const { data, error } = await client.auth.getSession();
+    if (error || !data.session) {
+      throw new AuthLinkError(
+        "This password reset link is invalid or has expired. Please request a new one.",
+      );
+    }
+    return { mode: "recovery" };
+  }
   try {
     const result = await rawRequest<{ mode: "demo" | "public" }>(
       "/auth/session",
       { signal },
     );
-    if (result.mode === "public") await supabase();
+    if (result.mode === "public") {
+      const client = await supabase();
+      const { data, error } = await client.auth.getSession();
+      if (error || !data.session) throw new ApiError("Please sign in", 401);
+      if (recoveringPassword) return { mode: "recovery" };
+      // A confirmation link can switch Supabase accounts while an old API
+      // cookie is still valid. Authorize the current account before showing data.
+      await exchange(data.session.access_token);
+      return { ...result, email: data.session?.user?.email };
+    }
     return result;
   } catch (error) {
     if (!(error instanceof ApiError) || error.status !== 401) throw error;
     try {
       await renewSession();
-      return await rawRequest("/auth/session", { signal });
+      const result = await rawRequest<{ mode: "public" }>("/auth/session", {
+        signal,
+      });
+      const client = await supabase();
+      const { data } = await client.auth.getSession();
+      if (recoveringPassword) return { mode: "recovery" };
+      return { ...result, email: data.session?.user?.email };
     } catch (renewalError) {
       if (
         renewalError instanceof ApiError &&
@@ -131,6 +212,7 @@ export async function openSession(
 }
 
 export async function login(email: string, password: string) {
+  clearAuthRedirect();
   const client = await supabase();
   const { data, error } = await client.auth.signInWithPassword({
     email,
@@ -141,11 +223,47 @@ export async function login(email: string, password: string) {
   await exchange(data.session.access_token);
 }
 
-export async function logout() {
-  await rawRequest("/auth/session", { method: "DELETE" });
+export async function signUp(email: string, password: string) {
+  clearAuthRedirect();
   const client = await supabase();
-  const { error } = await client.auth.signOut({ scope: "local" });
+  const { data, error } = await client.auth.signUp({
+    email,
+    password,
+    options: { emailRedirectTo: window.location.origin + "/" },
+  });
   if (error) throw new Error(error.message);
+  if (!data.session) return false;
+  await exchange(data.session.access_token);
+  return true;
+}
+
+export async function sendPasswordReset(email: string) {
+  clearAuthRedirect();
+  const client = await supabase();
+  const { error } = await client.auth.resetPasswordForEmail(email, {
+    redirectTo: window.location.origin + "/?auth=recovery",
+  });
+  if (error) throw new Error(error.message);
+}
+
+export async function updatePassword(password: string) {
+  const client = await supabase();
+  const { error } = await client.auth.updateUser({ password });
+  if (error) throw new Error(error.message);
+  clearAuthRedirect();
+}
+
+export async function logout() {
+  signingOut = true;
+  try {
+    await rawRequest("/auth/session", { method: "DELETE" });
+    const client = await supabase();
+    const { error } = await client.auth.signOut({ scope: "local" });
+    if (error) throw new Error(error.message);
+    clearAuthRedirect();
+  } finally {
+    signingOut = false;
+  }
 }
 
 export const submitTasks = (tasks: TaskSpec[]) =>

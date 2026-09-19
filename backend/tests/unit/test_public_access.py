@@ -5,6 +5,7 @@ import time
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
+from uuid import UUID
 
 import httpx
 from fastapi import HTTPException
@@ -143,6 +144,27 @@ class PublicAccessTests(unittest.IsolatedAsyncioTestCase):
             "/v1/workers", headers={"Authorization": f"Bearer {ADMIN}"}
         )
         self.assertEqual(response.status_code, 200)
+
+    async def test_approved_email_requires_confirmed_supabase_account(self):
+        self.app.state.config.supabase_admin_ids = frozenset()
+        self.app.state.config.supabase_admin_emails = frozenset({"owner@example.com"})
+        lookup = AsyncMock(return_value=False)
+        self.app.state.store.pool = SimpleNamespace(fetchval=lookup)
+        response = await self.login()
+        self.assertEqual(response.status_code, 403)
+        self.assertNotIn("set-cookie", response.headers)
+        query, user_id, emails = lookup.call_args.args
+        self.assertIn("auth.users", query)
+        self.assertIn("email_confirmed_at IS NOT NULL", query)
+        self.assertIn("deleted_at IS NULL", query)
+        self.assertEqual(user_id, UUID(USER_ID))
+        self.assertEqual(emails, ["owner@example.com"])
+        lookup.return_value = True
+        self.assertEqual((await self.login()).status_code, 200)
+        self.assertEqual((await self.client.get("/v1/workers")).status_code, 200)
+        # Revoking email approval affects existing cookies too.
+        lookup.return_value = False
+        self.assertEqual((await self.client.get("/v1/workers")).status_code, 403)
 
 
 class ListenerTests(unittest.TestCase):

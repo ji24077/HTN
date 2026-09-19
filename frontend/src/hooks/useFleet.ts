@@ -28,8 +28,8 @@ export function useFleet() {
       controller = new AbortController();
       const signal = controller.signal;
       try {
-        await openSession(signal);
-        if (disposed || signal.aborted) return;
+        const session = await openSession(signal);
+        if (disposed || signal.aborted || session.mode === "recovery") return;
         stream = new EventSource("/v1/updates");
         stream.addEventListener("snapshot", (event: MessageEvent<string>) => {
           if (disposed) return;

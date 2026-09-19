@@ -6,6 +6,11 @@
 !backend/src/**
 !frontend/
 !frontend/**
+!transport/
+!transport/tailscale/
+!transport/tailscale/*.go
+!transport/tailscale/go.mod
+!transport/tailscale/go.sum
 frontend/node_modules/
 frontend/coverage/
 backend/src/orchestrator/server/web/

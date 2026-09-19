@@ -20,7 +20,10 @@ export function TaskComposer({
   const [duration, setDuration] = useState(30);
   const [failover, setFailover] = useState(true);
   const ids = [
-    ...new Set(["worker-a", "worker-b", ...workers.map((worker) => worker.id)]),
+    ...new Set([
+      ...workers.map((worker) => worker.id),
+      ...(selected ? [selected] : []),
+    ]),
   ];
   function submit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();

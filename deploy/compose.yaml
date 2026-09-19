@@ -20,6 +20,7 @@ services:
     ports:
       - "127.0.0.1:63799:6379"
   server:
+    command: ["orchestrator-server"]
     build:
       context: ..
       dockerfile: deploy/Dockerfile

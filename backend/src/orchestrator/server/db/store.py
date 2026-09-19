@@ -89,7 +89,9 @@ class Store:
         )
         store = cls(pool)
         try:
-            async with store.change() as (conn, _):
+            # Remote schema setup makes many round trips and may wait for the
+            # other listener's startup lock; keep normal mutations at 5 seconds.
+            async with store.change(timeout=60) as (conn, _):
                 if schema != "public":
                     await conn.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')
                     await conn.execute(f'REVOKE ALL ON SCHEMA "{schema}" FROM PUBLIC')
@@ -131,13 +133,13 @@ class Store:
             self.pool.terminate()
 
     @asynccontextmanager
-    async def change(self) -> AsyncIterator[tuple[asyncpg.Connection, datetime]]:
+    async def change(self, *, timeout: float = 5) -> AsyncIterator[tuple[asyncpg.Connection, datetime]]:
         # A coarse database lock deliberately serializes prototype mutations,
         # including across processes. Move to finer row locks before scaling.
-        async with asyncio.timeout(5):
+        async with asyncio.timeout(timeout):
             async with self.pool.acquire() as conn:
                 async with conn.transaction():
-                    await conn.execute("SELECT pg_advisory_xact_lock(71420931)")
+                    await conn.execute("SELECT pg_advisory_xact_lock(71420931)", timeout=timeout)
                     now = await conn.fetchval("SELECT clock_timestamp()")
                     yield conn, now
 

@@ -93,3 +93,17 @@ TLS control-plane endpoint. The stub needs no GPU, so GPU speed or rendering
 correctness cannot be inferred from this trial. Repeat disconnect, reconnect,
 and stale-completion cases across the actual network; record recovery latency,
 attempt counts, and audit events. Stop or delete trial resources afterward.
+
+## Embedded Tailscale transport
+
+The backend and worker both include a Go/tsnet helper. Go forwarding, shutdown,
+fixed-target restrictions, and private gateway route-isolation tests pass under
+the race detector. Python tests verify helper lifecycle, environment credential
+isolation, and gateway TLS hostname verification before worker credentials are
+sent. The backend regression suite passes (35 passing tests, one opt-in database
+test skipped). The local bundled backend's public and private health endpoints
+return 200; the private management API returns 404.
+
+The macOS helper is built and the local backend is awaiting Tailscale browser
+authorization. Remote enrollment, certificates, and dispatch over the tailnet
+are not yet verified. Docker build/runtime remain untested on this host.

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   ApiError,
+  AuthLinkError,
   cancelTask,
   logout,
   openSession,
@@ -19,21 +20,38 @@ import { active, healthy, time, workerName } from "./lib/format";
 
 export default function App() {
   const [session, setSession] = useState<
-    "checking" | "login" | "demo" | "public" | "error"
+    "checking" | "login" | "demo" | "public" | "recovery" | "error"
   >("checking");
+  const [email, setEmail] = useState("");
+  const [authError, setAuthError] = useState("");
   const [revision, setRevision] = useState(0);
   useEffect(() => {
     const controller = new AbortController();
     const expired = () => setSession("login");
+    const recovery = () => setSession("recovery");
     window.addEventListener("session-expired", expired);
+    window.addEventListener("password-recovery", recovery);
     openSession(controller.signal)
       .then((result) => {
-        if (!controller.signal.aborted) setSession(result.mode || "demo");
+        if (!controller.signal.aborted) {
+          setEmail(result.email || "");
+          setAuthError("");
+          setSession((current) =>
+            current === "recovery" ? current : result.mode || "demo",
+          );
+        }
       })
       .catch((error) => {
         if (!controller.signal.aborted) {
+          setAuthError(
+            error instanceof AuthLinkError ||
+              (error instanceof ApiError && error.status === 403)
+              ? error.message
+              : "",
+          );
           setSession(
-            error instanceof ApiError && [401, 403].includes(error.status)
+            error instanceof AuthLinkError ||
+              (error instanceof ApiError && [401, 403].includes(error.status))
               ? "login"
               : "error",
           );
@@ -42,11 +60,15 @@ export default function App() {
     return () => {
       controller.abort();
       window.removeEventListener("session-expired", expired);
+      window.removeEventListener("password-recovery", recovery);
     };
   }, [revision]);
-  if (session === "login")
+  if (session === "login" || session === "recovery")
     return (
       <Login
+        key={session}
+        recovery={session === "recovery"}
+        initialError={authError}
         onLogin={() => {
           setSession("checking");
           setRevision((value) => value + 1);
@@ -59,7 +81,12 @@ export default function App() {
     return (
       <div className="login-page" role="alert">
         Could not connect to the server.
-        <button onClick={() => setRevision((value) => value + 1)}>
+        <button
+          onClick={() => {
+            setSession("checking");
+            setRevision((value) => value + 1);
+          }}
+        >
           Try again
         </button>
       </div>
@@ -67,6 +94,7 @@ export default function App() {
   return (
     <FleetApp
       remote={session === "public"}
+      email={email}
       onLogout={() => setSession("login")}
     />
   );
@@ -74,14 +102,17 @@ export default function App() {
 
 function FleetApp({
   remote,
+  email,
   onLogout,
 }: {
   remote: boolean;
+  email: string;
   onLogout: () => void;
 }) {
   const { snapshot, status, updatedAt } = useFleet();
   const [selected, setSelected] = useState("");
   const [busy, setBusy] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
   const sending = useRef(false);
   const [cancelling, setCancelling] = useState(new Set<string>());
   const pendingCancellations = useRef(new Set<string>());
@@ -128,11 +159,10 @@ function FleetApp({
       setCancelling(new Set(pendingCancellations.current));
     }
   }
-  const fleetSize = new Set([
-    "worker-a",
-    "worker-b",
-    ...snapshot.workers.map((worker) => worker.id),
-  ]).size;
+  const fleetSize = snapshot.workers.length;
+  const availableWorkers = snapshot.workers.filter(
+    (worker) => healthy(worker) && !worker.paused,
+  );
   const metrics = [
     {
       id: "online-count",
@@ -175,7 +205,7 @@ function FleetApp({
           <span>▦</span> Compute lab <small>01</small>
         </div>
         <p className="aside-note">
-          A little playground for
+          One place to manage
           <br />
           distributed work.
         </p>
@@ -196,26 +226,40 @@ function FleetApp({
             {remote && (
               <button
                 className="outline-btn"
+                disabled={signingOut}
                 onClick={async () => {
+                  setSigningOut(true);
                   try {
                     await logout();
                     onLogout();
                   } catch {
                     notify("Could not sign out. Please try again.");
+                  } finally {
+                    setSigningOut(false);
                   }
                 }}
               >
-                Sign out
+                {signingOut ? "Signing out…" : "Sign out"}
               </button>
             )}
-            <span className="pill neutral">Prototype</span>
-            <span className="avatar">ET</span>
+            {!remote && <span className="pill neutral">Demo</span>}
+            {remote && email && (
+              <span className="account-email" title={email}>
+                {email}
+              </span>
+            )}
+            <span
+              className="avatar"
+              aria-label={remote ? email || "Fleet account" : "Local demo"}
+            >
+              {remote ? email.slice(0, 2).toUpperCase() || "U" : "LD"}
+            </span>
           </div>
         </header>
         <div className="content">
           <div className="heading">
             <div>
-              <div className="eyebrow">Orchestration playground</div>
+              <div className="eyebrow">Fleet dashboard</div>
               <h1>Your fleet. Your call.</h1>
               <p className="subtitle">
                 Pick a worker, send a task, and watch the handoff happen.
@@ -224,12 +268,18 @@ function FleetApp({
             <button
               className="outline-btn"
               id="pair-button"
-              disabled={busy}
+              disabled={busy || availableWorkers.length === 0}
               onClick={() =>
-                void submit([
-                  stubTask("Render preview · scene A", "worker-a", 30, true),
-                  stubTask("Render preview · scene B", "worker-b", 45, true),
-                ])
+                void submit(
+                  availableWorkers.map((worker) =>
+                    stubTask(
+                      `Connection test · ${workerName(worker.id)}`,
+                      worker.id,
+                      30,
+                      true,
+                    ),
+                  ),
+                )
               }
             >
               <span aria-hidden="true">⇉</span> Run one on each

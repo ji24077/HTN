@@ -5,7 +5,7 @@ flowchart LR
     B[Browser] -->|Email/password login| A[Supabase Auth]
     B -->|Public HTTPS| P[Public API and dashboard :8080]
     P --> D[(Supabase PostgreSQL)]
-    W[Worker] -->|Tailscale WSS :8443| T[Tailscale Serve]
+    W[Worker with embedded Tailscale] -->|Tailscale WSS :8443| T[Embedded backend Tailscale]
     T --> G[Private worker gateway :8081]
     G --> D
 ```
@@ -13,7 +13,7 @@ flowchart LR
 Browsers do not need Tailscale. The server host and workers join the same
 tailnet. Both server processes use the same database and worker enrollment map.
 Only the worker gateway registers `/v1/worker`; only the public process registers
-the dashboard and management API. Both listen on loopback behind their proxies.
+the dashboard and management API. Both listen on loopback locally; the backend bundle owns both listeners and its private Tailscale endpoint.
 
 ## Supabase configuration
 
@@ -26,7 +26,13 @@ Run commands below from the repository root, loading `.env`.
 - `SUPABASE_ADMIN_IDS`: comma-separated Auth user UUIDs allowed to manage this
   shared fleet. Create a confirmed email/password user under Authentication →
   Users and copy its UUID. Signing up alone never grants fleet access. There is
-  no self-signup UI. All approved users currently have the same permissions.
+  a self-signup UI with email confirmation; approved users still need their UUID
+  added here. All approved users currently have the same permissions.
+- `SUPABASE_ADMIN_EMAILS`: alternatively, comma-separated approved email addresses.
+  The backend checks the authenticated user's current `auth.users` record and
+  requires a confirmed email. This allows an administrator to register through
+  the app without having to configure their UUID afterward. User metadata never
+  grants access. At least one approved ID or email is required to start the app.
 - `DATABASE_URL`: the direct or **Session pooler** URI from Connect, with the
   password URL-encoded and `sslmode=verify-full`. Transaction pooling on port
   6543 is rejected because the change feed needs a persistent `LISTEN` session.
@@ -99,8 +105,16 @@ The browser receives no database password, worker token, or automation key.
 
 ## Tailscale worker connections
 
-Install Tailscale on the server and each worker, sign into the intended tailnet,
-and permit approved workers to reach the server on TCP 8443 in tailnet policy.
+The default setup is the [bundled backend](bundled-backend.md): Tailscale runs
+inside the backend application on the same host as the website API, including
+for local development. The instructions below are an alternative for hosts
+that already use a system Tailscale installation; do not run both for the same
+backend identity.
+
+Install Tailscale on the server and sign into the intended tailnet.
+Workers can use the [bundled Tailscale transport](bundled-worker.md) without
+installing the desktop client, or use an existing system Tailscale installation.
+Permit approved workers to reach the server on TCP 8443 in tailnet policy.
 Use HTTPS-enabled MagicDNS and the server's full `.ts.net` name.
 Inspect existing Serve configuration before changing it:
 
@@ -111,6 +125,9 @@ tailscale serve --bg --https=8443 http://127.0.0.1:8081
 ```
 
 On each worker, use its own ignored environment file:
+
+The following direct-connection example assumes system Tailscale is installed.
+For the bundled worker, use the root `.env.worker.example` and the guide above.
 
 ```dotenv
 SERVER_URL=wss://YOUR-SERVER.YOUR-TAILNET.ts.net:8443/v1/worker

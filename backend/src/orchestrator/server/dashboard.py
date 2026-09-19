@@ -12,6 +12,7 @@ from .auth import (
     local_demo,
     public_dashboard,
     require_admin,
+    require_fleet_access,
     same_origin,
 )
 
@@ -74,8 +75,7 @@ async def login(request: Request):
     if not header.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Supabase access token required")
     claims = await request.app.state.supabase_auth.verify(header[7:])
-    if claims["sub"] not in request.app.state.config.supabase_admin_ids:
-        raise HTTPException(status_code=403, detail="This account does not have fleet access")
+    await require_fleet_access(request, claims)
     response = JSONResponse({"status": "ok"}, headers={"Cache-Control": "no-store"})
     response.set_cookie(
         SESSION_COOKIE,

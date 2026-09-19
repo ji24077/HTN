@@ -913,7 +913,46 @@ dialog pre {
   padding: 24px;
 }
 .login-card {
-  width: min(420px, 90vw);
+  width: min(420px, calc(100vw - 48px));
+}
+.login-card .brand {
+  margin-bottom: 28px;
+  color: #283025;
+}
+.auth-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 20px;
+}
+.auth-actions button {
+  background: none;
+  border: 0;
+  padding: 4px 0;
+  color: #506345;
+  font-size: 13px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.auth-hint {
+  font-size: 12px;
+  margin-top: 8px;
+  color: #626b5c;
+}
+.auth-message {
+  padding: 12px;
+  margin-top: 16px;
+  background: #eef2e9;
+  border-radius: 8px;
+  color: #435638;
+  line-height: 1.5;
+}
+.account-email {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
 }
 .login-card h1 {
   font-size: 26px;

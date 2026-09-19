@@ -38,10 +38,11 @@ def create_app(surface: str = "combined") -> FastAPI:
         if surface == "public" and not config.public_origin:
             raise ValueError("PUBLIC_ORIGIN is required for the public server")
         if surface == "public" and not (
-            config.supabase_url and config.supabase_publishable_key and config.supabase_admin_ids
+            config.supabase_url and config.supabase_publishable_key
+            and (config.supabase_admin_ids or config.supabase_admin_emails)
         ):
             raise ValueError(
-                "Public server requires SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY and SUPABASE_ADMIN_IDS"
+                "Public server requires Supabase URL/key and approved admin IDs or emails"
             )
         if surface == "combined" and config.public_origin:
             raise ValueError(
@@ -160,7 +161,11 @@ def main() -> None:
 
 
 def public_main() -> None:
-    run("create_public_app", "127.0.0.1", int(os.getenv("PUBLIC_PORT", "8080")))
+    run(
+        "create_public_app",
+        os.getenv("PUBLIC_BIND_HOST", "127.0.0.1"),
+        int(os.getenv("PUBLIC_PORT", "8080")),
+    )
 
 
 def worker_main() -> None:

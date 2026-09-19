@@ -6,10 +6,16 @@ import App from "../App";
 import type { Snapshot, Task } from "../api/types";
 
 const supabaseAuth = vi.hoisted(() => ({
+  initialize: vi.fn().mockResolvedValue({ error: null }),
   getSession: vi.fn(),
+  signUp: vi.fn(),
+  resetPasswordForEmail: vi.fn(),
+  updateUser: vi.fn(),
   signInWithPassword: vi.fn(),
   signOut: vi.fn(),
-  onAuthStateChange: vi.fn(),
+  onAuthStateChange: vi
+    .fn()
+    .mockReturnValue({ data: { subscription: { unsubscribe: vi.fn() } } }),
 }));
 vi.mock("@supabase/supabase-js", () => ({
   createClient: () => ({ auth: supabaseAuth }),
@@ -95,12 +101,29 @@ async function mount() {
   return { ...view, stream };
 }
 beforeEach(() => {
+  window.history.replaceState(null, "", "/");
+  supabaseAuth.signUp
+    .mockReset()
+    .mockResolvedValue({ data: { session: null }, error: null });
+  supabaseAuth.resetPasswordForEmail
+    .mockReset()
+    .mockResolvedValue({ error: null });
+  supabaseAuth.updateUser.mockReset().mockResolvedValue({ error: null });
   supabaseAuth.getSession
     .mockReset()
     .mockResolvedValue({ data: { session: null }, error: null });
-  supabaseAuth.signInWithPassword.mockReset().mockResolvedValue({
-    data: { session: { access_token: "test-user-jwt" } },
-    error: null,
+  supabaseAuth.signInWithPassword.mockReset().mockImplementation(async () => {
+    const result = {
+      data: {
+        session: {
+          access_token: "test-user-jwt",
+          user: { email: "admin@example.com" },
+        },
+      },
+      error: null,
+    };
+    supabaseAuth.getSession.mockResolvedValue(result);
+    return result;
   });
   supabaseAuth.signOut.mockReset().mockResolvedValue({ error: null });
   FakeEventSource.instances = [];
@@ -145,6 +168,7 @@ describe("dashboard interactions over pushed updates", () => {
     expect(FakeEventSource.instances).toHaveLength(0);
     await user.click(screen.getByRole("button", { name: "Sign in" }));
     await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+    expect(screen.getByText("admin@example.com")).toBeInTheDocument();
     expect(supabaseAuth.signInWithPassword).toHaveBeenCalledWith({
       email: "admin@example.com",
       password: "test-user-password",
@@ -325,4 +349,235 @@ describe("dashboard interactions over pushed updates", () => {
     expect(screen.getByRole("button", { name: "Send task" })).toBeEnabled();
     expect(screen.getByRole("textbox")).toHaveValue("Render preview");
   });
+});
+
+function requireSignIn() {
+  fetchMock.mockImplementation(async (path) => {
+    if (path === "/auth/config")
+      return Response.json({
+        url: "https://project.supabase.co",
+        publishableKey: "sb_publishable_test",
+      });
+    return Response.json({ detail: "unauthorized" }, { status: 401 });
+  });
+}
+
+describe("account registration and recovery", () => {
+  it("creates an account and waits for email confirmation without opening fleet data", async () => {
+    requireSignIn();
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(
+      await screen.findByRole("button", { name: "Create account" }),
+    );
+    await user.type(screen.getByLabelText("Email"), "new@example.com");
+    await user.type(screen.getByLabelText("Password"), "new-password");
+    await user.type(screen.getByLabelText("Confirm password"), "new-password");
+    await user.click(screen.getByRole("button", { name: "Create account" }));
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Check your email",
+    );
+    expect(supabaseAuth.signUp).toHaveBeenCalledWith({
+      email: "new@example.com",
+      password: "new-password",
+      options: { emailRedirectTo: window.location.origin + "/" },
+    });
+    expect(FakeEventSource.instances).toHaveLength(0);
+    expect(
+      fetchMock.mock.calls.some(([, options]) => options?.method === "POST"),
+    ).toBe(false);
+  });
+
+  it("rejects mismatched passwords before contacting Supabase", async () => {
+    requireSignIn();
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(
+      await screen.findByRole("button", { name: "Create account" }),
+    );
+    await user.type(screen.getByLabelText("Email"), "new@example.com");
+    await user.type(screen.getByLabelText("Password"), "new-password");
+    await user.type(
+      screen.getByLabelText("Confirm password"),
+      "different-password",
+    );
+    await user.click(screen.getByRole("button", { name: "Create account" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Passwords do not match",
+    );
+    expect(supabaseAuth.signUp).not.toHaveBeenCalled();
+  });
+
+  it("sends a password reset email with the recovery redirect", async () => {
+    requireSignIn();
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(
+      await screen.findByRole("button", { name: "Forgot password?" }),
+    );
+    await user.type(screen.getByLabelText("Email"), "admin@example.com");
+    await user.click(screen.getByRole("button", { name: "Send reset link" }));
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "If an account exists",
+    );
+    expect(supabaseAuth.resetPasswordForEmail).toHaveBeenCalledWith(
+      "admin@example.com",
+      { redirectTo: window.location.origin + "/?auth=recovery" },
+    );
+    expect(FakeEventSource.instances).toHaveLength(0);
+  });
+
+  it("updates a password from a recovery link without requiring fleet access", async () => {
+    window.history.replaceState(null, "", "/?auth=recovery");
+    requireSignIn();
+    supabaseAuth.getSession.mockResolvedValue({
+      data: { session: { access_token: "recovery-jwt" } },
+      error: null,
+    });
+    const user = userEvent.setup();
+    render(
+      <StrictMode>
+        <App />
+      </StrictMode>,
+    );
+    await user.type(
+      await screen.findByLabelText("New password"),
+      "changed-password",
+    );
+    await user.type(
+      screen.getByLabelText("Confirm password"),
+      "changed-password",
+    );
+    await user.click(screen.getByRole("button", { name: "Update password" }));
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Password updated",
+    );
+    expect(supabaseAuth.updateUser).toHaveBeenCalledWith({
+      password: "changed-password",
+    });
+    expect(window.location.search).toBe("");
+    expect(FakeEventSource.instances).toHaveLength(0);
+    expect(
+      fetchMock.mock.calls.some(([path]) => path === "/auth/session"),
+    ).toBe(false);
+  });
+
+  it("shows an expired email link error and lets the user request another", async () => {
+    window.history.replaceState(
+      null,
+      "",
+      "/?auth=recovery#error=access_denied&error_code=otp_expired",
+    );
+    const user = userEvent.setup();
+    render(
+      <StrictMode>
+        <App />
+      </StrictMode>,
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "invalid or has expired",
+    );
+    await user.click(screen.getByRole("button", { name: "Forgot password?" }));
+    await user.type(screen.getByLabelText("Email"), "admin@example.com");
+    await user.click(screen.getByRole("button", { name: "Send reset link" }));
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "If an account exists",
+    );
+    expect(window.location.hash).toBe("");
+    expect(FakeEventSource.instances).toHaveLength(0);
+  });
+
+  it("does not offer a password update without a recovery session", async () => {
+    window.history.replaceState(null, "", "/?auth=recovery");
+    requireSignIn();
+    render(<App />);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "password reset link is invalid",
+    );
+    expect(screen.queryByLabelText("New password")).not.toBeInTheDocument();
+  });
+
+  it("shows Supabase sign-in errors and permits retry", async () => {
+    requireSignIn();
+    supabaseAuth.signInWithPassword.mockResolvedValue({
+      data: { session: null },
+      error: { message: "Invalid login credentials" },
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await user.type(await screen.findByLabelText("Email"), "admin@example.com");
+    await user.type(screen.getByLabelText("Password"), "wrong-password");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Invalid login credentials",
+    );
+    expect(screen.getByRole("button", { name: "Sign in" })).toBeEnabled();
+    expect(FakeEventSource.instances).toHaveLength(0);
+  });
+});
+
+it("authorizes the account from a confirmation link before using an existing API cookie", async () => {
+  window.history.replaceState(null, "", "/?code=confirmation-code");
+  supabaseAuth.getSession.mockResolvedValue({
+    data: {
+      session: {
+        access_token: "unapproved-user-jwt",
+        user: { email: "unapproved@example.com" },
+      },
+    },
+    error: null,
+  });
+  fetchMock.mockImplementation(async (path, options) => {
+    if (path === "/auth/config")
+      return Response.json({
+        url: "https://project.supabase.co",
+        publishableKey: "sb_publishable_test",
+      });
+    if (options?.method === "POST")
+      return Response.json(
+        { detail: "This account does not have fleet access" },
+        { status: 403 },
+      );
+    return Response.json({ mode: "public" });
+  });
+  render(<App />);
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "does not have fleet access",
+  );
+  expect(
+    fetchMock.mock.calls.find(([, options]) => options?.method === "POST")?.[1]
+      ?.headers,
+  ).toMatchObject({ Authorization: "Bearer unapproved-user-jwt" });
+  expect(FakeEventSource.instances).toHaveLength(0);
+});
+
+it("shows an empty real fleet without sample worker cards or destinations", async () => {
+  const { stream } = await mount();
+  act(() => stream.snapshot({ workers: [], tasks: [], events: [] }));
+  expect(screen.getByText(/No workers connected yet/)).toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: "Send to Worker A" }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("option", { name: "Worker B" }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.getByRole("button", { name: "Run one on each" }),
+  ).toBeDisabled();
+});
+
+it("dispatches to the available registered workers instead of hardcoded demo IDs", async () => {
+  const user = userEvent.setup();
+  const { stream } = await mount();
+  act(() =>
+    stream.snapshot({
+      ...fleet(),
+      workers: [{ ...fleet().workers[0], id: "gpu-render-1" }],
+    }),
+  );
+  await user.click(screen.getByRole("button", { name: "Run one on each" }));
+  const post = fetchMock.mock.calls.find(([path]) => path === "/v1/tasks")!;
+  expect(JSON.parse(String(post[1]?.body)).tasks).toMatchObject([
+    { target_worker_id: "gpu-render-1" },
+  ]);
 });

@@ -24,6 +24,7 @@ class ServerConfig:
     supabase_publishable_key: str = ""
     supabase_admin_ids: frozenset[str] = frozenset()
     database_schema: str = "public"
+    supabase_admin_emails: frozenset[str] = frozenset()
 
     @classmethod
     def from_env(cls) -> "ServerConfig":
@@ -79,6 +80,13 @@ class ServerConfig:
             for value in os.getenv("SUPABASE_ADMIN_IDS", "").split(",")
             if value.strip()
         )
+        admin_emails = frozenset(
+            value.strip().lower()
+            for value in os.getenv("SUPABASE_ADMIN_EMAILS", "").split(",")
+            if value.strip()
+        )
+        if any(not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", email) for email in admin_emails):
+            raise ValueError("SUPABASE_ADMIN_EMAILS must contain valid email addresses")
         schema = os.getenv("DATABASE_SCHEMA", "orchestrator" if supabase_url else "public")
         if not re.fullmatch(r"[a-z][a-z0-9_]{0,62}", schema):
             raise ValueError("DATABASE_SCHEMA must be a lowercase SQL identifier")
@@ -102,4 +110,5 @@ class ServerConfig:
             publishable,
             admins,
             schema,
+            admin_emails,
         )

@@ -8,38 +8,26 @@ server-pushed updates. PostgreSQL owns leases and accepted results.
 a Python client, JSON CLI, and callable agent tools. Real GPU workloads, job
 splitting, machine scoring, and remote fleet validation remain separate work.
 
-## Quick start
+## Run the app
 
-From the repository root, install and build the React frontend (Node 24.15+):
+The app uses Supabase authentication and PostgreSQL. Configure the root `.env`
+from `.env.example`, including your public origin, Supabase project, database,
+worker tokens, and approved admin emails or user IDs. Then:
 
 ```sh
 npm --prefix frontend ci
-npm --prefix frontend run build
+./scripts/start-app.sh
 ```
 
-Then run each command in its own terminal:
+This starts the public API, private worker gateway, and frontend. In this
+workspace, open **https://localhost:5174** to create an account and sign in.
+Approved email addresses receive fleet access only after email confirmation.
+The dashboard shows registered workers and real database state.
 
-```sh
-uv run --project backend --python 3.12 --extra demo orchestrator-demo server
-uv run --project backend --python 3.12 --extra demo orchestrator-demo worker-a
-uv run --project backend --python 3.12 --extra demo orchestrator-demo worker-b
-```
-
-Open **http://127.0.0.1:8787** to select workers and dispatch tasks. The demo starts
-local PostgreSQL and stores its credentials/data in the ignored `.demo/` folder.
-No cloud or GPU resources are required.
-
-For frontend development, run `npm --prefix frontend run dev` in another terminal
-and open **http://127.0.0.1:5173** for hot reload. It uses the same backend and
-workers. See [frontend setup](frontend/README.md).
-
-For programmatic access:
-
-```sh
-uv run --project backend orchestrator tools
-uv run --project backend orchestrator --demo workers
-uv run --project backend python examples/agent_task.py --demo --task-id my-agent-task-001
-```
+See [frontend setup](frontend/README.md) for HTTPS and Supabase email redirects,
+and [networking](docs/networking.md) for hosting the website and connecting
+workers. The optional `orchestrator-demo` commands remain available for isolated
+tests; the app launcher does not use them.
 
 ## Project layout
 
@@ -57,6 +45,7 @@ HTN/
 │   ├── pyproject.toml       # Python dependencies and entry points
 │   └── uv.lock
 ├── deploy/                  # Dockerfile, local Compose, public HTTPS proxy
+├── transport/tailscale/     # Embedded worker tunnel (Go / tsnet)
 ├── docs/                    # Architecture, setup, API, and validation guides
 ├── examples/                # Runnable client and task fixtures
 ├── .env.example             # Supabase / public website configuration template
@@ -75,6 +64,9 @@ Hosted entry points are `orchestrator-public` and
 
 ## Guides
 
+- [Bundled backend](docs/bundled-backend.md): website API and private gateway on one host,
+  with Tailscale included; supports local development.
+- [Bundled worker](docs/bundled-worker.md): embedded Tailscale, enrollment, and worker image.
 - [Public website and private workers](docs/networking.md): Supabase login/database,
   separate public and worker listeners, and Tailscale Serve setup.
 - [Architecture and API](docs/architecture.md): leases, scheduling, protocols, and limits.
@@ -96,4 +88,4 @@ uv build --project backend
 Your root `.env` holds local Supabase configuration and is ignored by Git.
 `.demo/` holds local demo data; `.local/` holds local certificates and tooling.
 The Python environment lives in `backend/.venv/`. All are ignored.
-The local demo works without the unfinished Supabase admin ID or public domain.
+The app requires an approved admin email or user ID and a matching public origin.

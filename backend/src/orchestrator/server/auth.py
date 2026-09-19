@@ -3,6 +3,7 @@
 import hmac
 import os
 from urllib.parse import urlsplit
+from uuid import UUID
 
 from fastapi import HTTPException, Request
 
@@ -38,6 +39,28 @@ def local_demo(request: Request) -> bool:
     )
 
 
+async def require_fleet_access(request: Request, claims: dict) -> None:
+    config = request.app.state.config
+    if claims["sub"] in config.supabase_admin_ids:
+        return
+    emails = getattr(config, "supabase_admin_emails", frozenset())
+    if emails:
+        # Use Supabase's confirmed account record, never editable user metadata
+        # or an unverified email supplied by the browser.
+        approved = await request.app.state.store.pool.fetchval(
+            """SELECT EXISTS (
+                SELECT 1 FROM auth.users
+                WHERE id = $1 AND lower(email) = ANY($2::text[])
+                  AND email_confirmed_at IS NOT NULL AND deleted_at IS NULL
+            )""",
+            UUID(claims["sub"]),
+            list(emails),
+        )
+        if approved:
+            return
+    raise HTTPException(status_code=403, detail="This account does not have fleet access")
+
+
 async def require_admin(request: Request) -> None:
     if authorized(request.headers.get("authorization"), request.app.state.config.admin_token):
         return
@@ -59,8 +82,7 @@ async def require_admin(request: Request) -> None:
     verifier = getattr(request.app.state, "supabase_auth", None)
     if token and verifier:
         claims = await verifier.verify(token)
-        if claims["sub"] not in request.app.state.config.supabase_admin_ids:
-            raise HTTPException(status_code=403, detail="This account does not have fleet access")
+        await require_fleet_access(request, claims)
         request.state.auth_claims = claims
         return
     raise HTTPException(status_code=401, detail="unauthorized")

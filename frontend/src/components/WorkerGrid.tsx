@@ -31,9 +31,7 @@ export function WorkerGrid({
   selected: string;
   onSelect: (id: string) => void;
 }) {
-  const ids = [
-    ...new Set(["worker-a", "worker-b", ...workers.map((worker) => worker.id)]),
-  ];
+  const ids = workers.map((worker) => worker.id);
   return (
     <section>
       <div className="section-heading">
@@ -46,7 +44,13 @@ export function WorkerGrid({
         <small id="fleet-status">Choose a destination</small>
       </div>
       <div className="workers" id="workers">
-        {ids.map((id, index) => {
+        {ids.length === 0 && (
+          <p className="empty-state">
+            No workers connected yet. Workers will appear here when they join
+            your fleet.
+          </p>
+        )}
+        {ids.map((id) => {
           const worker = workers.find((worker) => worker.id === id);
           const task = tasks.find(
             (task) => task.worker_id === id && active(task),
@@ -84,16 +88,14 @@ export function WorkerGrid({
                 </span>
               </div>
               <h3>{workerName(id)}</h3>
-              <div className="worker-id">
-                {id} · LOCAL SERVICE {String(index + 1).padStart(2, "0")}
-              </div>
+              <div className="worker-id">{id}</div>
               <div className="worker-specs">
                 <span className="tag">
                   {worker?.capabilities.runtime === "cuda"
                     ? "CUDA"
                     : worker?.capabilities.runtime === "mps"
                       ? "Metal"
-                      : "CPU simulation"}
+                      : "CPU"}
                 </span>
                 <span className="tag">1 execution slot</span>
               </div>

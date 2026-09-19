@@ -23,6 +23,7 @@ from ..shared.protocol import (
 )
 from .config import WorkerConfig
 from .executors import StubExecutor
+from .tunnel import EmbeddedTunnel
 
 log = logging.getLogger(__name__)
 
@@ -59,9 +60,12 @@ async def execute(executor: Executor, task: Task, report: Callable[[float], None
 
 
 class Agent:
-    def __init__(self, config: WorkerConfig, executor: Executor):
+    def __init__(
+        self, config: WorkerConfig, executor: Executor, tunnel: EmbeddedTunnel | None = None
+    ):
         self.config = config
         self.executor = executor
+        self.tunnel = tunnel
 
     async def run(self) -> None:
         delay = 1.0
@@ -78,7 +82,17 @@ class Agent:
             delay = min(delay * 2, 30)
 
     async def session(self) -> None:
+        sock = await self.tunnel.open_socket() if self.tunnel else None
+        try:
+            await self.connected_session(sock)
+        finally:
+            if sock is not None:
+                sock.close()
+
+    async def connected_session(self, sock) -> None:
         config = self.config
+        # Keep the original WSS URL: TLS still verifies the gateway's hostname.
+        transport = {"sock": sock} if sock is not None else {}
         async with DirectConnect(
             config.url,
             additional_headers={
@@ -92,6 +106,7 @@ class Agent:
             ping_interval=None,
             compression=None,
             proxy=None,
+            **transport,
         ) as socket:
             await send(socket, Message(type="hello", capabilities=config.capabilities))
             async with asyncio.timeout(10):
@@ -215,8 +230,18 @@ class Agent:
 
 async def run_worker() -> None:
     executor = StubExecutor()
-    agent = Agent(WorkerConfig.from_env(executor.kind), executor)
-    task = asyncio.create_task(agent.run())
+    config = WorkerConfig.from_env(executor.kind)
+
+    async def run():
+        if config.transport == "direct":
+            await Agent(config, executor).run()
+            return
+        async with EmbeddedTunnel(config) as tunnel:
+            async with asyncio.TaskGroup() as group:
+                group.create_task(Agent(config, executor, tunnel).run())
+                group.create_task(tunnel.wait())
+
+    task = asyncio.create_task(run())
     loop = asyncio.get_running_loop()
     installed = []
     for sig in (signal.SIGINT, signal.SIGTERM):
