@@ -1,0 +1,37 @@
+Loading weights:   0%|          | 0/290 [00:00<?, ?it/s]Loading weights: 100%|██████████| 290/290 [00:00<00:00, 13047.17it/s]
+{"phase": "warmup", "engine": "baseline", "case": "original-0"}
+{"phase": "warmup", "engine": "baseline", "case": "original-1"}
+{"phase": "warmup", "engine": "baseline", "case": "original-2"}
+{"phase": "warmup", "engine": "baseline", "case": "original-3"}
+{"phase": "warmup", "engine": "baseline", "case": "original-4"}
+{"phase": "warmup", "engine": "baseline", "case": "original-5"}
+{"phase": "warmup", "engine": "baseline", "case": "independent-0"}
+{"phase": "warmup", "engine": "baseline", "case": "independent-1"}
+{"phase": "warmup", "engine": "baseline", "case": "independent-2"}
+{"phase": "warmup", "engine": "baseline", "case": "independent-3"}
+{"phase": "warmup", "engine": "baseline", "case": "independent-4"}
+{"phase": "warmup", "engine": "baseline", "case": "independent-5"}
+{"phase": "warmup", "engine": "baseline", "case": "finn-demo"}
+/usr/local/lib/python3.12/dist-packages/torch/_inductor/compile_fx.py:321: UserWarning: TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled. Consider setting `torch.set_float32_matmul_precision('high')` for better performance.
+  warnings.warn(
+{"phase": "warmup", "engine": "optimized", "case": "original-0"}
+{"phase": "warmup", "engine": "optimized", "case": "original-1"}
+{"phase": "warmup", "engine": "optimized", "case": "original-2"}
+{"phase": "warmup", "engine": "optimized", "case": "original-3"}
+{"phase": "warmup", "engine": "optimized", "case": "original-4"}
+{"phase": "warmup", "engine": "optimized", "case": "original-5"}
+{"phase": "warmup", "engine": "optimized", "case": "independent-0"}
+{"phase": "warmup", "engine": "optimized", "case": "independent-1"}
+{"phase": "warmup", "engine": "optimized", "case": "independent-2"}
+{"phase": "warmup", "engine": "optimized", "case": "independent-3"}
+{"phase": "warmup", "engine": "optimized", "case": "independent-4"}
+{"phase": "warmup", "engine": "optimized", "case": "independent-5"}
+{"phase": "warmup", "engine": "optimized", "case": "finn-demo"}
+/usr/local/lib/python3.12/dist-packages/torch/profiler/profiler.py:217: UserWarning: Warning: Profiler clears events at the end of each cycle.Only events from the current cycle will be reported.To keep events across cycles, set acc_events=True.
+  _warn_once(
+{"phase": "measure", "round": 1, "requests": 26}
+{"phase": "measure", "round": 2, "requests": 52}
+{"phase": "measure", "round": 3, "requests": 78}
+{"phase": "measure", "round": 4, "requests": 104}
+{"phase": "measure", "round": 5, "requests": 130}
+{"status": "measured", "out": "latency.json", "speedup_verified": true}

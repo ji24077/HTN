@@ -23,12 +23,47 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
+from gpushare.agent.gpu_matrix import ALL_TARGETS
+
 API_URL = "https://api.runpod.io/v2"
 MAX_BUDGET = 15.0
 MAX_DURATION = 5400
 SESSION_RE = re.compile(r"[a-z0-9][a-z0-9-]{7,47}\Z")
 POD_ID_RE = re.compile(r"[a-zA-Z0-9_-]{5,64}\Z")
 ROLES = {"source", "target"}
+PROFILES = {
+    "migration": {
+        "source": ("NVIDIA GeForce RTX 4090", "SECURE", ["EU-RO-1"], .74),
+        "target": ("AMD Instinct MI300X OAM", "SECURE", ["EU-RO-1"], 2.39),
+    },
+    "inference-latency": {
+        "source": ("NVIDIA GeForce RTX 3090", "COMMUNITY", [], .22),
+        "target": ("NVIDIA GeForce RTX 4090", "SECURE", ["EU-RO-1"], .74),
+        "amd": ("AMD Instinct MI300X OAM", "SECURE", ["EU-RO-1"], 2.39),
+    },
+    "inference-latency-3090": {
+        "source": ("NVIDIA GeForce RTX 3090", "COMMUNITY", [], .22),
+    },
+    "inference-latency-4090": {
+        "source": ("NVIDIA GeForce RTX 4090", "SECURE", ["EU-RO-1"], .74),
+    },
+    "inference-latency-amd": {
+        "target": ("AMD Instinct MI300X OAM", "SECURE", ["EU-RO-1"], 2.39),
+    },
+}
+
+# Each new benchmark model has its own bounded session. A campaign additionally
+# reserves their combined worst-case cost with gpu_matrix.expansion_plan.
+PROFILES.update({
+    target.profile: {"source": (target.gpu_id, target.cloud, list(target.regions), target.hourly_limit)}
+    for target in ALL_TARGETS if target.profile.startswith("hardware-")
+})
+
+
+def profile_config(value):
+    if not isinstance(value, str) or value not in PROFILES:
+        raise SessionError("Unknown approved rental profile")
+    return PROFILES[value]
 
 
 class SessionError(RuntimeError):
@@ -163,8 +198,11 @@ class RunpodClient:
             and record.get("data_center_ids") == ["EU-RO-1"]
         ):
             raise SessionError("Unavailable allocation probe is restricted to the approved AMD target")
-        query = urllib.parse.urlencode({"include": "AVAILABILITY", "product": "POD",
-                                       "count": record["gpu_count"], "cloud": record["cloud"]})
+        filters = {"include": "AVAILABILITY", "product": "POD",
+                   "count": record["gpu_count"], "cloud": record["cloud"]}
+        if record.get("min_cuda_version"):
+            filters["minCudaVersion"] = record["min_cuda_version"]
+        query = urllib.parse.urlencode(filters)
         response = self.request("GET", "/catalog/gpus?" + query)
         matches = [gpu for gpu in response.get("gpus", []) if gpu.get("id") == record["gpu_id"]]
         if len(matches) != 1:
@@ -183,7 +221,10 @@ class RunpodClient:
             raise SessionError("Quoted GPU is no longer available")
         centers = {dc.get("id") for dc in gpu.get("dataCenters", [])
                    if dc.get("availability") in available}
-        center_available = bool(centers.intersection(record["data_center_ids"]))
+        center_available = bool(centers.intersection(record["data_center_ids"])) or (
+            record["cloud"] == "COMMUNITY" and record["data_center_ids"] == []
+            and gpu.get("availability") in available
+        )
         if not center_available and not allow_unavailable_target_probe:
             raise SessionError("Quoted GPU is unavailable in the approved data center")
         return {"availability": gpu.get("availability"),
@@ -255,7 +296,8 @@ class Session:
             if not isinstance(baseline, list) or not all(valid_id(item) for item in baseline):
                 raise SessionError("Unsafe baseline IDs")
             records = journal["pods"]
-            if len(records) != 2 or {r["role"] for r in records} != ROLES:
+            configuration = profile_config(journal.get("profile", "migration"))
+            if len(records) != len(configuration) or {r["role"] for r in records} != set(configuration):
                 raise SessionError("Unsafe session Pod roles")
             ids = []
             permission = journal.get("allow_unavailable_target_probe", False)
@@ -266,7 +308,10 @@ class Session:
                     raise SessionError("Pod owner reference mismatch")
                 if record["name"] != pod_name(self.session_id, record["role"]):
                     raise SessionError("Pod name does not belong to this session")
-                if record["gpu_count"] != 1 or record["cloud"] != "SECURE":
+                gpu, cloud, centers, max_rate = configuration[record["role"]]
+                if (record["gpu_count"] != 1 or record["cloud"] != cloud
+                        or record["gpu_id"] != gpu or record["data_center_ids"] != centers
+                        or number(record["hourly_gpu_usd"], "GPU quote") > max_rate):
                     raise SessionError("Unsafe GPU configuration")
                 probe = record.get("allow_unavailable_target_probe", False)
                 if not isinstance(probe, bool) or (probe and not (
@@ -276,6 +321,12 @@ class Session:
                 )):
                     raise SessionError("Unsafe unavailable-target probe permission")
                 number(record["hourly_gpu_usd"], "GPU quote", 0.001)
+                minimum_cuda = record.get("min_cuda_version")
+                if minimum_cuda is not None and (
+                    not isinstance(minimum_cuda, str) or not re.fullmatch(r"\d+\.\d+", minimum_cuda)
+                    or not gpu.startswith("NVIDIA")
+                ):
+                    raise SessionError("Unsafe CUDA version constraint")
                 if record.get("id") is not None:
                     if not valid_id(record["id"]) or record["id"] in baseline:
                         raise SessionError("Unsafe journal Pod ID")
@@ -329,11 +380,15 @@ class Session:
         storage = number(plan.get("storage_allowance_per_hour"), "storage allowance", 0.10)
         if budget > MAX_BUDGET or duration > MAX_DURATION:
             raise SessionError("Plan exceeds the authorized $15 / 90 minute limits")
+        profile = plan.get("profile", "migration")
+        configuration = profile_config(profile)
+        if profile != "migration" and allow_unavailable_target_probe:
+            raise SessionError("Stock bypass is not supported for this profile")
         pods = plan.get("pods", [])
-        if (not isinstance(pods, list) or len(pods) != 2
+        if (not isinstance(pods, list) or len(pods) != len(configuration)
                 or not all(isinstance(pod, dict) for pod in pods)
-                or {pod.get("role") for pod in pods} != ROLES):
-            raise SessionError("Exactly source and target Pods are required")
+                or {pod.get("role") for pod in pods} != set(configuration)):
+            raise SessionError("Exactly the approved profile Pod roles are required")
         records = []
         for item in pods:
             role, payload = item["role"], item.get("payload")
@@ -345,15 +400,14 @@ class Session:
                 raise SessionError("Use an explicit image and supported bounded Pod fields")
             if payload.get("name") != pod_name(self.session_id, role):
                 raise SessionError("Payload name must match the unique session and role")
-            if (payload.get("cloud") != "SECURE" or not isinstance(payload.get("gpu"), dict)
+            expected_gpu, expected_cloud, centers, max_rate = configuration[role]
+            if (payload.get("cloud") != expected_cloud or not isinstance(payload.get("gpu"), dict)
                     or payload["gpu"].get("count") != 1):
-                raise SessionError("Only the approved single-GPU Secure Pods are supported")
-            expected_gpu = ("NVIDIA GeForce RTX 4090" if role == "source"
-                            else "AMD Instinct MI300X OAM")
+                raise SessionError("Only the approved single-GPU cloud configuration is supported")
             if payload["gpu"].get("id") != expected_gpu:
                 raise SessionError("Payload GPU differs from the approved pair")
-            if payload.get("dataCenterIds") != ["EU-RO-1"]:
-                raise SessionError("Only the approved EU-RO-1 location is supported")
+            if payload.get("dataCenterIds", []) != centers:
+                raise SessionError("Only the approved data center configuration is supported")
             if not 1 <= number(payload.get("disk"), "disk") <= 100 or payload.get("mounts"):
                 raise SessionError("Use at most 100 GB container disk and no separate volumes")
             probe = allow_unavailable_target_probe and role == "target"
@@ -368,16 +422,17 @@ class Session:
             ):
                 raise SessionError("Do not include credentials in the Pod environment")
             rate = number(item.get("hourly_gpu_usd"), "GPU quote", 0.001)
-            if rate > (0.74 if role == "source" else 2.39):
+            if rate > max_rate:
                 raise SessionError("GPU quote exceeds the approved rate")
             records.append({"role": role, "owner_session": self.session_id,
                             "name": payload["name"], "gpu_id": expected_gpu, "gpu_count": 1,
-                            "cloud": "SECURE", "data_center_ids": ["EU-RO-1"],
+                            "cloud": expected_cloud, "data_center_ids": centers,
                             "hourly_gpu_usd": rate, "quoted_at": quoted_at,
+                            "min_cuda_version": payload["gpu"].get("minCudaVersion"),
                             "quoted_available": item["available"],
                             "allow_unavailable_target_probe": probe,
                             "payload_hash": digest(payload), "state": "planned", "id": None})
-        journal = {"version": 1, "session_id": self.session_id, "plan_hash": digest(plan),
+        journal = {"version": 1, "profile": profile, "session_id": self.session_id, "plan_hash": digest(plan),
                    "budget_usd": budget, "storage_allowance_per_hour": storage,
                    "created_at": now, "deadline": now + duration, "pods": records,
                    "baseline_ids": [], "baseline_recorded": False, "state": "prepared",
@@ -521,7 +576,7 @@ class Session:
                 adopted = next(r for r in self.read()["pods"] if r["role"] == role)
                 cost = adopted.get("observed_hourly_usd")
                 if cost is not None and number(cost, "Pod cost") > (
-                    record["hourly_gpu_usd"] + journal["storage_allowance_per_hour"] / 2
+                    record["hourly_gpu_usd"] + journal["storage_allowance_per_hour"] / len(journal["pods"])
                 ):
                     raise SessionError("Created Pod cost exceeds its approved allowance")
                 self._require_create(self.read())

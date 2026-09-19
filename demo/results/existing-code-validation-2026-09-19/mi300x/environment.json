@@ -1,0 +1,8 @@
+{
+  "torch": "2.10.0+rocm7.1.1.gitd9556b05",
+  "gpu": "AMD Instinct MI300X",
+  "hip": "7.1.52802",
+  "cuda": null,
+  "device_count": 1,
+  "matrix_sum": 1073741824.0
+}

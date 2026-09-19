@@ -1,0 +1,12 @@
+{
+  "status": "passed",
+  "setup_seconds": 24.944620500013116,
+  "validation_exit_code": 0,
+  "latency_exit_code": 0,
+  "terminated": true,
+  "finished_at": 1789835181.5497937,
+  "session_id": "hardware-a5000-09437454",
+  "profile": "hardware-a5000",
+  "cleanup_verified": true,
+  "estimate_usd": 0.13343036750753723
+}

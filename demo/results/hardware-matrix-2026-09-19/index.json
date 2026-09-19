@@ -1,0 +1,106 @@
+{
+  "model_sha256": "02b0532346e314750330c6301670c2d6af40b874faf952f76f5fa326160ffbfb",
+  "dataset_file_sha256": "f1167e9094fa3ba5600d714cef22fc8045f932508ce61e5c56a9fc9cbe4ce1b9",
+  "campaign_id": "campaign-20260919-844ea14d",
+  "targets": {
+    "rtx5090": {
+      "execution": "demo/results/hardware-matrix-2026-09-19/rtx5090/execution.json"
+    },
+    "a5000": {
+      "latency": "demo/results/hardware-matrix-2026-09-19/a5000/latency.json",
+      "reference": "demo/results/hardware-matrix-2026-09-19/a5000/reference.json",
+      "candidate": "demo/results/hardware-matrix-2026-09-19/a5000/compile-strict.json",
+      "validation": "demo/results/hardware-matrix-2026-09-19/a5000/validation.json",
+      "http": "demo/results/hardware-matrix-2026-09-19/a5000/http.json",
+      "execution": "demo/results/hardware-matrix-2026-09-19/a5000/execution.json"
+    },
+    "a6000": {
+      "latency": "demo/results/hardware-matrix-2026-09-19/a6000/latency.json",
+      "reference": "demo/results/hardware-matrix-2026-09-19/a6000/reference.json",
+      "candidate": "demo/results/hardware-matrix-2026-09-19/a6000/compile-strict.json",
+      "validation": "demo/results/hardware-matrix-2026-09-19/a6000/validation.json",
+      "http": "demo/results/hardware-matrix-2026-09-19/a6000/http.json",
+      "execution": "demo/results/hardware-matrix-2026-09-19/a6000/execution.json"
+    },
+    "a40": {
+      "latency": "demo/results/hardware-matrix-2026-09-19/a40/latency.json",
+      "reference": "demo/results/hardware-matrix-2026-09-19/a40/reference.json",
+      "candidate": "demo/results/hardware-matrix-2026-09-19/a40/compile-strict.json",
+      "validation": "demo/results/hardware-matrix-2026-09-19/a40/validation.json",
+      "http": "demo/results/hardware-matrix-2026-09-19/a40/http.json",
+      "execution": "demo/results/hardware-matrix-2026-09-19/a40/execution.json"
+    },
+    "l4": {
+      "latency": "demo/results/hardware-matrix-2026-09-19/l4/latency.json",
+      "reference": "demo/results/hardware-matrix-2026-09-19/l4/reference.json",
+      "candidate": "demo/results/hardware-matrix-2026-09-19/l4/compile-strict.json",
+      "validation": "demo/results/hardware-matrix-2026-09-19/l4/validation.json",
+      "http": "demo/results/hardware-matrix-2026-09-19/l4/http.json",
+      "execution": "demo/results/hardware-matrix-2026-09-19/l4/execution.json"
+    },
+    "l40s": {
+      "latency": "demo/results/hardware-matrix-2026-09-19/l40s/latency.json",
+      "reference": "demo/results/hardware-matrix-2026-09-19/l40s/reference.json",
+      "candidate": "demo/results/hardware-matrix-2026-09-19/l40s/compile-strict.json",
+      "validation": "demo/results/hardware-matrix-2026-09-19/l40s/validation.json",
+      "http": "demo/results/hardware-matrix-2026-09-19/l40s/http.json",
+      "execution": "demo/results/hardware-matrix-2026-09-19/l40s/execution.json"
+    },
+    "a100": {
+      "latency": "demo/results/hardware-matrix-2026-09-19/a100/latency.json",
+      "reference": "demo/results/hardware-matrix-2026-09-19/a100/reference.json",
+      "candidate": "demo/results/hardware-matrix-2026-09-19/a100/compile-strict.json",
+      "validation": "demo/results/hardware-matrix-2026-09-19/a100/validation.json",
+      "http": "demo/results/hardware-matrix-2026-09-19/a100/http.json",
+      "execution": "demo/results/hardware-matrix-2026-09-19/a100/execution.json"
+    },
+    "h100": {
+      "latency": "demo/results/hardware-matrix-2026-09-19/h100/latency.json",
+      "reference": "demo/results/hardware-matrix-2026-09-19/h100/reference.json",
+      "candidate": "demo/results/hardware-matrix-2026-09-19/h100/compile-strict.json",
+      "validation": "demo/results/hardware-matrix-2026-09-19/h100/validation.json",
+      "http": "demo/results/hardware-matrix-2026-09-19/h100/http.json",
+      "execution": "demo/results/hardware-matrix-2026-09-19/h100/execution.json"
+    },
+    "rtx3090": {
+      "latency": "demo/results/hardware-matrix-2026-09-19/rtx3090/latency.json",
+      "reference": "demo/results/hardware-matrix-2026-09-19/rtx3090/reference.json",
+      "candidate": "demo/results/hardware-matrix-2026-09-19/rtx3090/compile-strict.json",
+      "validation": "demo/results/hardware-matrix-2026-09-19/rtx3090/validation.json",
+      "http": "demo/results/hardware-matrix-2026-09-19/rtx3090/http.json",
+      "execution": "demo/results/hardware-matrix-2026-09-19/rtx3090/execution.json"
+    },
+    "rtx5080": {
+      "latency": "demo/results/hardware-matrix-2026-09-19/rtx5080/latency.json",
+      "reference": "demo/results/hardware-matrix-2026-09-19/rtx5080/reference.json",
+      "candidate": "demo/results/hardware-matrix-2026-09-19/rtx5080/compile-strict.json",
+      "validation": "demo/results/hardware-matrix-2026-09-19/rtx5080/validation.json",
+      "http": "demo/results/hardware-matrix-2026-09-19/rtx5080/http.json",
+      "execution": "demo/results/hardware-matrix-2026-09-19/rtx5080/execution.json"
+    },
+    "rtx4090": {
+      "latency": "demo/results/inference-latency-2026-09-19/rtx4090.json",
+      "reference": "demo/results/existing-code-validation-2026-09-19/rtx4090/reference.json",
+      "candidate": "demo/results/existing-code-validation-2026-09-19/rtx4090/compile-strict.json",
+      "validation": "demo/results/existing-code-validation-2026-09-19/rtx4090/validation.json",
+      "http": "demo/results/existing-code-validation-2026-09-19/rtx4090/http.json",
+      "reused_previous_run": true
+    },
+    "mi300x": {
+      "latency": "demo/results/inference-latency-2026-09-19/mi300x.json",
+      "reference": "demo/results/existing-code-validation-2026-09-19/mi300x/reference.json",
+      "candidate": "demo/results/existing-code-validation-2026-09-19/mi300x/compile-strict.json",
+      "validation": "demo/results/existing-code-validation-2026-09-19/mi300x/validation.json",
+      "http": "demo/results/existing-code-validation-2026-09-19/mi300x/http.json",
+      "reused_previous_run": true
+    }
+  },
+  "budget": {
+    "prior_estimate_usd": 3.9154403114878074,
+    "new_estimate_usd": 3.0857576095713513,
+    "cumulative_estimate_usd": 7.001197921059159,
+    "combined_reservation_usd": 12.56,
+    "total_cap_usd": 15,
+    "cleanup_verified": true
+  }
+}

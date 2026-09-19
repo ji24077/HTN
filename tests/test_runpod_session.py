@@ -89,6 +89,129 @@ def make_plan():
             "storage_allowance_per_hour": 0.10, "pods": pods}
 
 
+def latency_plan():
+    from gpushare.agent.runpod_session import PROFILES
+
+    plan = make_plan()
+    template = copy.deepcopy(plan["pods"][0])
+    plan.update(profile="inference-latency", storage_allowance_per_hour=.15, budget_usd=13.5)
+    plan["pods"] = []
+    for role, (gpu, cloud, centers, rate) in PROFILES["inference-latency"].items():
+        item = copy.deepcopy(template)
+        item.update(role=role, hourly_gpu_usd=rate)
+        item["payload"].update(name=pod_name(SESSION_ID, role), gpu={"id": gpu, "count": 1},
+                               cloud=cloud, dataCenterIds=centers)
+        plan["pods"].append(item)
+    return plan
+
+
+@pytest.mark.parametrize("key", ["rtx5090", "a5000", "a6000", "a40", "l4", "l40s", "a100", "h100", "rtx5080"])
+def test_hardware_expansion_uses_its_reservation_and_cleans_only_owned_gpu(tmp_path, key):
+    from gpushare.agent.gpu_matrix import BY_KEY, NEW_TARGET_KEYS, expansion_plan
+
+    campaign = expansion_plan([*NEW_TARGET_KEYS, "rtx5080"], prior_reserve_usd=4.25)
+    reservation = next(r for r in campaign["reservations"] if r["key"] == key)
+    target = BY_KEY[key]
+    clock = Clock()
+    client = FakeClient(clock)
+    client.pods["other-pod"] = {"id": "other-pod", "name": "teammate-owned"}
+    session = Session(tmp_path, SESSION_ID, client, clock=clock, sleep=lambda _: None)
+    plan = make_plan()
+    plan.update(profile=target.profile, budget_usd=reservation["budget_usd"],
+                max_duration_seconds=reservation["max_duration_seconds"],
+                storage_allowance_per_hour=reservation["storage_allowance_per_hour"])
+    plan["pods"] = plan["pods"][:1]
+    plan["pods"][0].update(hourly_gpu_usd=target.hourly_limit)
+    plan["pods"][0]["payload"].update(gpu={"id": target.gpu_id, "count": 1, "minCudaVersion": "12.8"},
+                                       cloud=target.cloud, dataCenterIds=list(target.regions))
+    session.prepare(plan)
+    session.heartbeat()
+    session.create(plan)
+    assert client.creates == 1
+    assert session.cleanup()["state"] == "closed"
+    assert set(client.pods) == {"other-pod"}
+
+
+def test_latency_profile_owns_and_cleans_exactly_three_approved_pods(tmp_path):
+    clock = Clock()
+    client = FakeClient(clock)
+    session = Session(tmp_path, SESSION_ID, client, clock=clock, sleep=lambda _: None)
+    plan = latency_plan()
+    session.prepare(plan)
+    session.heartbeat()
+    session.create(plan)
+    assert len(session.read()["pods"]) == 3
+    assert client.creates == 3
+    session.cleanup()
+    assert len(client.deletes) == 3 and not client.pods
+
+
+@pytest.mark.parametrize("gpu", ["3090", "4090", "amd"])
+def test_independent_gpu_session_leaves_existing_comparison_pods_untouched(tmp_path, gpu):
+    clock = Clock()
+    client = FakeClient(clock)
+    client.pods["other-4090"] = {"id": "other-4090", "name": "existing-comparison"}
+    session = Session(tmp_path, SESSION_ID, client, clock=clock, sleep=lambda _: None)
+    plan = latency_plan() if gpu == "3090" else make_plan()
+    plan["profile"] = f"inference-latency-{gpu}"
+    role = "target" if gpu == "amd" else "source"
+    plan["pods"] = [item for item in plan["pods"] if item["role"] == role]
+    session.prepare(plan)
+    session.heartbeat()
+    session.create(plan)
+    assert client.creates == 1
+    assert session.cleanup()["state"] == "closed"
+    assert client.deletes == ["pod-00001"]
+    assert set(client.pods) == {"other-4090"}
+
+
+@pytest.mark.parametrize("change", ["cloud", "count", "price", "gpu", "region", "budget", "driver", "unknown"])
+def test_latency_profile_rejects_unapproved_rentals_before_create(tmp_path, change):
+    clock = Clock()
+    client = FakeClient(clock)
+    session = Session(tmp_path, SESSION_ID, client, clock=clock)
+    plan = latency_plan()
+    item = plan["pods"][0]
+    if change == "cloud":
+        item["payload"]["cloud"] = "SECURE"
+    elif change == "count":
+        item["payload"]["gpu"]["count"] = 2
+    elif change == "price":
+        item["hourly_gpu_usd"] = 1
+    elif change == "gpu":
+        item["payload"]["gpu"]["id"] = "NVIDIA H100"
+    elif change == "region":
+        plan["pods"][1]["payload"]["dataCenterIds"] = ["US-OTHER"]
+    elif change == "budget":
+        plan["budget_usd"] = 1
+    elif change == "driver":
+        item["payload"]["gpu"]["minCudaVersion"] = "not-a-version"
+    else:
+        plan["profile"] = "anything"
+    with pytest.raises(SessionError):
+        session.prepare(plan)
+    assert client.creates == 0
+
+
+def test_community_quote_checks_driver_constraint_before_creation(monkeypatch):
+    from gpushare.agent.runpod_session import RunpodClient
+
+    client = RunpodClient("test-key")
+    calls = []
+    record = {"role": "source", "gpu_id": "NVIDIA GeForce RTX 3090", "gpu_count": 1,
+              "cloud": "COMMUNITY", "data_center_ids": [], "hourly_gpu_usd": .22,
+              "min_cuda_version": "12.4"}
+
+    def catalog(method, path):
+        calls.append((method, path))
+        return {"gpus": [{"id": record["gpu_id"], "community": True,
+                          "price": {"community": .22}, "availability": "LOW"}]}
+
+    monkeypatch.setattr(client, "request", catalog)
+    assert client.check_quote(record)["approved_data_center_available"]
+    assert calls[0][0] == "GET" and "minCudaVersion=12.4" in calls[0][1]
+
+
 @pytest.fixture
 def prepared(tmp_path):
     clock = Clock()

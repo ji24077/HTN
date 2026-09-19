@@ -1,9 +1,21 @@
 # CUDA → AMD translation demo
 
+**Picking this up? Read [Ji's handoff](HANDOFF.md) first** for branch ancestry,
+checkpoints, reproduction commands, accepted results and remaining integration work.
+
 Both translation directions and NVIDIA-to-AMD checkpoint continuation have now
 passed on RunPod's RTX 4090 and MI300X. See [actual results, inputs, outputs and
 costs](RUN_RESULTS.md). The native benchmark passed its speedup gate only for
 the largest tested input; no whole-training speedup is claimed.
+
+For the saved sentence-to-JSON model, see the separate
+[3090 / 4090 / MI300X latency experiment](LATENCY.md), including fixed inputs,
+per-request outputs, rejected optimizations, and measured response times.
+The follow-up [300-case validation using the existing code](results/existing-code-validation-2026-09-19/README.md)
+includes actual HTTP requests and exposes answer changes beyond the original
+13-case speed test. See the [next product milestones](validation/NEXT_STEPS.md).
+The [expanded RunPod hardware matrix](hardware/README.md) covers ten NVIDIA
+models plus MI300X, with raw measurements and separate quality decisions.
 
 Paste **all of `train.py`** into the engineering agent. It is a standalone
 PyTorch training script with its CUDA C++ kernel embedded as `CUDA_SOURCE`.

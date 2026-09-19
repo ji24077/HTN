@@ -1,10 +1,16 @@
 """Local-only prepare; explicitly invoked create/cleanup use authenticated REST v2.
 
 Plan JSON fields: budget_usd <= 15, max_duration_seconds <= 5400,
-storage_allowance_per_hour >= 0.10, pods: exactly source and target entries.
+storage_allowance_per_hour >= 0.10. The default migration profile requires
+exactly source and target entries. The explicit inference-latency profile adds
+an amd entry and uses a Community 3090 source, Secure 4090 target and Secure
+MI300X amd pod at the fixed approved rates.
+The inference-latency-3090, inference-latency-4090 and inference-latency-amd
+profiles run just that approved GPU so capacity waits need not hold other pods.
 Each entry: role, hourly_gpu_usd, quoted_at_utc (ISO 8601 with timezone),
 available: true, payload (REST v2 Pod body). Names must equal
-gpushare-<session-id>-<role>. Source is RTX 4090, target MI300X; Secure EU-RO-1.
+gpushare-<session-id>-<role>. In the default migration profile, source is
+RTX 4090 and target is MI300X, both Secure EU-RO-1.
 
 prepare --session-id ID --plan FILE   # no network; starts fixed deadline
 watchdog --session-id ID             # independent process; start before create

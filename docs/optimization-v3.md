@@ -1,6 +1,6 @@
 # Local optimization pass: v3b
 
-This experiment continues the saved `ckpt/laptop-lora-v2` Qwen2.5-0.5B adapter on targeted examples. **The candidate failed the appointment-year regression gate and was not promoted. The default remains v2.** Experiments ran on the local RTX 4060 Laptop GPU. No RunPod, Baseten, or OpenAI key was required. Source, tests, generated data, and measured reports are prepared for a PR; model weights remain local.
+This experiment continues the saved `ckpt/laptop-lora-v2` Qwen2.5-0.5B adapter on targeted examples. **The candidate failed the appointment-year regression gate and was not promoted. The default remains v2.** Experiments ran on the local RTX 4060 Laptop GPU. No RunPod, Baseten, or OpenAI key was required. Source, tests, generated data, and measured reports are retained. The later [Ji handoff](../demo/HANDOFF.md) also publishes both exact adapters with base-download instructions.
 
 ## Measured quality and selection
 
@@ -17,7 +17,7 @@ The pipeline and optional training configurations are improved; this experiment 
 ## Input and output
 
 - Training input: `data/experiments/binding-v3b/train_replay.jsonl` — 5,168 rows: all 1,768 original training records, 2,400 targeted records, and 1,000 deterministically selected v2 training records for replay.
-- Experimental training output: `ckpt/laptop-lora-v3b/adapter_model.safetensors` and `meta.json`. This rejected candidate is retained for inspection. This is an adapter requiring the original Qwen base model, not a full standalone checkpoint. Weight files remain local and Git-ignored.
+- Experimental training output: `ckpt/laptop-lora-v3b/adapter_model.safetensors` and `meta.json`. This rejected candidate is retained for inspection. This is an adapter requiring the original Qwen base model, not a full standalone checkpoint. The later handoff includes the exact v2/v3b weight files; see [checkpoint setup](../demo/checkpoints/README.md).
 - Evaluation outputs: `eval/v3b-{baseline,candidate}-{original,challenge,independent}.json`. Each includes every input, expected record, model output, wrong fields, category, and source index. Samples are ordered with failures first.
 - Machine-readable results and checkpoint hashes: `experiments/optimization-v3-results.json`.
 - Live CLI example using the retained v2 checkpoint: [input](../experiments/demo-input.txt) and [output with source spans](../experiments/demo-output.json). Its appointment year was correctly extracted as 2019 despite founding and publication dates in the same input.

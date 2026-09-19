@@ -1,0 +1,1064 @@
+{
+  "status": "rejected",
+  "n": 300,
+  "dataset_file_sha256": "f1167e9094fa3ba5600d714cef22fc8045f932508ce61e5c56a9fc9cbe4ce1b9",
+  "model_identity": {
+    "sha256": "02b0532346e314750330c6301670c2d6af40b874faf952f76f5fa326160ffbfb",
+    "files": {
+      "base/config.json": "479dcf0c5286339e41ad3992cd08ae88a467c4187587936248e2b7c96283484b",
+      "base/generation_config.json": "8c970692323e3ea0e9b8b0a4dca79388d31226e41f83c9fd6014804280ebf6e8",
+      "base/merges.txt": "599bab54075088774b1733fde865d5bd747cbcc7a547c5bc12610e874e26f5e3",
+      "base/model.safetensors": "88c142557820ccad55bb59756bfcfcf891de9cc6202816bd346445188a0ed342",
+      "base/tokenizer.json": "c0382117ea329cdf097041132f6d735924b697924d6f6fc3945713e96ce87539",
+      "base/tokenizer_config.json": "c91efca15ceff6e9ee9424db58a6f59cd41294e550a86cbd07e3c1fb500b34f9",
+      "base/vocab.json": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+      "adapter/adapter_config.json": "07d36e13b0d75ea18d9f0dde9fda49b13553639b337956b76030b3b645341dd1",
+      "adapter/adapter_model.safetensors": "600691de70c80f28743563212ef26b4dac61a1014effaafde5fec1a48020992d",
+      "adapter/tokenizer.json": "3fd169731d2cbde95e10bf356d66d5997fd885dd8dbb6fb4684da3f23b2585d8",
+      "adapter/tokenizer_config.json": "b271a1c91521384eb6d794eb27c9d55b3ff93ade6beb59e668d55411155ea16e"
+    }
+  },
+  "reference_evaluator_sha256": "69af55c89f226f661b04e829d598112f2dd758703e8ca9d3d0b098ee9935db90",
+  "reference_code_unchanged": true,
+  "candidates": {
+    "static": {
+      "passed": false,
+      "n": 300,
+      "changed_or_invalid_cases": [
+        {
+          "source_index": 0,
+          "id": "original-0",
+          "fields": [
+            "org"
+          ],
+          "before": {
+            "name": "Mei-Ling Chang",
+            "age": 24,
+            "org": "Taipei National University",
+            "role": "graduate teaching assistant",
+            "year": 2024
+          },
+          "after": {
+            "name": "Mei-Ling Chang",
+            "age": 24,
+            "org": "linguistics department, Taipei National University",
+            "role": "graduate teaching assistant",
+            "year": 2024
+          },
+          "expected": {
+            "name": "Mei-Ling Chang",
+            "age": 24,
+            "org": "Taipei National University",
+            "role": "graduate teaching assistant",
+            "year": 2024
+          }
+        },
+        {
+          "source_index": 10,
+          "id": "original-10",
+          "fields": [
+            "role"
+          ],
+          "before": {
+            "name": "Bogdan Ilyenko",
+            "age": 71,
+            "org": "Sevastopol Botanical Garden",
+            "role": "curator of rare species",
+            "year": 2026
+          },
+          "after": {
+            "name": "Bogdan Ilyenko",
+            "age": 71,
+            "org": "Sevastopol Botanical Garden",
+            "role": "horticulturist",
+            "year": 2026
+          },
+          "expected": {
+            "name": "Bogdan Ilyenko",
+            "age": 71,
+            "org": "Sevastopol Botanical Garden",
+            "role": "curator of rare species",
+            "year": 2026
+          }
+        },
+        {
+          "source_index": 47,
+          "id": "original-47",
+          "fields": [
+            "org"
+          ],
+          "before": {
+            "name": "Sebastian Okonkwo",
+            "age": 25,
+            "org": "agricultural development agency",
+            "role": "trainee machinist",
+            "year": 1989
+          },
+          "after": {
+            "name": "Sebastian Okonkwo",
+            "age": 25,
+            "org": "agricultural development and research institute",
+            "role": "trainee machinist",
+            "year": 1989
+          },
+          "expected": {
+            "name": "Sebastian Okonkwo",
+            "age": 25,
+            "org": "metallurgy lab in Wolverhampton",
+            "role": "trainee machinist",
+            "year": 1989
+          }
+        },
+        {
+          "source_index": 50,
+          "id": "original-50",
+          "fields": [
+            "role"
+          ],
+          "before": {
+            "name": "Béatrice Laurent",
+            "age": 48,
+            "org": "TransAid",
+            "role": "regional coordinator for 2018",
+            "year": 2018
+          },
+          "after": {
+            "name": "Béatrice Laurent",
+            "age": 48,
+            "org": "TransAid",
+            "role": "regional coordinator",
+            "year": 2018
+          },
+          "expected": {
+            "name": "Béatrice Laurent",
+            "age": 48,
+            "org": "TransAid",
+            "role": "regional coordinator",
+            "year": 2018
+          }
+        },
+        {
+          "source_index": 56,
+          "id": "original-56",
+          "fields": [
+            "role"
+          ],
+          "before": {
+            "name": "Yamamoto Kiyoko",
+            "age": 62,
+            "org": "Kyoto Institute of Linguistics",
+            "role": "advisory board chair",
+            "year": 2019
+          },
+          "after": {
+            "name": "Yamamoto Kiyoko",
+            "age": 62,
+            "org": "Kyoto Institute of Linguistics",
+            "role": "chair of the advisory board",
+            "year": 2019
+          },
+          "expected": {
+            "name": "Yamamoto Kiyoko",
+            "age": 62,
+            "org": "Kyoto Institute of Linguistics",
+            "role": "chair of the advisory board",
+            "year": 2019
+          }
+        },
+        {
+          "source_index": 90,
+          "id": "original-90",
+          "fields": [
+            "role"
+          ],
+          "before": {
+            "name": "Gruffud Llewellyn",
+            "age": 38,
+            "org": "Cardigan Bay Marine Sanctuary",
+            "role": "conservation officer",
+            "year": 2007
+          },
+          "after": {
+            "name": "Gruffud Llewellyn",
+            "age": 38,
+            "org": "Cardigan Bay Marine Sanctuary",
+            "role": "marine biologist by training",
+            "year": 2007
+          },
+          "expected": {
+            "name": "Gruffud Llewellyn",
+            "age": 38,
+            "org": "Cardigan Bay Marine Sanctuary",
+            "role": "conservation officer",
+            "year": 2007
+          }
+        },
+        {
+          "source_index": 121,
+          "id": "original-121",
+          "fields": [
+            "org"
+          ],
+          "before": {
+            "name": "Zeynep Aydın",
+            "age": 49,
+            "org": "Izmir Municipal Court",
+            "role": "municipal judge",
+            "year": 2009
+          },
+          "after": {
+            "name": "Zeynep Aydın",
+            "age": 49,
+            "org": "Municipal Court of Izmir",
+            "role": "municipal judge",
+            "year": 2009
+          },
+          "expected": {
+            "name": "Zeynep Aydın",
+            "age": 49,
+            "org": "city of Izmir",
+            "role": "municipal judge",
+            "year": 2009
+          }
+        },
+        {
+          "source_index": 128,
+          "id": "original-128",
+          "fields": [
+            "role"
+          ],
+          "before": {
+            "name": "Aikaterini Papadakis",
+            "age": 57,
+            "org": "University of Thessaloniki",
+            "role": "professorship in Byzantine history",
+            "year": 2010
+          },
+          "after": {
+            "name": "Aikaterini Papadakis",
+            "age": 57,
+            "org": "University of Thessaloniki",
+            "role": "professor",
+            "year": 2010
+          },
+          "expected": {
+            "name": "Aikaterini Papadakis",
+            "age": 57,
+            "org": "University of Thessaloniki",
+            "role": "professor of Byzantine history",
+            "year": 2010
+          }
+        },
+        {
+          "source_index": 154,
+          "id": "original-154",
+          "fields": [
+            "org"
+          ],
+          "before": {
+            "name": "Wayne Silvers",
+            "age": 71,
+            "org": "Montana District Court bench",
+            "role": "senior judge",
+            "year": 2001
+          },
+          "after": {
+            "name": "Wayne Silvers",
+            "age": 71,
+            "org": "Montana District Court",
+            "role": "senior judge",
+            "year": 2001
+          },
+          "expected": {
+            "name": "Wayne Silvers",
+            "age": 71,
+            "org": "Montana District Court",
+            "role": "senior judge",
+            "year": 2001
+          }
+        },
+        {
+          "source_index": 187,
+          "id": "original-187",
+          "fields": [
+            "role"
+          ],
+          "before": {
+            "name": "Nguyễn Văn Hùng",
+            "age": 71,
+            "org": "Hanoi Heritage Foundation",
+            "role": "master restorer",
+            "year": 2007
+          },
+          "after": {
+            "name": "Nguyễn Văn Hùng",
+            "age": 71,
+            "org": "Hanoi Heritage Foundation",
+            "role": "restorer",
+            "year": 2007
+          },
+          "expected": {
+            "name": "Nguyễn Văn Hùng",
+            "age": 71,
+            "org": "Hanoi Heritage Foundation",
+            "role": "master restorer",
+            "year": 2007
+          }
+        },
+        {
+          "source_index": 190,
+          "id": "original-190",
+          "fields": [
+            "org"
+          ],
+          "before": {
+            "name": "Thabo Mokoena",
+            "age": 22,
+            "org": "Cape Herald newspaper",
+            "role": "junior copywriter",
+            "year": 2011
+          },
+          "after": {
+            "name": "Thabo Mokoena",
+            "age": 22,
+            "org": "Cape Herald",
+            "role": "junior copywriter",
+            "year": 2011
+          },
+          "expected": {
+            "name": "Thabo Mokoena",
+            "age": 22,
+            "org": "Cape Herald",
+            "role": "junior copywriter",
+            "year": 2011
+          }
+        },
+        {
+          "source_index": 193,
+          "id": "original-193",
+          "fields": [
+            "org"
+          ],
+          "before": {
+            "name": "Fatima Al-Zahrani",
+            "age": 48,
+            "org": "Sabt Polymers",
+            "role": "lead quality engineer",
+            "year": 2014
+          },
+          "after": {
+            "name": "Fatima Al-Zahrani",
+            "age": 48,
+            "org": "Sabit Polymers",
+            "role": "lead quality engineer",
+            "year": 2014
+          },
+          "expected": {
+            "name": "Fatima Al-Zahrani",
+            "age": 48,
+            "org": "Sabt Polymers",
+            "role": "lead quality engineer",
+            "year": 2014
+          }
+        },
+        {
+          "source_index": 196,
+          "id": "original-196",
+          "fields": [
+            "org"
+          ],
+          "before": {
+            "name": "Kwame Boateng",
+            "age": 29,
+            "org": "Red Cross Accra branch",
+            "role": "logistics coordinator",
+            "year": 2019
+          },
+          "after": {
+            "name": "Kwame Boateng",
+            "age": 29,
+            "org": "Red Cross",
+            "role": "logistics coordinator",
+            "year": 2019
+          },
+          "expected": {
+            "name": "Kwame Boateng",
+            "age": 29,
+            "org": "Red Cross",
+            "role": "logistics coordinator",
+            "year": 2019
+          }
+        },
+        {
+          "source_index": 207,
+          "id": "independent-31",
+          "fields": [
+            "name"
+          ],
+          "before": {
+            "name": "Caleb Ross",
+            "age": 26,
+            "org": "Kite \"Blue\" Design",
+            "role": "wayfinding prototype maker",
+            "year": 2021
+          },
+          "after": {
+            "name": "Kite \"Blue\" Design",
+            "age": 26,
+            "org": "Kite \"Blue\" Design",
+            "role": "wayfinding prototype maker",
+            "year": 2021
+          },
+          "expected": {
+            "name": "Caleb Ross",
+            "age": 26,
+            "org": "Kite \"Blue\" Design",
+            "role": "wayfinding prototype maker",
+            "year": 2021
+          }
+        }
+      ],
+      "regressed_cases": [
+        0,
+        10,
+        90,
+        187,
+        193,
+        207
+      ],
+      "invalid_reference": [],
+      "invalid_candidate": [],
+      "reference_correct": 270,
+      "candidate_correct": 269,
+      "categories": {
+        "original:original": {
+          "n": 200,
+          "reference_correct": 179,
+          "candidate_correct": 179
+        },
+        "independent:chronology": {
+          "n": 10,
+          "reference_correct": 10,
+          "candidate_correct": 10
+        },
+        "independent:diacritics": {
+          "n": 10,
+          "reference_correct": 10,
+          "candidate_correct": 10
+        },
+        "independent:punctuation": {
+          "n": 10,
+          "reference_correct": 9,
+          "candidate_correct": 8
+        },
+        "independent:record_formats": {
+          "n": 10,
+          "reference_correct": 10,
+          "candidate_correct": 10
+        },
+        "independent:subject_selection": {
+          "n": 10,
+          "reference_correct": 10,
+          "candidate_correct": 10
+        },
+        "challenge:correction": {
+          "n": 5,
+          "reference_correct": 5,
+          "candidate_correct": 5
+        },
+        "challenge:distractor_person": {
+          "n": 5,
+          "reference_correct": 5,
+          "candidate_correct": 5
+        },
+        "challenge:irrelevant_numbers": {
+          "n": 5,
+          "reference_correct": 1,
+          "candidate_correct": 1
+        },
+        "challenge:labelled_note": {
+          "n": 5,
+          "reference_correct": 5,
+          "candidate_correct": 5
+        },
+        "challenge:nested_punctuation": {
+          "n": 5,
+          "reference_correct": 5,
+          "candidate_correct": 5
+        },
+        "challenge:parenthetical_dates": {
+          "n": 5,
+          "reference_correct": 2,
+          "candidate_correct": 2
+        },
+        "challenge:quoted_title": {
+          "n": 5,
+          "reference_correct": 4,
+          "candidate_correct": 4
+        },
+        "challenge:reverse_note": {
+          "n": 5,
+          "reference_correct": 5,
+          "candidate_correct": 5
+        },
+        "challenge:tabular_note": {
+          "n": 5,
+          "reference_correct": 5,
+          "candidate_correct": 5
+        },
+        "challenge:unrelated_age": {
+          "n": 5,
+          "reference_correct": 5,
+          "candidate_correct": 5
+        }
+      },
+      "policy": "Every indexed output valid and every JSON value unchanged; ground-truth accuracy reported separately."
+    },
+    "compile-strict": {
+      "passed": false,
+      "n": 300,
+      "changed_or_invalid_cases": [
+        {
+          "source_index": 0,
+          "id": "original-0",
+          "fields": [
+            "org"
+          ],
+          "before": {
+            "name": "Mei-Ling Chang",
+            "age": 24,
+            "org": "Taipei National University",
+            "role": "graduate teaching assistant",
+            "year": 2024
+          },
+          "after": {
+            "name": "Mei-Ling Chang",
+            "age": 24,
+            "org": "linguistics department, Taipei National University",
+            "role": "graduate teaching assistant",
+            "year": 2024
+          },
+          "expected": {
+            "name": "Mei-Ling Chang",
+            "age": 24,
+            "org": "Taipei National University",
+            "role": "graduate teaching assistant",
+            "year": 2024
+          }
+        },
+        {
+          "source_index": 10,
+          "id": "original-10",
+          "fields": [
+            "role"
+          ],
+          "before": {
+            "name": "Bogdan Ilyenko",
+            "age": 71,
+            "org": "Sevastopol Botanical Garden",
+            "role": "curator of rare species",
+            "year": 2026
+          },
+          "after": {
+            "name": "Bogdan Ilyenko",
+            "age": 71,
+            "org": "Sevastopol Botanical Garden",
+            "role": "horticulturist",
+            "year": 2026
+          },
+          "expected": {
+            "name": "Bogdan Ilyenko",
+            "age": 71,
+            "org": "Sevastopol Botanical Garden",
+            "role": "curator of rare species",
+            "year": 2026
+          }
+        },
+        {
+          "source_index": 47,
+          "id": "original-47",
+          "fields": [
+            "org"
+          ],
+          "before": {
+            "name": "Sebastian Okonkwo",
+            "age": 25,
+            "org": "agricultural development agency",
+            "role": "trainee machinist",
+            "year": 1989
+          },
+          "after": {
+            "name": "Sebastian Okonkwo",
+            "age": 25,
+            "org": "agricultural development and research institute",
+            "role": "trainee machinist",
+            "year": 1989
+          },
+          "expected": {
+            "name": "Sebastian Okonkwo",
+            "age": 25,
+            "org": "metallurgy lab in Wolverhampton",
+            "role": "trainee machinist",
+            "year": 1989
+          }
+        },
+        {
+          "source_index": 50,
+          "id": "original-50",
+          "fields": [
+            "role"
+          ],
+          "before": {
+            "name": "Béatrice Laurent",
+            "age": 48,
+            "org": "TransAid",
+            "role": "regional coordinator for 2018",
+            "year": 2018
+          },
+          "after": {
+            "name": "Béatrice Laurent",
+            "age": 48,
+            "org": "TransAid",
+            "role": "regional coordinator",
+            "year": 2018
+          },
+          "expected": {
+            "name": "Béatrice Laurent",
+            "age": 48,
+            "org": "TransAid",
+            "role": "regional coordinator",
+            "year": 2018
+          }
+        },
+        {
+          "source_index": 56,
+          "id": "original-56",
+          "fields": [
+            "role"
+          ],
+          "before": {
+            "name": "Yamamoto Kiyoko",
+            "age": 62,
+            "org": "Kyoto Institute of Linguistics",
+            "role": "advisory board chair",
+            "year": 2019
+          },
+          "after": {
+            "name": "Yamamoto Kiyoko",
+            "age": 62,
+            "org": "Kyoto Institute of Linguistics",
+            "role": "chair of the advisory board",
+            "year": 2019
+          },
+          "expected": {
+            "name": "Yamamoto Kiyoko",
+            "age": 62,
+            "org": "Kyoto Institute of Linguistics",
+            "role": "chair of the advisory board",
+            "year": 2019
+          }
+        },
+        {
+          "source_index": 90,
+          "id": "original-90",
+          "fields": [
+            "role"
+          ],
+          "before": {
+            "name": "Gruffud Llewellyn",
+            "age": 38,
+            "org": "Cardigan Bay Marine Sanctuary",
+            "role": "conservation officer",
+            "year": 2007
+          },
+          "after": {
+            "name": "Gruffud Llewellyn",
+            "age": 38,
+            "org": "Cardigan Bay Marine Sanctuary",
+            "role": "marine biologist by training",
+            "year": 2007
+          },
+          "expected": {
+            "name": "Gruffud Llewellyn",
+            "age": 38,
+            "org": "Cardigan Bay Marine Sanctuary",
+            "role": "conservation officer",
+            "year": 2007
+          }
+        },
+        {
+          "source_index": 121,
+          "id": "original-121",
+          "fields": [
+            "org"
+          ],
+          "before": {
+            "name": "Zeynep Aydın",
+            "age": 49,
+            "org": "Izmir Municipal Court",
+            "role": "municipal judge",
+            "year": 2009
+          },
+          "after": {
+            "name": "Zeynep Aydın",
+            "age": 49,
+            "org": "Municipal Court of Izmir",
+            "role": "municipal judge",
+            "year": 2009
+          },
+          "expected": {
+            "name": "Zeynep Aydın",
+            "age": 49,
+            "org": "city of Izmir",
+            "role": "municipal judge",
+            "year": 2009
+          }
+        },
+        {
+          "source_index": 128,
+          "id": "original-128",
+          "fields": [
+            "role"
+          ],
+          "before": {
+            "name": "Aikaterini Papadakis",
+            "age": 57,
+            "org": "University of Thessaloniki",
+            "role": "professorship in Byzantine history",
+            "year": 2010
+          },
+          "after": {
+            "name": "Aikaterini Papadakis",
+            "age": 57,
+            "org": "University of Thessaloniki",
+            "role": "professor",
+            "year": 2010
+          },
+          "expected": {
+            "name": "Aikaterini Papadakis",
+            "age": 57,
+            "org": "University of Thessaloniki",
+            "role": "professor of Byzantine history",
+            "year": 2010
+          }
+        },
+        {
+          "source_index": 154,
+          "id": "original-154",
+          "fields": [
+            "org"
+          ],
+          "before": {
+            "name": "Wayne Silvers",
+            "age": 71,
+            "org": "Montana District Court bench",
+            "role": "senior judge",
+            "year": 2001
+          },
+          "after": {
+            "name": "Wayne Silvers",
+            "age": 71,
+            "org": "Montana District Court",
+            "role": "senior judge",
+            "year": 2001
+          },
+          "expected": {
+            "name": "Wayne Silvers",
+            "age": 71,
+            "org": "Montana District Court",
+            "role": "senior judge",
+            "year": 2001
+          }
+        },
+        {
+          "source_index": 187,
+          "id": "original-187",
+          "fields": [
+            "role"
+          ],
+          "before": {
+            "name": "Nguyễn Văn Hùng",
+            "age": 71,
+            "org": "Hanoi Heritage Foundation",
+            "role": "master restorer",
+            "year": 2007
+          },
+          "after": {
+            "name": "Nguyễn Văn Hùng",
+            "age": 71,
+            "org": "Hanoi Heritage Foundation",
+            "role": "restorer",
+            "year": 2007
+          },
+          "expected": {
+            "name": "Nguyễn Văn Hùng",
+            "age": 71,
+            "org": "Hanoi Heritage Foundation",
+            "role": "master restorer",
+            "year": 2007
+          }
+        },
+        {
+          "source_index": 190,
+          "id": "original-190",
+          "fields": [
+            "org"
+          ],
+          "before": {
+            "name": "Thabo Mokoena",
+            "age": 22,
+            "org": "Cape Herald newspaper",
+            "role": "junior copywriter",
+            "year": 2011
+          },
+          "after": {
+            "name": "Thabo Mokoena",
+            "age": 22,
+            "org": "Cape Herald",
+            "role": "junior copywriter",
+            "year": 2011
+          },
+          "expected": {
+            "name": "Thabo Mokoena",
+            "age": 22,
+            "org": "Cape Herald",
+            "role": "junior copywriter",
+            "year": 2011
+          }
+        },
+        {
+          "source_index": 196,
+          "id": "original-196",
+          "fields": [
+            "org"
+          ],
+          "before": {
+            "name": "Kwame Boateng",
+            "age": 29,
+            "org": "Red Cross Accra branch",
+            "role": "logistics coordinator",
+            "year": 2019
+          },
+          "after": {
+            "name": "Kwame Boateng",
+            "age": 29,
+            "org": "Red Cross",
+            "role": "logistics coordinator",
+            "year": 2019
+          },
+          "expected": {
+            "name": "Kwame Boateng",
+            "age": 29,
+            "org": "Red Cross",
+            "role": "logistics coordinator",
+            "year": 2019
+          }
+        },
+        {
+          "source_index": 207,
+          "id": "independent-31",
+          "fields": [
+            "name"
+          ],
+          "before": {
+            "name": "Caleb Ross",
+            "age": 26,
+            "org": "Kite \"Blue\" Design",
+            "role": "wayfinding prototype maker",
+            "year": 2021
+          },
+          "after": {
+            "name": "Kite \"Blue\" Design",
+            "age": 26,
+            "org": "Kite \"Blue\" Design",
+            "role": "wayfinding prototype maker",
+            "year": 2021
+          },
+          "expected": {
+            "name": "Caleb Ross",
+            "age": 26,
+            "org": "Kite \"Blue\" Design",
+            "role": "wayfinding prototype maker",
+            "year": 2021
+          }
+        }
+      ],
+      "regressed_cases": [
+        0,
+        10,
+        90,
+        187,
+        207
+      ],
+      "invalid_reference": [],
+      "invalid_candidate": [],
+      "reference_correct": 270,
+      "candidate_correct": 270,
+      "categories": {
+        "original:original": {
+          "n": 200,
+          "reference_correct": 179,
+          "candidate_correct": 180
+        },
+        "independent:chronology": {
+          "n": 10,
+          "reference_correct": 10,
+          "candidate_correct": 10
+        },
+        "independent:diacritics": {
+          "n": 10,
+          "reference_correct": 10,
+          "candidate_correct": 10
+        },
+        "independent:punctuation": {
+          "n": 10,
+          "reference_correct": 9,
+          "candidate_correct": 8
+        },
+        "independent:record_formats": {
+          "n": 10,
+          "reference_correct": 10,
+          "candidate_correct": 10
+        },
+        "independent:subject_selection": {
+          "n": 10,
+          "reference_correct": 10,
+          "candidate_correct": 10
+        },
+        "challenge:correction": {
+          "n": 5,
+          "reference_correct": 5,
+          "candidate_correct": 5
+        },
+        "challenge:distractor_person": {
+          "n": 5,
+          "reference_correct": 5,
+          "candidate_correct": 5
+        },
+        "challenge:irrelevant_numbers": {
+          "n": 5,
+          "reference_correct": 1,
+          "candidate_correct": 1
+        },
+        "challenge:labelled_note": {
+          "n": 5,
+          "reference_correct": 5,
+          "candidate_correct": 5
+        },
+        "challenge:nested_punctuation": {
+          "n": 5,
+          "reference_correct": 5,
+          "candidate_correct": 5
+        },
+        "challenge:parenthetical_dates": {
+          "n": 5,
+          "reference_correct": 2,
+          "candidate_correct": 2
+        },
+        "challenge:quoted_title": {
+          "n": 5,
+          "reference_correct": 4,
+          "candidate_correct": 4
+        },
+        "challenge:reverse_note": {
+          "n": 5,
+          "reference_correct": 5,
+          "candidate_correct": 5
+        },
+        "challenge:tabular_note": {
+          "n": 5,
+          "reference_correct": 5,
+          "candidate_correct": 5
+        },
+        "challenge:unrelated_age": {
+          "n": 5,
+          "reference_correct": 5,
+          "candidate_correct": 5
+        }
+      },
+      "policy": "Every indexed output valid and every JSON value unchanged; ground-truth accuracy reported separately."
+    }
+  },
+  "commands": [
+    {
+      "label": "unchanged-evaluator",
+      "argv": [
+        "/workspace/gpushare-validation/validation-20260919-e281ae3a/scripts/evaluate.py",
+        "--model",
+        "/workspace/gpushare-validation/validation-20260919-e281ae3a/adapter",
+        "--data",
+        "/workspace/gpushare-validation/validation-20260919-e281ae3a/demo/validation/cases300.jsonl",
+        "--out",
+        "/workspace/gpushare-validation/validation-20260919-e281ae3a/validation/reference.json",
+        "--n",
+        "300",
+        "--batch",
+        "1",
+        "--dtype",
+        "bf16",
+        "--max-new-tokens",
+        "128",
+        "--seq-len",
+        "192",
+        "--show",
+        "0"
+      ]
+    },
+    {
+      "label": "static",
+      "argv": [
+        "/workspace/gpushare-validation/validation-20260919-e281ae3a/scripts/validate_existing_inference.py",
+        "--model",
+        "/workspace/gpushare-validation/validation-20260919-e281ae3a/adapter",
+        "--base",
+        "/workspace/gpushare-validation/validation-20260919-e281ae3a/hf-cache/hub/models--Qwen--Qwen2.5-0.5B/snapshots/060db6499f32faf8b98477b0a26969ef7d8b9987",
+        "--expected-model-sha256",
+        "02b0532346e314750330c6301670c2d6af40b874faf952f76f5fa326160ffbfb",
+        "--data",
+        "/workspace/gpushare-validation/validation-20260919-e281ae3a/demo/validation/cases300.jsonl",
+        "--out",
+        "/workspace/gpushare-validation/validation-20260919-e281ae3a/validation/static.json",
+        "--n",
+        "300",
+        "--batch",
+        "1",
+        "--candidate-engine",
+        "static"
+      ]
+    },
+    {
+      "label": "compile-strict",
+      "argv": [
+        "/workspace/gpushare-validation/validation-20260919-e281ae3a/scripts/validate_existing_inference.py",
+        "--model",
+        "/workspace/gpushare-validation/validation-20260919-e281ae3a/adapter",
+        "--base",
+        "/workspace/gpushare-validation/validation-20260919-e281ae3a/hf-cache/hub/models--Qwen--Qwen2.5-0.5B/snapshots/060db6499f32faf8b98477b0a26969ef7d8b9987",
+        "--expected-model-sha256",
+        "02b0532346e314750330c6301670c2d6af40b874faf952f76f5fa326160ffbfb",
+        "--data",
+        "/workspace/gpushare-validation/validation-20260919-e281ae3a/demo/validation/cases300.jsonl",
+        "--out",
+        "/workspace/gpushare-validation/validation-20260919-e281ae3a/validation/compile-strict.json",
+        "--n",
+        "300",
+        "--batch",
+        "1",
+        "--candidate-engine",
+        "compile-strict"
+      ]
+    }
+  ],
+  "reference": {
+    "n": 300,
+    "json_parse_rate": 1.0,
+    "exact_match_rate": 0.9,
+    "runtime": {
+      "gpu": "AMD Instinct MI300X",
+      "batch": 1,
+      "dtype": "bf16",
+      "seconds": 393.37770656496286,
+      "peak_allocated_gb": 1.144743936
+    }
+  }
+}

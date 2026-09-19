@@ -1,0 +1,209 @@
+{
+  "status": "rejected",
+  "n": 300,
+  "dataset_file_sha256": "f1167e9094fa3ba5600d714cef22fc8045f932508ce61e5c56a9fc9cbe4ce1b9",
+  "model_identity": {
+    "sha256": "02b0532346e314750330c6301670c2d6af40b874faf952f76f5fa326160ffbfb",
+    "files": {
+      "base/config.json": "479dcf0c5286339e41ad3992cd08ae88a467c4187587936248e2b7c96283484b",
+      "base/generation_config.json": "8c970692323e3ea0e9b8b0a4dca79388d31226e41f83c9fd6014804280ebf6e8",
+      "base/merges.txt": "599bab54075088774b1733fde865d5bd747cbcc7a547c5bc12610e874e26f5e3",
+      "base/model.safetensors": "88c142557820ccad55bb59756bfcfcf891de9cc6202816bd346445188a0ed342",
+      "base/tokenizer.json": "c0382117ea329cdf097041132f6d735924b697924d6f6fc3945713e96ce87539",
+      "base/tokenizer_config.json": "c91efca15ceff6e9ee9424db58a6f59cd41294e550a86cbd07e3c1fb500b34f9",
+      "base/vocab.json": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+      "adapter/adapter_config.json": "07d36e13b0d75ea18d9f0dde9fda49b13553639b337956b76030b3b645341dd1",
+      "adapter/adapter_model.safetensors": "600691de70c80f28743563212ef26b4dac61a1014effaafde5fec1a48020992d",
+      "adapter/tokenizer.json": "3fd169731d2cbde95e10bf356d66d5997fd885dd8dbb6fb4684da3f23b2585d8",
+      "adapter/tokenizer_config.json": "b271a1c91521384eb6d794eb27c9d55b3ff93ade6beb59e668d55411155ea16e"
+    }
+  },
+  "reference_evaluator_sha256": "69af55c89f226f661b04e829d598112f2dd758703e8ca9d3d0b098ee9935db90",
+  "reference_code_unchanged": true,
+  "candidates": {
+    "compile-strict": {
+      "passed": false,
+      "n": 300,
+      "changed_or_invalid_cases": [
+        {
+          "source_index": 133,
+          "id": "original-133",
+          "fields": [
+            "role"
+          ],
+          "before": {
+            "name": "Bronagh Doherty",
+            "age": 24,
+            "org": "Cairn Wildlife Park",
+            "role": "zoo veterinarian",
+            "year": 2008
+          },
+          "after": {
+            "name": "Bronagh Doherty",
+            "age": 24,
+            "org": "Cairn Wildlife Park",
+            "role": "zoovet veterinarian",
+            "year": 2008
+          },
+          "expected": {
+            "name": "Bronagh Doherty",
+            "age": 24,
+            "org": "Cairn Wildlife Park",
+            "role": "zoo veterinarian",
+            "year": 2008
+          }
+        }
+      ],
+      "regressed_cases": [
+        133
+      ],
+      "invalid_reference": [],
+      "invalid_candidate": [],
+      "reference_correct": 270,
+      "candidate_correct": 269,
+      "categories": {
+        "original:original": {
+          "n": 200,
+          "reference_correct": 179,
+          "candidate_correct": 178
+        },
+        "independent:chronology": {
+          "n": 10,
+          "reference_correct": 10,
+          "candidate_correct": 10
+        },
+        "independent:diacritics": {
+          "n": 10,
+          "reference_correct": 10,
+          "candidate_correct": 10
+        },
+        "independent:punctuation": {
+          "n": 10,
+          "reference_correct": 9,
+          "candidate_correct": 9
+        },
+        "independent:record_formats": {
+          "n": 10,
+          "reference_correct": 10,
+          "candidate_correct": 10
+        },
+        "independent:subject_selection": {
+          "n": 10,
+          "reference_correct": 10,
+          "candidate_correct": 10
+        },
+        "challenge:correction": {
+          "n": 5,
+          "reference_correct": 5,
+          "candidate_correct": 5
+        },
+        "challenge:distractor_person": {
+          "n": 5,
+          "reference_correct": 5,
+          "candidate_correct": 5
+        },
+        "challenge:irrelevant_numbers": {
+          "n": 5,
+          "reference_correct": 1,
+          "candidate_correct": 1
+        },
+        "challenge:labelled_note": {
+          "n": 5,
+          "reference_correct": 5,
+          "candidate_correct": 5
+        },
+        "challenge:nested_punctuation": {
+          "n": 5,
+          "reference_correct": 5,
+          "candidate_correct": 5
+        },
+        "challenge:parenthetical_dates": {
+          "n": 5,
+          "reference_correct": 2,
+          "candidate_correct": 2
+        },
+        "challenge:quoted_title": {
+          "n": 5,
+          "reference_correct": 4,
+          "candidate_correct": 4
+        },
+        "challenge:reverse_note": {
+          "n": 5,
+          "reference_correct": 5,
+          "candidate_correct": 5
+        },
+        "challenge:tabular_note": {
+          "n": 5,
+          "reference_correct": 5,
+          "candidate_correct": 5
+        },
+        "challenge:unrelated_age": {
+          "n": 5,
+          "reference_correct": 5,
+          "candidate_correct": 5
+        }
+      },
+      "policy": "Every indexed output valid and every JSON value unchanged; ground-truth accuracy reported separately."
+    }
+  },
+  "commands": [
+    {
+      "label": "unchanged-evaluator",
+      "argv": [
+        "/workspace/gpushare-validation/hardware-a6000-2ca04f6b/scripts/evaluate.py",
+        "--model",
+        "/workspace/gpushare-validation/hardware-a6000-2ca04f6b/adapter",
+        "--data",
+        "/workspace/gpushare-validation/hardware-a6000-2ca04f6b/demo/validation/cases300.jsonl",
+        "--out",
+        "/workspace/gpushare-validation/hardware-a6000-2ca04f6b/validation/reference.json",
+        "--n",
+        "300",
+        "--batch",
+        "1",
+        "--dtype",
+        "bf16",
+        "--max-new-tokens",
+        "128",
+        "--seq-len",
+        "192",
+        "--show",
+        "0"
+      ]
+    },
+    {
+      "label": "compile-strict",
+      "argv": [
+        "/workspace/gpushare-validation/hardware-a6000-2ca04f6b/scripts/validate_existing_inference.py",
+        "--model",
+        "/workspace/gpushare-validation/hardware-a6000-2ca04f6b/adapter",
+        "--base",
+        "/workspace/gpushare-validation/hardware-a6000-2ca04f6b/hf-cache/hub/models--Qwen--Qwen2.5-0.5B/snapshots/060db6499f32faf8b98477b0a26969ef7d8b9987",
+        "--expected-model-sha256",
+        "02b0532346e314750330c6301670c2d6af40b874faf952f76f5fa326160ffbfb",
+        "--data",
+        "/workspace/gpushare-validation/hardware-a6000-2ca04f6b/demo/validation/cases300.jsonl",
+        "--out",
+        "/workspace/gpushare-validation/hardware-a6000-2ca04f6b/validation/compile-strict.json",
+        "--n",
+        "300",
+        "--batch",
+        "1",
+        "--candidate-engine",
+        "compile-strict"
+      ]
+    }
+  ],
+  "reference": {
+    "n": 300,
+    "json_parse_rate": 1.0,
+    "exact_match_rate": 0.9,
+    "runtime": {
+      "gpu": "NVIDIA RTX A6000",
+      "batch": 1,
+      "dtype": "bf16",
+      "seconds": 386.8175635468215,
+      "peak_allocated_gb": 1.074620416
+    }
+  }
+}

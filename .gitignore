@@ -10,10 +10,20 @@ __pycache__/
 .DS_Store
 .gpushare/
 
-# Keep measurements; trained weights and tokenizer copies stay local.
+# Keep measurements; only the two handoff adapters below are published.
 ckpt/**
 !ckpt/**/
 !ckpt/**/meta.json
+!ckpt/laptop-lora-v2/adapter_config.json
+!ckpt/laptop-lora-v2/adapter_model.safetensors
+!ckpt/laptop-lora-v2/tokenizer.json
+!ckpt/laptop-lora-v2/tokenizer_config.json
+!ckpt/laptop-lora-v2/chat_template.jinja
+!ckpt/laptop-lora-v3b/adapter_config.json
+!ckpt/laptop-lora-v3b/adapter_model.safetensors
+!ckpt/laptop-lora-v3b/tokenizer.json
+!ckpt/laptop-lora-v3b/tokenizer_config.json
+!ckpt/laptop-lora-v3b/chat_template.jinja
 
 # Local drafts and superseded partial evaluations; final reports are published.
 data/experiments/binding-v3/

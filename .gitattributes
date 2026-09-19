@@ -1,5 +1,14 @@
 # Preserve the exact bytes of measured evidence and its frozen data.
 demo/results/** -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+demo/validation/*.json* -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+demo/hardware/*.json -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+# Catalog exports retain their original trailing newline for checksum identity.
+demo/hardware/catalog-*.json whitespace=blank-at-eol,space-before-tab,cr-at-eol,-blank-at-eof
+ckpt/laptop-lora-v2/* -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+ckpt/laptop-lora-v3b/* -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+# Keep serialized tokenizer dictionaries out of code-review diffs.
+ckpt/laptop-lora-v2/tokenizer.json -diff linguist-generated=true
+ckpt/laptop-lora-v3b/tokenizer.json -diff linguist-generated=true
 data/experiments/** -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
 eval/laptop-*.json -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
 eval/profile-v3-*.json -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol

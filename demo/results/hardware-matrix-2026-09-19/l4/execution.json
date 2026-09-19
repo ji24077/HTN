@@ -1,0 +1,12 @@
+{
+  "status": "rejected",
+  "setup_seconds": 26.110208099999,
+  "validation_exit_code": 2,
+  "latency_exit_code": 0,
+  "terminated": true,
+  "finished_at": 1789835322.614384,
+  "session_id": "hardware-l4-a1f93f73",
+  "profile": "hardware-l4",
+  "cleanup_verified": true,
+  "estimate_usd": 0.2283599827355809
+}

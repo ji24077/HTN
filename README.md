@@ -5,6 +5,10 @@
 Design and tickets: `docs/handbook.md`. Your own part: `docs/jack.md` / `docs/ethan.md` / `docs/ji.md`.
 This file is how we work together.
 
+Ji: start with the [GPU benchmark and migration handoff](demo/HANDOFF.md).
+It includes measured results, saved adapters, reproduction commands, and the
+integration work still needed on `ji-phin-agentinfra`.
+
 ---
 
 ## Setup (5 minutes, per machine)

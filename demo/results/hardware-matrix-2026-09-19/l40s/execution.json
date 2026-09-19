@@ -1,0 +1,12 @@
+{
+  "status": "passed",
+  "setup_seconds": 23.39506260000053,
+  "validation_exit_code": 0,
+  "latency_exit_code": 0,
+  "terminated": true,
+  "finished_at": 1789835208.308848,
+  "session_id": "hardware-l40s-e2f43159",
+  "profile": "hardware-l40s",
+  "cleanup_verified": true,
+  "estimate_usd": 0.40293733727733294
+}
