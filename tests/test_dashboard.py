@@ -1,5 +1,6 @@
 import json
 
+import pytest
 from fastapi.testclient import TestClient
 
 from gpushare.dashboard import runner
@@ -13,8 +14,10 @@ def test_research_console_and_state_are_served():
     state = client.get("/api/state")
 
     assert page.status_code == 200
-    assert "연구 파이프라인" in page.text
+    assert "모델을 고르고" in page.text
     assert 'data-testid="run-training"' in page.text
+    assert 'data-testid="optimize-training"' in page.text
+    assert 'data-testid="optimize-inference"' in page.text
     assert state.status_code == 200
     assert state.json()["experiment"]["model_id"] == "Qwen/Qwen2.5-0.5B"
 
@@ -187,6 +190,57 @@ def test_streaming_route_reports_errors_as_a_frame_not_a_500():
     assert "no model is loaded" in frames[-1]["error"]
 
 
+def test_model_picker_keeps_checkpoint_pod_and_agent_artifact(monkeypatch):
+    monkeypatch.setattr(
+        runner,
+        "latest_run",
+        lambda: {
+            "job_id": "baseline-job",
+            "pod_id": "pod-base",
+            "remote_checkpoint": "/workspace/gpushare-ui/.runs/base/ckpt",
+        },
+    )
+    monkeypatch.setattr(
+        runner.JOBS,
+        "list",
+        lambda: [
+            {
+                "id": "agent-job",
+                "kind": "optimize-training-speed",
+                "status": "complete",
+                "result": {
+                    "pod": {"id": "pod-agent"},
+                    "remote_checkpoint": "/workspace/gpushare-ui/.runs/agent/validate/ckpt",
+                },
+            }
+        ],
+    )
+
+    models = {model["id"]: model for model in runner.available_models()}
+
+    assert models["finetuned"]["pod_id"] == "pod-base"
+    assert models["agent-trained"]["pod_id"] == "pod-agent"
+    assert models["agent-trained"]["kind"] == "agent"
+
+
+def test_checkpoint_model_refuses_the_wrong_pod(monkeypatch):
+    monkeypatch.setattr(
+        runner,
+        "available_models",
+        lambda: [
+            {
+                "id": "finetuned",
+                "label": "fine-tuned",
+                "ref": "/workspace/run/ckpt",
+                "pod_id": "pod-with-weights",
+            }
+        ],
+    )
+
+    with pytest.raises(runner.JobError, match="pod-with-weights"):
+        runner._model_ref("finetuned", "different-pod")
+
+
 def test_a_full_gpu_sends_the_job_to_one_with_room(monkeypatch):
     """Placement, not refusal. Pooling GPUs is the point of the product.
 
@@ -336,3 +390,25 @@ def test_reclaim_runs_when_nothing_fits(monkeypatch):
     pod, _ = runner._place(object(), need_gb=16.0, preferred_pod_id="only")
 
     assert pod["id"] == "only" and freed["done"]
+
+
+def test_the_measurement_panels_survive_a_ui_rewrite():
+    """Two agents edit this file. A rewrite must not silently drop the numbers.
+
+    Every id below is a measurement that exists in /api/state and has nowhere
+    else to be seen. When this fails the page still looks finished, which is
+    why it is asserted rather than left to a glance.
+    """
+    page = TestClient(build_app()).get("/").text
+
+    for anchor in (
+        "qHalluc",      # hallucination rate — the nullable-schema result
+        "qOmit",
+        "qLoss",
+        "fieldChart",   # per-field accuracy, before vs after
+        "lossChart",
+        "loadPolicy",   # long-context prefix cache
+        "runAb",
+        "--s-before",   # the validated series palette
+    ):
+        assert anchor in page, f"{anchor} was dropped from the page"

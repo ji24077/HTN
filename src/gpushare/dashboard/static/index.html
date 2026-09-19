@@ -3,456 +3,426 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>GPUShare Research Console</title>
+  <title>GPUShare Experiment</title>
   <style>
     :root {
-      --bg: #08110f;
-      --panel: #0d1916;
-      --panel-2: #101f1b;
-      --line: #21362f;
-      --ink: #edf7f2;
-      --muted: #8fa69c;
-      --mint: #7cf2b5;
-      --mint-2: #2bc880;
-      --amber: #ffc86b;
-      --red: #ff7b78;
-      --blue: #85b9ff;
-      --radius: 18px;
-      /* Chart series. NOT the brand mint/blue: those sit at OKLCH L .78-.88,
-         outside the dark-mode band [.48,.67], so as fills they glare and the
-         lightness check fails. These two were snapped to L .62 at the same
-         hues and validated: CVD dE 23.2 (protan), contrast >= 3:1 vs panel.
-         Marks only - text keeps the ink tokens. */
-      --s-before: #0089ea;
-      --s-after: #00a05b;
+      --bg:#08110f; --panel:#101c18; --panel2:#13231e; --line:#274038;
+      --ink:#edf7f2; --muted:#91a89e; --mint:#78efb1; --green:#2bc880;
+      --blue:#8abfff; --amber:#ffc86b; --red:#ff817d; --radius:18px;
+      /* Chart series. NOT --mint/--blue: those sit at OKLCH L .78-.88, outside
+         the dark-mode band [.48,.67], so as fills they glare and the lightness
+         check fails. Snapped to L .62 at the same hues and validated against
+         this panel colour: CVD dE 23.2 (protan), contrast >= 3:1. Marks only —
+         text keeps the ink tokens. */
+      --s-before:#0089ea; --s-after:#00a05b;
     }
-    * { box-sizing: border-box; }
+    .charts { display:grid; grid-template-columns:1.05fr .95fr; gap:16px; }
+    .chart-head { display:flex; justify-content:space-between; align-items:baseline; gap:12px; flex-wrap:wrap; margin-bottom:14px; }
+    .legend { display:flex; gap:14px; }
+    .legend span { color:var(--muted); font-size:12px; font-weight:750; }
+    .legend i { width:10px; height:10px; border-radius:3px; display:inline-block; margin-right:6px; }
+    svg.chart { width:100%; display:block; overflow:visible; }
+    svg.chart text { font:11px/1 Inter, ui-sans-serif, system-ui, sans-serif; }
+    .ax { fill:var(--muted); }
+    .val { fill:var(--ink); font-weight:750; }
+    .gridline { stroke:var(--line); stroke-width:1; }
+    .hit { fill:transparent; cursor:crosshair; }
+    .chart-tip { position:fixed; z-index:60; pointer-events:none; display:none; background:#07100d; border:1px solid var(--line); border-radius:10px; padding:8px 10px; box-shadow:0 14px 34px rgba(0,0,0,.55); font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--ink); white-space:nowrap; }
+    .chart-tip u { display:block; text-decoration:none; color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.07em; margin-bottom:3px; }
+    .tableview { margin-top:14px; }
+    .tableview summary { cursor:pointer; color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.08em; font-weight:800; }
+    table.dv { width:100%; border-collapse:collapse; margin-top:10px; font:12px/1.65 ui-monospace,SFMono-Regular,Menlo,monospace; }
+    table.dv th, table.dv td { text-align:right; padding:5px 8px; border-bottom:1px solid var(--line); }
+    table.dv th { color:var(--muted); font-weight:750; }
+    table.dv td:first-child, table.dv th:first-child { text-align:left; color:var(--muted); }
+    .empty-note { color:var(--muted); border:1px dashed var(--line); border-radius:12px; padding:22px 16px; text-align:center; font-size:13px; line-height:1.6; }
+    .caveat { color:var(--amber); font-size:12px; line-height:1.55; margin-top:12px; border-left:2px solid var(--amber); padding-left:10px; }
+    .qtiles { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
+    .qtile { background:var(--panel2); border:1px solid var(--line); border-radius:14px; padding:14px; }
+    .qtile span { color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.07em; font-weight:800; display:block; }
+    .qtile b { display:block; font-size:26px; letter-spacing:-.04em; margin:6px 0 2px; }
+    .qtile small { color:var(--muted); font-size:11px; }
+    @media (max-width:860px){ .charts,.qtiles{ grid-template-columns:1fr; } }
+    * { box-sizing:border-box; }
+    html { scroll-behavior:smooth; }
     body {
-      margin: 0;
-      color: var(--ink);
-      background:
-        radial-gradient(circle at 12% -10%, rgba(43,200,128,.15), transparent 31rem),
-        radial-gradient(circle at 88% 18%, rgba(133,185,255,.08), transparent 25rem),
-        var(--bg);
-      font: 14px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      min-height: 100vh;
+      margin:0; color:var(--ink); background:
+        radial-gradient(circle at 12% -10%,rgba(43,200,128,.15),transparent 34rem),
+        radial-gradient(circle at 92% 8%,rgba(138,191,255,.08),transparent 30rem),var(--bg);
+      font:14px/1.55 Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
     }
-    button, input, select { font: inherit; }
-    button { cursor: pointer; }
-    .shell { max-width: 1460px; margin: 0 auto; padding: 28px; }
-    header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 28px; }
-    .eyebrow { color: var(--mint); text-transform: uppercase; letter-spacing: .16em; font-size: 11px; font-weight: 800; }
-    h1 { font-size: clamp(30px, 5vw, 58px); line-height: .98; letter-spacing: -.055em; margin: 8px 0 12px; max-width: 850px; }
-    .sub { color: var(--muted); max-width: 760px; font-size: 16px; }
-    .live-pill { border: 1px solid var(--line); background: rgba(13,25,22,.78); border-radius: 999px; padding: 10px 14px; white-space: nowrap; }
-    .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--mint); margin-right: 8px; box-shadow: 0 0 0 5px rgba(124,242,181,.08); }
-    .dot.off { background: var(--red); }
-    .grid { display: grid; gap: 16px; }
-    .overview { grid-template-columns: 1.2fr .8fr; margin-bottom: 16px; }
-    .card { background: linear-gradient(145deg, rgba(16,31,27,.96), rgba(11,22,19,.96)); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px; box-shadow: 0 18px 50px rgba(0,0,0,.17); }
-    .card h2, .card h3 { margin: 0; letter-spacing: -.025em; }
-    .card h2 { font-size: 22px; }
-    .card h3 { font-size: 17px; }
-    .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; font-weight: 750; }
-    .model-id { font: 700 19px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--mint); margin: 6px 0 18px; }
-    .task-example { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    .code { background: #07100d; border: 1px solid #1b3029; border-radius: 12px; padding: 14px; color: #cbe2d8; font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-word; min-height: 104px; }
-    .facts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; height: 100%; }
-    .fact { background: rgba(7,16,13,.65); border: 1px solid var(--line); border-radius: 14px; padding: 14px; }
-    .fact strong { display: block; font-size: 24px; letter-spacing: -.04em; margin-top: 5px; }
-    .fact span { color: var(--muted); font-size: 12px; }
-    .section-head { display: flex; justify-content: space-between; align-items: end; gap: 16px; margin: 32px 0 14px; }
-    .section-head h2 { margin: 0; font-size: 25px; letter-spacing: -.035em; }
-    .section-head p { color: var(--muted); margin: 0; }
-    .pipeline { grid-template-columns: repeat(3, 1fr); }
-    /* Playground ------------------------------------------------------- */
-    .play { grid-template-columns: 340px 1fr; align-items: start; }
-    .model-pick { display: grid; gap: 10px; }
-    .model-pick select, .model-pick textarea { width: 100%; background: #07100d; color: var(--ink); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
-    .model-pick textarea { min-height: 96px; resize: vertical; font: 13px/1.5 inherit; }
-    .serving-pill { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 999px; padding: 7px 12px; font-size: 12px; color: var(--muted); }
-    .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 2px; }
-    .chip { border: 1px solid var(--line); background: rgba(7,16,13,.6); color: var(--muted); border-radius: 999px; padding: 5px 10px; font-size: 12px; }
-    .chip:hover { color: var(--ink); border-color: var(--mint-2); }
-    .io { display: grid; gap: 10px; }
-    .verdict { display: inline-flex; align-items: center; gap: 7px; border-radius: 999px; padding: 5px 11px; font-size: 12px; font-weight: 750; border: 1px solid var(--line); }
-    .verdict.ok { color: var(--mint); border-color: rgba(124,242,181,.45); }
-    .verdict.bad { color: var(--red); border-color: rgba(255,123,120,.45); }
-    .latency { display: flex; gap: 18px; flex-wrap: wrap; color: var(--muted); font-size: 12px; }
-    .latency b { color: var(--ink); font: 700 15px/1 ui-monospace, Menlo, monospace; display: block; margin-top: 3px; }
-    .caveat { border-left: 2px solid var(--amber); padding: 8px 0 8px 12px; color: var(--muted); font-size: 12.5px; margin-top: 12px; }
-    .caveat b { color: var(--amber); }
-    .streaming::after { content: '▋'; color: var(--mint); animation: blink 1s step-end infinite; }
-    @keyframes blink { 50% { opacity: 0; } }
-    .latency b.hero { color: var(--mint); font-size: 18px; }
-
-    .step { position: relative; overflow: hidden; min-height: 336px; display: flex; flex-direction: column; }
-    .step-no { color: var(--mint); font: 800 12px ui-monospace, monospace; margin-bottom: 14px; }
-    .step p { color: var(--muted); }
-    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
-    .form-row.one { grid-template-columns: 1fr; }
-    label { color: var(--muted); font-size: 12px; display: block; }
-    input, select {
-      width: 100%; margin-top: 5px; padding: 10px 11px; color: var(--ink); background: #07100d;
-      border: 1px solid var(--line); border-radius: 10px; outline: none;
+    button,input,select,textarea { font:inherit; }
+    button { cursor:pointer; }
+    button:disabled { cursor:not-allowed; opacity:.38; }
+    .shell { max-width:1240px; margin:auto; padding:28px; }
+    header { display:flex; justify-content:space-between; align-items:flex-start; gap:24px; margin-bottom:24px; }
+    .eyebrow { color:var(--mint); font-size:11px; font-weight:850; letter-spacing:.15em; text-transform:uppercase; }
+    h1 { font-size:clamp(34px,5vw,60px); line-height:1; letter-spacing:-.055em; margin:8px 0 12px; }
+    h2,h3,p { margin-top:0; }
+    h2 { letter-spacing:-.035em; }
+    h3 { letter-spacing:-.02em; }
+    .lead { color:var(--muted); font-size:16px; max-width:730px; }
+    .live { white-space:nowrap; border:1px solid var(--line); background:rgba(16,28,24,.8); border-radius:999px; padding:9px 13px; }
+    .dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--mint); margin-right:8px; }
+    .dot.off { background:var(--red); }
+    .card { background:linear-gradient(145deg,rgba(18,34,29,.98),rgba(11,22,18,.98)); border:1px solid var(--line); border-radius:var(--radius); padding:20px; box-shadow:0 18px 48px rgba(0,0,0,.16); }
+    .flow { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:24px; }
+    .flow-step { border:1px solid var(--line); border-radius:14px; padding:13px; color:var(--muted); background:rgba(7,16,13,.5); }
+    .flow-step b { display:block; color:var(--ink); margin-top:3px; }
+    .flow-step.done { border-color:rgba(120,239,177,.45); }
+    .flow-step.done .num { color:var(--mint); }
+    .flow-step.now { border-color:var(--blue); box-shadow:0 0 0 2px rgba(138,191,255,.09); }
+    .num { font:800 11px ui-monospace,monospace; color:var(--muted); }
+    .section { margin-top:28px; }
+    .section-head { display:flex; justify-content:space-between; align-items:end; gap:20px; margin:0 0 12px; }
+    .section-head h2 { margin:3px 0 0; font-size:25px; }
+    .section-head p { margin:0; color:var(--muted); }
+    .setup { display:grid; grid-template-columns:1.15fr .85fr; gap:16px; }
+    .form-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    label { display:block; color:var(--muted); font-size:12px; font-weight:700; }
+    input,select,textarea {
+      width:100%; margin-top:5px; padding:11px 12px; color:var(--ink); background:#07100d;
+      border:1px solid var(--line); border-radius:11px; outline:none;
     }
-    input:focus, select:focus { border-color: var(--mint-2); box-shadow: 0 0 0 3px rgba(43,200,128,.1); }
-    .btn { border: 0; border-radius: 11px; padding: 11px 14px; font-weight: 800; background: var(--mint); color: #06100c; transition: transform .12s ease, opacity .12s ease; }
-    .btn:hover { transform: translateY(-1px); }
-    .btn:disabled { opacity: .35; cursor: not-allowed; transform: none; }
-    .btn.secondary { background: transparent; color: var(--ink); border: 1px solid var(--line); }
-    .btn.danger { background: transparent; color: var(--red); border: 1px solid rgba(255,123,120,.35); }
-    .step .btn { width: 100%; margin-top: auto; }
-    .status-line { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; margin: 12px 0; min-height: 20px; }
-    .status-line b { color: var(--ink); }
-    .metrics { grid-template-columns: repeat(4, 1fr); }
-    .charts { grid-template-columns: 1.05fr .95fr; margin-top: 16px; }
-    .chart-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
-    .legend { display: flex; gap: 14px; }
-    .legend span { color: var(--muted); font-size: 12px; font-weight: 750; letter-spacing: .02em; }
-    .legend i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; margin-right: 6px; }
-    svg.chart { width: 100%; display: block; overflow: visible; }
-    svg.chart text { font: 11px/1 Inter, ui-sans-serif, system-ui, sans-serif; }
-    .ax { fill: var(--muted); }
-    .val { fill: var(--ink); font-weight: 750; }
-    .gridline { stroke: var(--line); stroke-width: 1; }
-    .hit { fill: transparent; cursor: crosshair; }
-    .chart-tip { position: fixed; z-index: 60; pointer-events: none; display: none; background: #07100d; border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; box-shadow: 0 14px 34px rgba(0,0,0,.55); font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink); white-space: nowrap; }
-    .chart-tip u { display: block; text-decoration: none; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .07em; margin-bottom: 3px; }
-    .tableview { margin-top: 14px; }
-    .tableview summary { cursor: pointer; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; font-weight: 800; }
-    table.dv { width: 100%; border-collapse: collapse; margin-top: 10px; font: 12px/1.65 ui-monospace, SFMono-Regular, Menlo, monospace; }
-    table.dv th, table.dv td { text-align: right; padding: 5px 8px; border-bottom: 1px solid var(--line); }
-    table.dv th { color: var(--muted); font-weight: 750; }
-    table.dv td:first-child, table.dv th:first-child { text-align: left; color: var(--muted); }
-    .empty-note { color: var(--muted); border: 1px dashed var(--line); border-radius: 12px; padding: 22px 16px; text-align: center; font-size: 13px; line-height: 1.6; }
-    .caveat { color: var(--amber); font-size: 12px; line-height: 1.55; margin-top: 12px; border-left: 2px solid var(--amber); padding-left: 10px; }
-    .metric { padding: 18px; }
-    .metric .value { font-size: 32px; font-weight: 850; letter-spacing: -.05em; margin: 6px 0 2px; }
-    .delta { color: var(--mint); font-size: 12px; }
-    .muted { color: var(--muted); }
-    .actions { grid-template-columns: repeat(4, 1fr); }
-    .action { min-height: 300px; display: flex; flex-direction: column; }
-    .action-icon { width: 36px; height: 36px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 11px; margin-bottom: 16px; color: var(--mint); font-weight: 900; }
-    .action p { color: var(--muted); min-height: 62px; }
-    .action .btn { margin-top: auto; width: 100%; }
-    .validation { margin-top: 12px; padding: 9px 10px; border-radius: 9px; background: rgba(124,242,181,.06); color: var(--mint); font-size: 12px; }
-    .run-panel { margin-top: 18px; }
-    .run-top { display: flex; justify-content: space-between; gap: 16px; align-items: center; }
-    .progress { height: 7px; background: #07100d; border-radius: 999px; overflow: hidden; margin: 14px 0; }
-    .progress > div { height: 100%; background: linear-gradient(90deg, var(--mint-2), var(--mint)); width: 0; transition: width .35s ease; }
-    .log { height: 260px; overflow: auto; background: #050b09; border: 1px solid #172820; border-radius: 12px; padding: 13px; color: #a9c4b8; font: 11px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; }
-    .samples { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 16px; }
-    .sample { border: 1px solid var(--line); border-radius: 13px; padding: 14px; background: rgba(7,16,13,.55); }
-    .sample .in { color: var(--muted); margin-bottom: 8px; }
-    .sample .out { font: 12px/1.5 ui-monospace, monospace; word-break: break-word; }
-    .ok { color: var(--mint); }
-    .warn { color: var(--amber); }
-    .bad { color: var(--red); }
-    .toast { position: fixed; right: 22px; bottom: 22px; max-width: 390px; background: #13231e; border: 1px solid var(--line); border-radius: 12px; padding: 13px 15px; box-shadow: 0 20px 50px rgba(0,0,0,.35); display: none; z-index: 5; }
-    .footnote { color: var(--muted); font-size: 12px; margin-top: 10px; }
-    @media (max-width: 1100px) { .pipeline, .actions { grid-template-columns: 1fr 1fr; } .overview { grid-template-columns: 1fr; } }
-    @media (max-width: 720px) { .shell { padding: 18px; } header { display: block; } .live-pill { display: inline-block; margin-top: 16px; } .pipeline, .actions, .metrics, .samples, .task-example, .charts { grid-template-columns: 1fr; } .facts { grid-template-columns: 1fr 1fr; } }
+    input:focus,select:focus,textarea:focus { border-color:var(--green); box-shadow:0 0 0 3px rgba(43,200,128,.1); }
+    .span2 { grid-column:1/-1; }
+    .btn { border:0; border-radius:11px; padding:11px 15px; font-weight:850; background:var(--mint); color:#06100c; }
+    .btn.secondary { color:var(--ink); background:transparent; border:1px solid var(--line); }
+    .btn.blue { background:var(--blue); }
+    .btn.danger { color:var(--red); background:transparent; border:1px solid rgba(255,129,125,.4); }
+    .btnrow { display:flex; gap:9px; flex-wrap:wrap; align-items:center; margin-top:14px; }
+    .hint { color:var(--muted); font-size:12px; }
+    .callout { padding:13px 14px; border-radius:12px; border:1px solid var(--line); background:rgba(7,16,13,.62); color:var(--muted); }
+    .callout strong { color:var(--ink); display:block; margin-bottom:3px; }
+    .callout.ok { border-color:rgba(120,239,177,.38); }
+    .callout.warn { border-color:rgba(255,200,107,.43); }
+    .callout.bad { border-color:rgba(255,129,125,.43); }
+    .metrics { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-top:14px; }
+    .metric { border:1px solid var(--line); background:rgba(7,16,13,.58); border-radius:13px; padding:14px; min-height:92px; }
+    .metric span { color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.06em; }
+    .metric b { display:block; font-size:25px; letter-spacing:-.04em; margin-top:7px; }
+    .metric small { color:var(--muted); }
+    .chat-layout { display:grid; grid-template-columns:310px 1fr; gap:16px; align-items:stretch; }
+    .model-control { display:flex; flex-direction:column; gap:12px; }
+    .model-state { margin-top:auto; }
+    .chat { min-height:500px; display:flex; flex-direction:column; padding:0; overflow:hidden; }
+    .chat-head { display:flex; justify-content:space-between; gap:16px; align-items:center; padding:16px 18px; border-bottom:1px solid var(--line); }
+    .messages { flex:1; padding:20px; display:flex; flex-direction:column; gap:14px; max-height:520px; overflow:auto; }
+    .message { max-width:83%; padding:12px 14px; border-radius:15px; white-space:pre-wrap; word-break:break-word; }
+    .message.user { align-self:flex-end; background:#244b3d; }
+    .message.assistant { align-self:flex-start; background:#07100d; border:1px solid var(--line); }
+    .message.system { align-self:center; max-width:95%; color:var(--muted); background:transparent; text-align:center; }
+    .message.error { border-color:rgba(255,129,125,.5); color:#ffd2d0; }
+    .typing::after { content:"▋"; color:var(--mint); animation:blink 1s step-end infinite; }
+    @keyframes blink { 50% { opacity:0; } }
+    .timing { display:flex; flex-wrap:wrap; gap:6px; margin-top:9px; }
+    .pill { border:1px solid var(--line); border-radius:999px; padding:4px 8px; color:var(--muted); font-size:11px; }
+    .composer { display:grid; grid-template-columns:1fr auto; gap:10px; padding:15px; border-top:1px solid var(--line); background:rgba(7,16,13,.52); }
+    .composer textarea { min-height:58px; max-height:160px; resize:vertical; margin:0; }
+    .agent-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+    .agent-card { display:flex; flex-direction:column; min-height:250px; }
+    .agent-card p { color:var(--muted); }
+    .agent-card .btn { margin-top:auto; }
+    .compare { overflow:auto; }
+    table { width:100%; border-collapse:collapse; min-width:680px; }
+    th,td { padding:13px 12px; text-align:left; border-bottom:1px solid var(--line); }
+    th { color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.07em; }
+    td strong { color:var(--mint); }
+    .delta.good { color:var(--mint); }
+    .delta.wait { color:var(--muted); }
+    details.card { padding:0; overflow:hidden; }
+    details summary { cursor:pointer; padding:18px 20px; font-weight:850; list-style:none; }
+    details summary::-webkit-details-marker { display:none; }
+    details[open] summary { border-bottom:1px solid var(--line); }
+    .advanced { padding:20px; display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+    .tool { border:1px solid var(--line); border-radius:14px; padding:16px; background:rgba(7,16,13,.42); }
+    .job { margin-top:16px; }
+    .job-top { display:flex; justify-content:space-between; align-items:center; gap:12px; }
+    .progress { height:7px; background:#06100c; border-radius:999px; overflow:hidden; margin:13px 0; }
+    .progress div { height:100%; width:0; background:linear-gradient(90deg,var(--green),var(--mint)); transition:width .25s; }
+    pre { max-height:260px; overflow:auto; white-space:pre-wrap; background:#050b09; border:1px solid #1b3029; border-radius:11px; padding:12px; color:#aac6b9; font:11px/1.5 ui-monospace,monospace; }
+    .toast { position:fixed; right:20px; bottom:20px; max-width:390px; padding:13px 15px; border-radius:12px; background:#162720; border:1px solid var(--line); box-shadow:0 18px 44px rgba(0,0,0,.36); display:none; z-index:10; }
+    .toast.bad { color:#ffd1cf; border-color:rgba(255,129,125,.45); }
+    @media (max-width:900px) {
+      .flow,.metrics { grid-template-columns:1fr 1fr; }
+      .setup,.chat-layout,.agent-grid,.advanced { grid-template-columns:1fr; }
+    }
+    @media (max-width:600px) {
+      .shell { padding:18px; } header { display:block; } .live { display:inline-block; margin-top:14px; }
+      .flow,.metrics,.form-grid { grid-template-columns:1fr; } .span2 { grid-column:auto; }
+      .section-head { display:block; } .section-head p { margin-top:5px; }
+      .composer { grid-template-columns:1fr; } .message { max-width:95%; }
+    }
   </style>
 </head>
 <body>
   <main class="shell">
     <header>
       <div>
-        <div class="eyebrow">GPUShare / Research Console</div>
-        <h1>가설이 아니라,<br>실행으로 확인합니다.</h1>
-        <div class="sub">Qwen2.5-0.5B에 구조화 출력을 학습시키고, RunPod에서 측정한 뒤, 에이전트의 네 가지 결정을 동일한 held-out 평가로 자동 검증합니다.</div>
+        <div class="eyebrow">GPUShare / Guided experiment</div>
+        <h1>모델을 고르고,<br>직접 비교합니다.</h1>
+        <p class="lead">먼저 일반 설정으로 학습하고 추론합니다. 그다음 같은 모델과 데이터에 에이전트를 적용해 시간과 품질이 실제로 달라졌는지 확인합니다.</p>
       </div>
-      <div class="live-pill"><span id="healthDot" class="dot"></span><span id="healthText">연결 확인 중</span></div>
+      <div class="live"><span id="healthDot" class="dot off"></span><span id="healthText">연결 확인 중</span></div>
     </header>
 
-    <section class="grid overview">
+    <nav class="flow" aria-label="실험 순서">
+      <div id="flow1" class="flow-step now"><span class="num">01</span><b>일반 학습</b><span>모델과 GPU 선택</span></div>
+      <div id="flow2" class="flow-step"><span class="num">02</span><b>직접 추론</b><span>입력하고 시간 측정</span></div>
+      <div id="flow3" class="flow-step"><span class="num">03</span><b>에이전트 실행</b><span>설정 탐색 및 검증</span></div>
+      <div id="flow4" class="flow-step"><span class="num">04</span><b>비교</b><span>속도와 품질 판정</span></div>
+    </nav>
+
+    <section class="section" id="baseline">
+      <div class="section-head">
+        <div><div class="eyebrow">Step 1 · Agent off</div><h2>일반 설정으로 먼저 학습</h2></div>
+        <p>이 결과가 이후 비교의 기준선입니다.</p>
+      </div>
+      <div class="setup">
+        <article class="card">
+          <div class="form-grid">
+            <label class="span2">훈련할 모델
+              <select id="trainModel"><option value="Qwen/Qwen2.5-0.5B">Qwen2.5-0.5B · JSON 추출</option></select>
+            </label>
+            <label class="span2">학습할 GPU Pod<select id="trainPod"><option value="">Pod 불러오는 중…</option></select></label>
+            <label>학습 Steps<input id="trainSteps" type="number" min="10" max="10000" value="500"></label>
+            <label>Micro batch<input id="microBatch" type="number" min="1" max="128" value="16"></label>
+          </div>
+          <div class="btnrow">
+            <button id="trainBtn" class="btn" data-testid="run-training">일반 학습 시작</button>
+            <span class="hint">에이전트 OFF · bf16 / SDPA · 동일 held-out 자동 평가</span>
+          </div>
+        </article>
+        <article class="card">
+          <div class="eyebrow">Baseline result</div>
+          <h3 id="baselineTitle">아직 기준 실행이 없습니다</h3>
+          <div id="baselineNotice" class="callout">일반 학습을 한 번 완료하면 학습 시간과 품질이 여기에 고정됩니다.</div>
+          <div class="metrics">
+            <div class="metric"><span>전체 파이프라인</span><b id="baseTotal">—</b><small>평가 포함</small></div>
+            <div class="metric"><span>Step time</span><b id="baseStep">—</b><small>median</small></div>
+            <div class="metric"><span>Exact match</span><b id="baseExact">—</b><small>held-out</small></div>
+            <div class="metric"><span>Peak VRAM</span><b id="baseVram">—</b><small>실측</small></div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="section" id="playground">
+      <div class="section-head">
+        <div><div class="eyebrow">Step 2 · Inference</div><h2>학습한 모델에 직접 입력</h2></div>
+        <p>모델 준비가 끝나야 전송 버튼이 열립니다.</p>
+      </div>
+      <div class="chat-layout">
+        <aside class="card model-control">
+          <label>추론할 모델<select id="serveModel"><option value="">모델 불러오는 중…</option></select></label>
+          <label>모델이 저장된 Pod<select id="servePod"><option value="">Pod 불러오는 중…</option></select></label>
+          <button id="prepareBtn" class="btn blue">선택한 모델 추론 준비</button>
+          <div id="serveState" class="callout model-state warn"><strong>추론 준비 필요</strong>모델을 선택하고 위 버튼을 누르세요.</div>
+          <button id="stopBtn" class="btn secondary">모델 내리기</button>
+        </aside>
+        <article class="card chat">
+          <div class="chat-head">
+            <div><strong>직접 추론</strong><div class="hint">첫 토큰 시간과 전체 생성 시간을 함께 기록합니다.</div></div>
+            <span id="chatModel" class="pill">모델 준비 안 됨</span>
+          </div>
+          <div id="messages" class="messages" aria-live="polite">
+            <div class="message system">추론 서버가 준비되면 아래 입력창이 활성화됩니다. “모델이 load되지 않았다”는 오류 대신 준비 단계를 먼저 안내합니다.</div>
+          </div>
+          <div class="composer">
+            <textarea id="chatInput" disabled placeholder="예: Sarah Chen, 34, joined Anthropic in 2023 as a research engineer."></textarea>
+            <button id="sendBtn" class="btn" disabled>전송</button>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="section" id="agents">
+      <div class="section-head">
+        <div><div class="eyebrow">Step 3 · Agent on</div><h2>같은 기준에 에이전트 적용</h2></div>
+        <p>기준 실행이 있어야 버튼이 활성화됩니다.</p>
+      </div>
+      <div class="agent-grid">
+        <article class="card agent-card">
+          <div class="eyebrow">Training agent</div>
+          <h3>학습 설정 최적화</h3>
+          <p>동일한 tokens/step을 유지한 채 batch×accum 후보를 실측하고, 가장 빠른 설정으로 기준과 같은 step 수를 다시 학습합니다. 품질도 같은 held-out으로 검증합니다.</p>
+          <div id="trainAgentState" class="callout">기준 학습을 기다리는 중입니다.</div>
+          <button id="trainAgentBtn" class="btn" data-testid="optimize-training">학습 에이전트 실행</button>
+        </article>
+        <article class="card agent-card">
+          <div class="eyebrow">Inference agent</div>
+          <h3>추론 처리량 최적화</h3>
+          <p>같은 체크포인트와 64개 입력을 순차 처리와 batch 처리로 각각 측정합니다. 생성 토큰 수와 품질이 같을 때만 속도 향상으로 인정합니다.</p>
+          <div id="inferAgentState" class="callout">학습된 체크포인트를 기다리는 중입니다.</div>
+          <button id="inferAgentBtn" class="btn" data-testid="optimize-inference">추론 에이전트 실행</button>
+        </article>
+      </div>
+    </section>
+
+    <section class="section" id="comparison">
+      <div class="section-head">
+        <div><div class="eyebrow">Step 4 · Evidence</div><h2>에이전트 사용 전후 비교</h2></div>
+        <p>측정되지 않은 값은 추정하지 않고 비워둡니다.</p>
+      </div>
+      <article class="card compare">
+        <table>
+          <thead><tr><th>지표</th><th>에이전트 없이</th><th>에이전트 사용</th><th>판정</th></tr></thead>
+          <tbody>
+            <tr><td>학습 step time</td><td id="cmpTrainBase">—</td><td id="cmpTrainAgent">—</td><td id="cmpTrainDelta" class="delta wait">대기 중</td></tr>
+            <tr><td>학습 exact match</td><td id="cmpQualityBase">—</td><td id="cmpQualityAgent">—</td><td id="cmpQualityDelta" class="delta wait">대기 중</td></tr>
+            <tr><td>64개 추론 시간</td><td id="cmpInferBase">—</td><td id="cmpInferAgent">—</td><td id="cmpInferDelta" class="delta wait">대기 중</td></tr>
+            <tr><td>추론 처리량</td><td id="cmpTpsBase">—</td><td id="cmpTpsAgent">—</td><td id="cmpTpsDelta" class="delta wait">대기 중</td></tr>
+          </tbody>
+        </table>
+        <div id="compareGate" class="callout" style="margin-top:14px"><strong>비교 준비 중</strong>일반 학습 후 두 에이전트를 실행하면 같은 조건의 결과가 채워집니다.</div>
+      </article>
+    </section>
+
+    <section class="section" id="quality">
+      <div class="head">
+        <div><div class="eyebrow">Step 5 · Quality</div><h2>모델이 실제로 무엇을 틀리는가</h2></div>
+        <p class="hint">속도만이 아니라 필드 단위로 봅니다.</p>
+      </div>
       <article class="card">
-        <div class="label">Research workload</div>
-        <div id="modelId" class="model-id">Qwen/Qwen2.5-0.5B</div>
-        <div class="task-example">
-          <div><div class="label">입력</div><div id="exampleIn" class="code">불러오는 중…</div></div>
-          <div><div class="label">목표 JSON</div><div id="exampleOut" class="code">불러오는 중…</div></div>
+        <div class="qtiles">
+          <div class="qtile"><span>Hallucination / after</span><b id="qHalluc">—</b><small id="qHallucNote">—</small></div>
+          <div class="qtile"><span>Omission / after</span><b id="qOmit">—</b><small>있는 사실을 빼먹음</small></div>
+          <div class="qtile"><span>Held-out loss</span><b id="qLoss">—</b><small id="qLossDelta">—</small></div>
+          <div class="qtile"><span>학습 설정</span><b id="qCfg" style="font-size:18px">—</b><small id="qCfg2">—</small></div>
         </div>
-      </article>
-      <article class="card">
-        <div class="label">Current evidence</div>
-        <div class="facts">
-          <div class="fact"><span>Train rows</span><strong id="trainRows">—</strong></div>
-          <div class="fact"><span>Held-out</span><strong id="heldRows">—</strong></div>
-          <div class="fact"><span>GPU</span><strong id="gpuName" style="font-size:16px">—</strong></div>
-          <div class="fact"><span>Step time</span><strong id="stepTime">—</strong></div>
-          <div class="fact"><span>Peak VRAM</span><strong id="peakVram">—</strong></div>
-          <div class="fact"><span>Tests</span><strong>60</strong></div>
-        </div>
-      </article>
-    </section>
-
-    <div class="section-head">
-      <div><div class="eyebrow">End-to-end</div><h2>연구 파이프라인</h2></div>
-      <p>각 단계는 실제 산출물을 다음 단계에 넘깁니다.</p>
-    </div>
-    <section class="grid pipeline">
-      <article class="card step">
-        <div class="step-no">01 / DATA</div><h3>데이터 생성</h3>
-        <p>Baseten의 호스팅 모델로 다양한 문장/레코드 쌍을 만들고 중복·불충실 샘플을 제거합니다.</p>
-        <div class="form-row">
-          <label>전체 목표<input id="dataTotal" type="number" min="100" max="10000" value="2000"></label>
-          <label>Held-out<input id="dataHeld" type="number" min="20" max="2000" value="200"></label>
-        </div>
-        <div class="status-line"><span class="dot"></span><span id="dataStatus">현재 데이터 사용 가능</span></div>
-        <button id="generateBtn" class="btn" data-testid="generate-data">데이터 다시 생성</button>
-      </article>
-
-      <article class="card step">
-        <div class="step-no">02 / TRAIN</div><h3>RunPod에서 학습</h3>
-        <p>선택한 GPU에 코드와 데이터를 동기화하고, baseline 평가부터 fine-tune까지 실제로 실행합니다.</p>
-        <div class="form-row one"><label>GPU Pod<select id="trainPod" data-testid="train-pod"><option value="">Pod 불러오는 중…</option></select></label></div>
-        <div class="form-row">
-          <label>Steps<input id="trainSteps" type="number" min="10" max="10000" value="500"></label>
-          <label>Micro batch<input id="microBatch" type="number" min="1" max="128" value="16"></label>
-        </div>
-        <div class="status-line"><span class="dot"></span><span>baseline과 after를 같은 held-out으로 평가</span></div>
-        <button id="trainBtn" class="btn" data-testid="run-training">학습 + 자동 평가 실행</button>
-      </article>
-
-      <article class="card step">
-        <div class="step-no">03 / VERIFY</div><h3>결과 확인</h3>
-        <p>유효 JSON 비율만 보지 않고 모든 필드가 맞는 exact match와 샘플 실패까지 함께 확인합니다.</p>
-        <div class="form-row">
-          <div class="fact"><span>JSON parse</span><strong id="parseCompact">—</strong></div>
-          <div class="fact"><span>Exact match</span><strong id="exactCompact">—</strong></div>
-        </div>
-        <div id="gateCompact" class="validation">아직 실행된 평가가 없습니다.</div>
-        <button id="resultsBtn" class="btn secondary">아래 결과로 이동</button>
-      </article>
-    </section>
-
-    <div class="section-head" id="results">
-      <div><div class="eyebrow">Measured outcome</div><h2>학습 전후 결과</h2></div>
-      <p id="sampleCount">고정 held-out 평가</p>
-    </div>
-    <section class="grid metrics">
-      <article class="card metric"><div class="label">JSON parse / before</div><div id="parseBefore" class="value">—</div><div class="muted">유효 스키마 출력</div></article>
-      <article class="card metric"><div class="label">JSON parse / after</div><div id="parseAfter" class="value">—</div><div id="parseDelta" class="delta">—</div></article>
-      <article class="card metric"><div class="label">Exact match / before</div><div id="exactBefore" class="value">—</div><div class="muted">5개 필드 모두 정확</div></article>
-      <article class="card metric"><div class="label">Exact match / after</div><div id="exactAfter" class="value">—</div><div id="exactDelta" class="delta">—</div></article>
-    </section>
-    <section class="grid metrics" style="margin-top:16px">
-      <article class="card metric"><div class="label">Hallucination / after</div><div id="halluc" class="value">—</div><div id="hallucNote" class="muted">—</div></article>
-      <article class="card metric"><div class="label">Omission / after</div><div id="omit" class="value">—</div><div class="muted">있는 사실을 빼먹음</div></article>
-      <article class="card metric"><div class="label">Held-out loss</div><div id="lossAfter" class="value">—</div><div id="lossDelta" class="delta">—</div></article>
-      <article class="card metric"><div class="label">학습 설정</div><div id="trainCfg" class="value" style="font-size:19px">—</div><div id="trainCfg2" class="muted">—</div></article>
-    </section>
-
-    <section class="grid charts">
-      <article class="card">
-        <div class="chart-head">
-          <div><div class="label">필드별 정확도</div></div>
-          <div class="legend">
-            <span><i style="background:var(--s-before)"></i>before</span>
-            <span><i style="background:var(--s-after)"></i>after</span>
+        <div class="charts" style="margin-top:16px">
+          <div>
+            <div class="chart-head">
+              <div class="eyebrow">필드별 정확도</div>
+              <div class="legend">
+                <span><i style="background:var(--s-before)"></i>before</span>
+                <span><i style="background:var(--s-after)"></i>after</span>
+              </div>
+            </div>
+            <div id="fieldChart"></div>
+            <details class="tableview"><summary>표로 보기</summary><div id="fieldTable"></div></details>
+          </div>
+          <div>
+            <div class="chart-head">
+              <div class="eyebrow">학습 loss</div>
+              <div class="legend"><span><i style="background:var(--s-after)"></i>train loss</span></div>
+            </div>
+            <div id="lossChart"></div>
+            <details class="tableview" id="lossTableWrap" style="display:none"><summary>표로 보기</summary><div id="lossTable"></div></details>
           </div>
         </div>
-        <div id="fieldChart"></div>
-        <details class="tableview"><summary>표로 보기</summary><div id="fieldTable"></div></details>
       </article>
+    </section>
 
-      <article class="card">
-        <div class="chart-head">
-          <div><div class="label">학습 loss</div></div>
-          <div class="legend"><span><i style="background:var(--s-after)"></i>train loss</span></div>
+    <section class="section" id="longctx">
+      <div class="head">
+        <div><div class="eyebrow">Step 6 · Long context</div><h2>같은 문서를 매번 다시 읽지 않기</h2></div>
+        <p class="hint">prefill을 없애면 남는 것은 decode뿐입니다.</p>
+      </div>
+      <div class="charts">
+        <article class="card">
+          <div class="eyebrow">정적 정책 문서</div>
+          <p class="hint" style="margin:8px 0 12px">프롬프트의 <b>앞</b>에 놓입니다. 어텐션이 causal이라 앞이 고정일 때만 재사용됩니다.</p>
+          <button id="loadPolicy" class="btn blue">정책 로드 · 캐시 구축</button>
+          <div id="policyStat" class="callout" style="margin-top:10px">아직 로드 안 됨</div>
+          <button id="clearPolicy" class="btn secondary" style="margin-top:8px">캐시 해제</button>
+        </article>
+        <article class="card">
+          <div class="eyebrow">이벤트 (동적 · 매 요청 변경)</div>
+          <textarea id="event" style="width:100%;min-height:64px;margin:10px 0">An employee uploaded credentials to an unknown website.</textarea>
+          <button id="runAb" class="btn">A/B 실행 — 캐시 끔 → 캐시 켬</button>
+          <div id="abDiag" style="margin-top:14px"></div>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <details class="card">
+        <summary>고급 작업 · 데이터 생성 / Migration</summary>
+        <div class="advanced">
+          <div class="tool">
+            <div class="eyebrow">Data</div><h3>학습 데이터 다시 생성</h3>
+            <div class="form-grid">
+              <label>전체 목표<input id="dataTotal" type="number" min="100" max="10000" value="2000"></label>
+              <label>Held-out<input id="dataHeld" type="number" min="20" max="2000" value="200"></label>
+            </div>
+            <div class="btnrow"><button id="dataBtn" class="btn secondary">데이터 생성</button><span id="dataState" class="hint">—</span></div>
+          </div>
+          <div class="tool">
+            <div class="eyebrow">Migration</div><h3>체크포인트 이동 및 검증</h3>
+            <label>Source Pod<select id="migrationSource"></select></label>
+            <label style="margin-top:9px">Target Pod<select id="migrationTarget"></select></label>
+            <div class="btnrow">
+              <button id="migrateBtn" class="btn secondary">Migration 실행</button>
+              <span class="hint">동일 모델·동일 held-out 자동 검증</span>
+            </div>
+          </div>
         </div>
-        <div id="lossChart"></div>
-        <details class="tableview" id="lossTableWrap" style="display:none"><summary>표로 보기</summary><div id="lossTable"></div></details>
-      </article>
+      </details>
     </section>
 
-    <section id="samples" class="samples"></section>
-
-
-    <div class="section-head">
-      <div><div class="eyebrow">Try it yourself</div><h2>모델에 직접 물어보기</h2></div>
-      <p>학습 전 모델과 학습 후 모델에 같은 문장을 넣어 보세요.</p>
-    </div>
-    <section class="grid play">
-      <div class="card model-pick">
-        <div class="label">Model</div>
-        <select id="modelSelect"></select>
-        <div class="label" style="margin-top:6px">Pod</div>
-        <select id="servePod"></select>
-        <button class="primary" id="loadModel">이 모델 GPU에 올리기</button>
-        <div class="serving-pill" id="servingPill"><span class="dot off"></span>모델 없음</div>
-        <button id="stopModel" style="background:none;border:1px solid var(--line);color:var(--muted);border-radius:12px;padding:8px">내리기</button>
-      </div>
-      <div class="card io">
-        <div class="label">Input sentence</div>
-        <div class="chips" id="exampleChips"></div>
-        <textarea id="sentence" placeholder="Sarah Chen, 34, joined Anthropic in 2023 as a research engineer."></textarea>
-        <button class="primary" id="runGenerate">추출 실행</button>
-        <div class="label" style="margin-top:4px">Raw output</div>
-        <div class="code" id="genRaw">—</div>
-        <div class="label">Parsed</div>
-        <div class="code" id="genParsed">—</div>
-        <div id="genVerdict"></div>
-        <div class="latency" id="genLatency"></div>
-        <div class="caveat">
-          <b>이 지연 시간은 추론 최적화의 증거가 아닙니다.</b>
-          여기는 동시 요청 1건입니다. 배치 최적화의 이득은 동시성에서 나오므로
-          batch 1에서는 배치할 것이 없습니다. 처리량은 아래 &ldquo;추론 최적화&rdquo;
-          액션이 동시 64건으로 측정합니다.
-        </div>
-      </div>
-    </section>
-
-    <div class="section-head">
-      <div><div class="eyebrow">Long context / prefix cache</div><h2>긴 문맥 추론 최적화</h2></div>
-      <p>같은 정책 문서를 매 요청 다시 읽지 않게 합니다.</p>
-    </div>
-    <section class="grid play">
-      <div class="card model-pick">
-        <div class="label">정적 정책 문서</div>
-        <p class="muted" style="font-size:12px;margin:8px 0 12px">
-          프롬프트의 <b>앞</b>에 놓입니다. 어텐션이 causal이라 앞이 고정일 때만 재사용됩니다.
-        </p>
-        <button class="primary" id="loadPolicy">정책 로드 · 캐시 구축</button>
-        <div id="policyStat" class="validation" style="margin-top:10px">아직 로드 안 됨</div>
-        <button id="clearPolicy" style="background:none;border:1px solid var(--line);color:var(--muted);border-radius:12px;padding:8px;margin-top:8px;width:100%">캐시 해제</button>
-      </div>
-      <div class="card io">
-        <div class="label">이벤트 (동적 · 매 요청 변경)</div>
-        <textarea id="event" style="min-height:64px">An employee uploaded credentials to an unknown website.</textarea>
-        <button class="primary" id="runAb">A/B 실행 — 캐시 끔 → 캐시 켬</button>
-        <div id="abDiag" style="margin-top:14px"></div>
-      </div>
-    </section>
-
-    <div class="section-head">
-      <div><div class="eyebrow">Human-triggered / machine-verified</div><h2>에이전트 액션</h2></div>
-      <p>결정은 사용자가 시작하고, 결과 검증은 자동입니다.</p>
-    </div>
-    <section class="grid actions">
-      <article class="card action">
-        <div class="action-icon">A→N</div><h3>AMD → NVIDIA</h3>
-        <p>벤더 중립 safetensors를 대상 Pod로 옮긴 뒤 같은 200개 샘플을 다시 평가합니다.</p>
-        <label>Source<select id="amdSource"></select></label>
-        <label style="margin-top:8px">Target<select id="amdTarget"></select></label>
-        <div class="validation">자동 gate: parse / exact ±2%</div>
-        <button id="migrateAmdBtn" class="btn" data-testid="migrate-amd">마이그레이션 + 검증</button>
-      </article>
-      <article class="card action">
-        <div class="action-icon">N→N+</div><h3>Next generation</h3>
-        <p>서로 다른 NVIDIA 세대 사이에서 체크포인트 이동과 결과 보존을 확인합니다.</p>
-        <label>Source<select id="nextSource"></select></label>
-        <label style="margin-top:8px">Target<select id="nextTarget"></select></label>
-        <div class="validation">자동 gate: 동일 모델·동일 데이터</div>
-        <button id="migrateNextBtn" class="btn" data-testid="migrate-next">다음 세대로 이동</button>
-      </article>
-      <article class="card action">
-        <div class="action-icon">↗</div><h3>Training speed</h3>
-        <p>동일한 3,072 tokens/step에서 batch×accum 후보를 실제로 40스텝씩 측정합니다.</p>
-        <label>Measure on<select id="trainingOptPod"></select></label>
-        <div class="validation">자동 gate: fixed work + finite loss</div>
-        <button id="optTrainBtn" class="btn" data-testid="optimize-training">실측 튜닝 실행</button>
-      </article>
-      <article class="card action">
-        <div class="action-icon">≫</div><h3>Inference speed</h3>
-        <p>순차 생성과 16-way batched 생성을 같은 64개 프롬프트로 비교합니다.</p>
-        <label>Measure on<select id="inferenceOptPod"></select></label>
-        <div class="validation">자동 gate: 같은 토큰 수 + 품질 ±2%</div>
-        <button id="optInferBtn" class="btn" data-testid="optimize-inference">추론 벤치마크 실행</button>
-      </article>
-    </section>
-
-    <section class="card run-panel">
-      <div class="run-top">
-        <div><div class="label">Live job</div><h2 id="jobTitle">대기 중</h2></div>
-        <button id="cancelBtn" class="btn danger" style="width:auto" disabled>작업 중지</button>
+    <section id="jobPanel" class="card job">
+      <div class="job-top">
+        <div><div class="eyebrow">Current job</div><h3 id="jobTitle">대기 중</h3></div>
+        <button id="cancelBtn" class="btn danger" disabled>작업 중지</button>
       </div>
       <div class="progress"><div id="progressBar"></div></div>
-      <div id="jobMeta" class="status-line">버튼을 누르면 실제 실행 로그가 여기에 표시됩니다.</div>
-      <div id="log" class="log">No active job.</div>
-      <div class="footnote">브라우저를 닫아도 서버 프로세스가 살아 있는 동안 job은 계속됩니다. 원격 체크포인트는 RunPod에 남고 측정 결과만 로컬로 내려받습니다.</div>
+      <div id="jobSummary" class="callout">실행을 시작하면 단계와 시간이 여기에 표시됩니다.</div>
+      <details style="margin-top:12px"><summary>상세 로그 보기</summary><pre id="jobLog">No active job.</pre></details>
     </section>
   </main>
   <div id="toast" class="toast"></div>
-  <div id="chartTip" class="chart-tip"></div>
 
+  <div id="chartTip" class="chart-tip"></div>
   <script>
-    const $ = (id) => document.getElementById(id);
-    const e = (value) => String(value ?? "").replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
-    const pct = (value) => value == null ? '—' : `${(value * 100).toFixed(1)}%`;
-    const num = (value, digits=2) => value == null ? '—' : Number(value).toFixed(digits);
-    let activeJob = null;
-    let pods = [];
+    const el = (id) => document.getElementById(id);
+    const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const pct = (v) => v == null ? '—' : (Number(v) * 100).toFixed(1) + '%';
+    const secs = (v, digits=2) => v == null || !Number.isFinite(Number(v)) ? '—' : Number(v).toFixed(digits) + 's';
+    const duration = (job) => job && job.started_at && job.finished_at ? job.finished_at - job.started_at : null;
+    let appState = null, pods = [], jobs = [], models = [], serving = {running:false}, activeJob = null;
+    let lastInteractive = null;
 
     function toast(message, bad=false) {
-      const box = $('toast'); box.textContent = message; box.style.display = 'block'; box.className = `toast ${bad ? 'bad' : ''}`;
-      setTimeout(() => box.style.display = 'none', 4200);
+      const box = el('toast'); box.textContent = message; box.className = 'toast' + (bad ? ' bad' : '');
+      box.style.display = 'block'; setTimeout(() => box.style.display = 'none', 4200);
     }
-
     async function api(path, options={}) {
-      const response = await fetch(path, {headers:{'Content-Type':'application/json'}, ...options});
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
+      const res = await fetch(path, Object.assign({headers:{'Content-Type':'application/json'}}, options));
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || 'HTTP ' + res.status);
       return data;
     }
-
-    function renderState(state) {
-      lastState = state;
-      const x = state.experiment;
-      $('modelId').textContent = x.model_id;
-      $('exampleIn').textContent = x.example.sentence;
-      $('exampleOut').textContent = JSON.stringify(x.example.record, null, 2);
-      $('trainRows').textContent = x.data.train.toLocaleString();
-      $('heldRows').textContent = x.data.heldout.toLocaleString();
-      $('gpuName').textContent = x.train?.gpu || '미실행';
-      $('stepTime').textContent = x.train ? `${num(x.train.t_step_median_s, 3)}s` : '—';
-      $('peakVram').textContent = x.train ? `${num(x.train.peak_vram_gb, 1)}G` : '—';
-      const before = x.before, after = x.after;
-      for (const [id, value] of [['parseBefore',before?.json_parse_rate],['parseAfter',after?.json_parse_rate],['exactBefore',before?.exact_match_rate],['exactAfter',after?.exact_match_rate]]) $(id).textContent = pct(value);
-      $('parseCompact').textContent = pct(after?.json_parse_rate);
-      $('exactCompact').textContent = pct(after?.exact_match_rate);
-      if (before && after) {
-        $('parseDelta').textContent = `${pct(before.json_parse_rate)} → ${pct(after.json_parse_rate)}`;
-        $('exactDelta').textContent = `${pct(before.exact_match_rate)} → ${pct(after.exact_match_rate)}`;
-        const comparable = before.n === after.n;
-        $('gateCompact').textContent = comparable ? `동일 ${after.n}개 샘플로 비교됨` : `주의: before ${before.n}개 / after ${after.n}개`;
-        $('gateCompact').className = `validation ${comparable ? 'ok' : 'warn'}`;
-        $('sampleCount').textContent = `before ${before.n} · after ${after.n}`;
-      }
-
-      // Only `after` is reported. `before.hallucination_rate` is 0.000 for a
-      // reason that is not a merit: json_parse_rate is 0, so nothing parses and
-      // there is no field to invent into. Shown as a before/after pair it would
-      // read as the base model being the honest one, which is backwards.
-      $('halluc').textContent = pct(after?.hallucination_rate);
-      $('hallucNote').textContent = after?.n_nullable != null
-        ? `null \uc815\ub2f5 ${after.n_nullable}\uac74 \uae30\uc900 \u00b7 before\ub294 \uce21\uc815 \ubd88\uac00`
-        : 'before\ub294 \uce21\uc815 \ubd88\uac00';
-      $('omit').textContent = pct(after?.omission_rate);
-      $('lossAfter').textContent = after?.held_out_loss != null ? num(after.held_out_loss, 4) : '\u2014';
-      $('lossDelta').textContent = (before?.held_out_loss != null && after?.held_out_loss != null)
-        ? `${num(before.held_out_loss, 4)} \u2192 ${num(after.held_out_loss, 4)}` : '\u2014';
-      const tr = x.train;
-      $('trainCfg').textContent = tr ? `${tr.dtype} \u00b7 ${tr.attention}` : '\u2014';
-      $('trainCfg2').textContent = tr
-        ? `${tr.steps} steps \u00b7 batch ${tr.micro_batch}\u00d7${tr.grad_accum} \u00b7 ${Number(tr.tokens_per_step).toLocaleString()} tok/step`
-        : '\ubbf8\uc2e4\ud589';
-      drawFieldChart(before, after);
-      drawLossChart(tr);
-
-      const samples = after?.samples || [];
-      $('samples').innerHTML = samples.slice(0, 6).map(s => `<article class="sample"><div class="in">${e(s.sentence)}</div><div class="out">${e(s.raw_output)}</div><div class="${s.wrong_fields?.length ? 'warn' : 'ok'}" style="margin-top:8px">${s.wrong_fields?.length ? `오류: ${e(s.wrong_fields.join(', '))}` : '✓ exact match'}</div></article>`).join('');
+    function latest(kind, status='complete') {
+      return jobs.find((j) => j.kind === kind && (!status || j.status === status));
+    }
+    function runningJob() {
+      return jobs.find((j) => ['queued','running','cancelling'].includes(j.status));
+    }
+    function podOptions() {
+      const live = pods.filter((p) => p.status === 'running');
+      if (!live.length) return '<option value="">실행 중인 Pod 없음</option>';
+      return live.map((p) => '<option value="' + esc(p.id) + '">' + esc(p.gpu) + ' · ' + esc(p.name) + ' · $' + esc(p.cost_per_hour) + '/h</option>').join('');
+    }
+    function replaceOptions(id, html) {
+      const node = el(id), before = node.value; node.innerHTML = html;
+      if ([...node.options].some((o) => o.value === before)) node.value = before;
+    }
+    function friendlyFailure(job) {
+      const text = ((job && job.error) || '') + ' ' + ((job && job.logs) || []).join(' ');
+      if (/No space left on device|disk free|disk space/i.test(text)) return 'GPU Pod의 디스크 공간이 부족해 체크포인트를 저장하지 못했습니다. 디스크를 비우거나 다른 Pod로 다시 실행하세요.';
+      if (/no pod has room/i.test(text)) return '학습에 필요한 VRAM 또는 디스크가 있는 Pod가 없습니다. 실행 중인 모델을 내리거나 다른 Pod를 선택하세요.';
+      if (/no model is loaded/i.test(text)) return '추론 모델이 준비되지 않았습니다. Step 2에서 모델을 선택하고 “추론 준비”를 누르세요.';
+      return (job && job.error) || '작업이 완료되지 않았습니다. 상세 로그를 확인하세요.';
     }
 
+    const num = (v, d=2) => v == null ? '\u2014' : Number(v).toFixed(d);
 
     // ── charts ────────────────────────────────────────────────────────────
     // Hand-rolled SVG rather than a charting library: the page is served off
     // the pod through an SSH forward and must not fetch a CDN bundle.
-    let lastState = null;
 
-    const TIP = () => $('chartTip');
+    const TIP = () => el('chartTip');
     function tipShow(evt, html) {
       const t = TIP(); t.innerHTML = html; t.style.display = 'block';
       const r = t.getBoundingClientRect();
@@ -480,7 +450,7 @@
     const FIELD_LABEL = {name:'name', age:'age', org:'org', role:'role', year:'year'};
 
     function drawFieldChart(before, after) {
-      const host = $('fieldChart');
+      const host = el('fieldChart');
       host.innerHTML = '';
       const fa_b = before?.field_accuracy, fa_a = after?.field_accuracy;
       if (!fa_a) { host.innerHTML = '<div class="empty-note">평가 결과가 아직 없습니다.<br>학습을 한 번 실행하면 채워집니다.</div>'; return; }
@@ -528,17 +498,17 @@
       });
       host.appendChild(svg);
 
-      $('fieldTable').innerHTML =
+      el('fieldTable').innerHTML =
         `<table class="dv"><thead><tr><th>field</th><th>before</th><th>after</th></tr></thead><tbody>` +
-        fields.map(f => `<tr><td>${e(FIELD_LABEL[f])}</td><td>${pct(fa_b?.[f])}</td><td>${pct(fa_a?.[f])}</td></tr>`).join('') +
+        fields.map(f => `<tr><td>${esc(FIELD_LABEL[f])}</td><td>${pct(fa_b?.[f])}</td><td>${pct(fa_a?.[f])}</td></tr>`).join('') +
         `</tbody></table>`;
     }
 
     function drawLossChart(train) {
-      const host = $('lossChart');
+      const host = el('lossChart');
       host.innerHTML = '';
       const curve = train?.loss_curve;
-      $('lossTableWrap').style.display = 'none';
+      el('lossTableWrap').style.display = 'none';
       if (!Array.isArray(curve) || curve.length < 2) {
         // Deliberately not reconstructed from the job log: that log keeps only
         // the last 300 lines, so on a 500-step run the early drop is gone and
@@ -592,8 +562,8 @@
       host.appendChild(svg);
 
       const every = Math.max(1, Math.floor(curve.length / 20));
-      $('lossTableWrap').style.display = '';
-      $('lossTable').innerHTML =
+      el('lossTableWrap').style.display = '';
+      el('lossTable').innerHTML =
         `<table class="dv"><thead><tr><th>step</th><th>loss</th></tr></thead><tbody>` +
         curve.filter((_, i) => i % every === 0 || i === curve.length - 1)
              .map(d => `<tr><td>${d.step}</td><td>${d.loss.toFixed(4)}</td></tr>`).join('') +
@@ -604,9 +574,9 @@
     window.addEventListener('resize', () => {
       clearTimeout(resizeTimer);
       resizeTimer = setTimeout(() => {
-        if (!lastState) return;
-        drawFieldChart(lastState.experiment.before, lastState.experiment.after);
-        drawLossChart(lastState.experiment.train);
+        if (!appState) return;
+        drawFieldChart(appState.experiment.before, appState.experiment.after);
+        drawLossChart(appState.experiment.train);
       }, 150);
     });
 
@@ -632,7 +602,7 @@
     }
 
     async function loadPolicy(text) {
-      const el = $('policyStat');
+      const el = el('policyStat');
       el.className = 'validation'; el.textContent = text ? '프리필 계산 중… (cold 경로, 수 초)' : '해제 중…';
       try {
         const r = await api('/api/prefix', {method:'POST', body: JSON.stringify({prefix: text})});
@@ -678,8 +648,8 @@
     }
 
     async function runAb() {
-      const box = $('abDiag');
-      const sentence = $('event').value.trim();
+      const box = el('abDiag');
+      const sentence = el('event').value.trim();
       if (!sentence) { toast('이벤트를 입력하세요', true); return; }
       box.innerHTML = '<div class="empty-note">캐시 끈 상태로 실행 중… (cold, 수 초)</div>';
       try {
@@ -716,229 +686,284 @@
           </tbody></table>
           <div class="caveat">첫 요청은 반드시 miss입니다. 서버 재시작이나 캐시 축출 뒤에도 다시 cold가 됩니다 —
             "항상 ${on.latency_s.toFixed(1)}초"가 아니라 "warm일 때 ${on.latency_s.toFixed(1)}초"입니다.</div>
-          <div class="code" style="margin-top:12px">${e(on.raw_output || '')}</div>`;
-        abChart($('abPlot'), rows);
-      } catch (err) { box.innerHTML = `<div class="empty-note">${e(String(err.message || err))}</div>`; }
+          <div class="code" style="margin-top:12px">${esc(on.raw_output || '')}</div>`;
+        abChart(el('abPlot'), rows);
+      } catch (err) { box.innerHTML = `<div class="empty-note">${esc(String(err.message || err))}</div>`; }
     }
 
-    function podOptions(filter=()=>true) {
-      const found = pods.filter(p => p.status === 'running' && filter(p));
-      return found.length ? found.map(p => `<option value="${e(p.id)}">${e(p.gpu)} · ${e(p.name)} · $${e(p.cost_per_hour)}/h</option>`).join('') : '<option value="">사용 가능한 Pod 없음</option>';
+    function renderQualityTiles(x) {
+      const after = x.after, before = x.before, tr = x.train;
+      // Only `after`. before.hallucination_rate is 0.000 for a reason that is
+      // not a merit: json_parse_rate is 0, so nothing parses and there is no
+      // field to invent into. As a pair it would read as the base model being
+      // the honest one, which is backwards.
+      el('qHalluc').textContent = pct(after?.hallucination_rate);
+      el('qHallucNote').textContent = after?.n_nullable != null
+        ? `null 정답 ${after.n_nullable}건 · before는 측정 불가` : 'before는 측정 불가';
+      el('qOmit').textContent = pct(after?.omission_rate);
+      el('qLoss').textContent = after?.held_out_loss != null ? num(after.held_out_loss, 4) : '—';
+      el('qLossDelta').textContent = (before?.held_out_loss != null && after?.held_out_loss != null)
+        ? `${num(before.held_out_loss, 4)} → ${num(after.held_out_loss, 4)}` : '—';
+      el('qCfg').textContent = tr ? `${tr.dtype} · ${tr.attention}` : '—';
+      el('qCfg2').textContent = tr
+        ? `${tr.steps} steps · batch ${tr.micro_batch}×${tr.grad_accum} · ${Number(tr.tokens_per_step).toLocaleString()} tok/step`
+        : '미실행';
     }
 
-    $('loadPolicy').addEventListener('click', () => loadPolicy(policyText()));
-    $('clearPolicy').addEventListener('click', () => loadPolicy(''));
-    $('runAb').addEventListener('click', runAb);
+    el('loadPolicy').addEventListener('click', () => loadPolicy(policyText()));
+    el('clearPolicy').addEventListener('click', () => loadPolicy(''));
+    el('runAb').addEventListener('click', runAb);
 
-    function renderPods() {
-      $('servePod').innerHTML = podOptions();
-      $('loadModel').disabled = !$('servePod').value;
-      $('trainPod').innerHTML = podOptions();
-      $('trainingOptPod').innerHTML = podOptions();
-      $('inferenceOptPod').innerHTML = podOptions();
-      $('amdSource').innerHTML = podOptions(p => p.vendor === 'amd');
-      $('amdTarget').innerHTML = podOptions(p => p.vendor === 'nvidia');
-      $('nextSource').innerHTML = podOptions(p => p.vendor === 'nvidia');
-      $('nextTarget').innerHTML = podOptions(p => p.vendor === 'nvidia');
-      $('trainBtn').disabled = !$('trainPod').value;
-      $('optTrainBtn').disabled = !$('trainingOptPod').value;
-      $('optInferBtn').disabled = !$('inferenceOptPod').value;
-      $('migrateAmdBtn').disabled = !$('amdSource').value || !$('amdTarget').value;
-      const nvidia = pods.filter(p => p.status === 'running' && p.vendor === 'nvidia');
-      $('migrateNextBtn').disabled = nvidia.length < 2;
+    function renderFlow() {
+      const baselineReady = Boolean(appState && appState.experiment && appState.experiment.after);
+      const agentReady = Boolean(latest('optimize-training-speed') || latest('optimize-inference-speed'));
+      const compareReady = Boolean(latest('optimize-training-speed') && latest('optimize-inference-speed'));
+      const states = [baselineReady, serving.running, agentReady, compareReady];
+      let first = states.findIndex((x) => !x); if (first < 0) first = 3;
+      states.forEach((done, i) => {
+        const node = el('flow' + (i + 1)); node.className = 'flow-step' + (done ? ' done' : '') + (i === first ? ' now' : '');
+      });
+    }
+
+    function renderBaseline() {
+      const x = appState.experiment;
+      const baseJob = latest('train-and-evaluate');
+      const failed = latest('train-and-evaluate', 'failed');
+      const train = (baseJob && baseJob.result && baseJob.result.train) || x.train;
+      const after = (baseJob && baseJob.result && baseJob.result.after) || x.after;
+      el('baseTotal').textContent = secs(duration(baseJob), 0);
+      el('baseStep').textContent = secs(train && train.t_step_median_s, 3);
+      el('baseExact').textContent = pct(after && after.exact_match_rate);
+      el('baseVram').textContent = train && train.peak_vram_gb != null ? Number(train.peak_vram_gb).toFixed(1) + 'G' : '—';
+      if (baseJob || after) {
+        el('baselineTitle').textContent = '기준 실행이 준비됐습니다';
+        el('baselineNotice').className = 'callout ok';
+        el('baselineNotice').innerHTML = '<strong>에이전트 OFF 기준선</strong>같은 모델·데이터·step 수로 에이전트 결과를 비교할 수 있습니다.';
+      } else if (failed) {
+        el('baselineTitle').textContent = '최근 일반 학습이 실패했습니다';
+        el('baselineNotice').className = 'callout bad';
+        el('baselineNotice').innerHTML = '<strong>다시 실행하기 전에 확인</strong>' + esc(friendlyFailure(failed));
+      }
+      const ready = Boolean(after);
+      el('trainAgentBtn').disabled = !ready || Boolean(activeJob);
+      el('inferAgentBtn').disabled = !ready || Boolean(activeJob);
+      el('trainAgentState').innerHTML = ready ? '<strong>기준선 준비됨</strong>동일 step 수로 agent 설정을 검증합니다.' : '기준 학습을 기다리는 중입니다.';
+      el('trainAgentState').className = 'callout' + (ready ? ' ok' : '');
+      el('inferAgentState').innerHTML = ready ? '<strong>체크포인트 준비됨</strong>순차 처리와 batch 처리를 같은 64개 입력으로 측정합니다.' : '학습된 체크포인트를 기다리는 중입니다.';
+      el('inferAgentState').className = 'callout' + (ready ? ' ok' : '');
+    }
+
+    function renderModels() {
+      const visible = models.filter((m) => ['base','finetuned','agent'].includes(m.kind));
+      const select = el('serveModel'), previous = select.value;
+      select.innerHTML = visible.map((m) => '<option value="' + esc(m.id) + '">' + esc(m.label) + '</option>').join('');
+      const preferred = visible.find((m) => m.kind === 'finetuned') || visible[0];
+      select.value = visible.some((m) => m.id === previous) ? previous : (preferred ? preferred.id : '');
+      syncModelPod();
+      renderServing();
+    }
+    function selectedModel() { return models.find((m) => m.id === el('serveModel').value); }
+    function syncModelPod() {
+      const model = selectedModel();
+      if (model && model.pod_id && [...el('servePod').options].some((o) => o.value === model.pod_id)) el('servePod').value = model.pod_id;
+      const requiredMissing = Boolean(model && model.pod_id && !pods.some((p) => p.id === model.pod_id && p.status === 'running'));
+      el('prepareBtn').disabled = !el('servePod').value || requiredMissing || Boolean(activeJob);
+      if (requiredMissing) {
+        el('serveState').className = 'callout model-state bad';
+        el('serveState').innerHTML = '<strong>모델이 있는 Pod가 꺼져 있습니다</strong>필요한 Pod ' + esc(model.pod_id) + '를 먼저 실행하세요.';
+      }
+    }
+    function renderServing() {
+      const ready = Boolean(serving && serving.running);
+      el('chatInput').disabled = !ready;
+      el('sendBtn').disabled = !ready;
+      el('stopBtn').disabled = !serving.model_id;
+      if (ready) {
+        el('serveState').className = 'callout model-state ok';
+        el('serveState').innerHTML = '<strong>추론 준비 완료</strong>' + esc(serving.model_id) + ' · ' + esc(serving.dtype) + ' · 입력을 보낼 수 있습니다.';
+        el('chatModel').textContent = serving.model_id + ' · ready';
+      } else if (serving && serving.model_id) {
+        el('serveState').className = 'callout model-state bad';
+        el('serveState').innerHTML = '<strong>연결이 끊겼습니다</strong>“선택한 모델 추론 준비”를 다시 누르세요.';
+        el('chatModel').textContent = '연결 끊김';
+      } else if (!(el('serveState').className || '').includes('bad')) {
+        el('serveState').className = 'callout model-state warn';
+        el('serveState').innerHTML = '<strong>추론 준비 필요</strong>모델을 선택하고 위 버튼을 누르세요.';
+        el('chatModel').textContent = '모델 준비 안 됨';
+      }
+    }
+
+    function chosenCandidate(job) {
+      if (!job || !job.result) return null;
+      const c = job.result.chosen || {};
+      return (job.result.candidates || []).find((x) => x.micro_batch === c.micro_batch && x.grad_accum === c.grad_accum) || null;
+    }
+    function renderComparison() {
+      const x = appState.experiment;
+      const baseJob = latest('train-and-evaluate');
+      const trainJob = latest('optimize-training-speed');
+      const inferJob = latest('optimize-inference-speed');
+      const baseTrain = (baseJob && baseJob.result && baseJob.result.train) || x.train;
+      const baseQuality = (baseJob && baseJob.result && baseJob.result.after) || x.after;
+      const candidate = chosenCandidate(trainJob);
+      const agentQuality = trainJob && trainJob.result && trainJob.result.quality && trainJob.result.quality.chosen;
+      const baseStep = baseTrain && baseTrain.t_step_median_s;
+      const agentStep = candidate && candidate.t_step_median_s;
+      el('cmpTrainBase').textContent = secs(baseStep, 3);
+      el('cmpTrainAgent').textContent = secs(agentStep, 3);
+      el('cmpQualityBase').textContent = pct(baseQuality && baseQuality.exact_match_rate);
+      el('cmpQualityAgent').textContent = pct(agentQuality && agentQuality.exact_match_rate);
+      if (baseStep && agentStep) {
+        const gain = baseStep / agentStep;
+        el('cmpTrainDelta').textContent = gain >= 1 ? gain.toFixed(2) + '× faster' : (1/gain).toFixed(2) + '× slower';
+        el('cmpTrainDelta').className = 'delta ' + (gain >= 1 ? 'good' : '');
+      }
+      if (baseQuality && agentQuality) {
+        const d = agentQuality.exact_match_rate - baseQuality.exact_match_rate;
+        el('cmpQualityDelta').textContent = (d >= 0 ? '+' : '') + (d * 100).toFixed(1) + '%p';
+        el('cmpQualityDelta').className = 'delta ' + (d >= -0.02 ? 'good' : '');
+      }
+      const ib = inferJob && inferJob.result && inferJob.result.baseline;
+      const io = inferJob && inferJob.result && inferJob.result.optimized;
+      el('cmpInferBase').textContent = secs(ib && ib.elapsed_s, 2);
+      el('cmpInferAgent').textContent = secs(io && io.elapsed_s, 2);
+      el('cmpTpsBase').textContent = ib ? Number(ib.tokens_per_second).toFixed(1) + ' tok/s' : '—';
+      el('cmpTpsAgent').textContent = io ? Number(io.tokens_per_second).toFixed(1) + ' tok/s' : '—';
+      if (inferJob && inferJob.result && inferJob.result.speedup) {
+        const speedup = Number(inferJob.result.speedup);
+        el('cmpInferDelta').textContent = speedup.toFixed(2) + '× faster';
+        el('cmpTpsDelta').textContent = speedup.toFixed(2) + '× throughput';
+        el('cmpInferDelta').className = el('cmpTpsDelta').className = 'delta good';
+      }
+      const both = Boolean(trainJob && inferJob);
+      el('compareGate').className = 'callout ' + (both ? 'ok' : '');
+      el('compareGate').innerHTML = both
+        ? '<strong>비교 완료</strong>학습과 추론 모두 실측값입니다. 품질 gate 결과: ' + esc((trainJob.result.validation || {}).status || 'unknown') + ' / ' + esc((inferJob.result.validation || {}).status || 'unknown')
+        : '<strong>비교 준비 중</strong>일반 학습 후 두 에이전트를 실행하면 같은 조건의 결과가 채워집니다.';
+    }
+
+    function renderJob(job) {
+      if (!job) {
+        el('jobTitle').textContent = '대기 중'; el('progressBar').style.width = '0%';
+        el('jobSummary').className = 'callout'; el('jobSummary').textContent = '실행을 시작하면 단계와 시간이 여기에 표시됩니다.';
+        el('jobLog').textContent = 'No active job.'; el('cancelBtn').disabled = true; return;
+      }
+      el('jobTitle').textContent = job.kind + ' · ' + job.status;
+      el('progressBar').style.width = (job.progress || 0) + '%';
+      el('cancelBtn').disabled = !['queued','running','cancelling'].includes(job.status);
+      const elapsed = job.started_at ? ((job.finished_at || Date.now()/1000) - job.started_at) : null;
+      if (job.status === 'failed') {
+        el('jobSummary').className = 'callout bad';
+        el('jobSummary').innerHTML = '<strong>작업 실패 · ' + secs(elapsed,0) + '</strong>' + esc(friendlyFailure(job));
+      } else if (job.status === 'complete') {
+        el('jobSummary').className = 'callout ok';
+        el('jobSummary').innerHTML = '<strong>완료 · ' + secs(elapsed,0) + '</strong>자동 검증 결과가 위 비교 화면에 반영되었습니다.';
+      } else {
+        el('jobSummary').className = 'callout';
+        el('jobSummary').innerHTML = '<strong>' + esc(job.stage) + ' · ' + (job.progress || 0) + '%</strong>경과 ' + secs(elapsed,0) + ' · job ' + esc(job.id.slice(0,8));
+      }
+      el('jobLog').textContent = (job.logs || []).slice(-100).join('\n') || 'Waiting for output…';
+      el('jobLog').scrollTop = el('jobLog').scrollHeight;
     }
 
     async function load() {
       try {
-        const [state, podData, jobData] = await Promise.all([api('/api/state'), api('/api/pods'), api('/api/jobs')]);
-        renderState(state); pods = podData.pods; renderPods(); loadModels();
-        $('healthText').textContent = `${pods.filter(p=>p.status==='running').length}개 RunPod 연결`;
-        $('healthDot').className = 'dot';
-        const live = jobData.jobs.find(j => ['running','queued','cancelling'].includes(j.status));
-        if (live) { activeJob = live.id; renderJob(live); pollJob(); }
+        const stateData = await api('/api/state');
+        const jobData = await api('/api/jobs');
+        const modelData = await api('/api/models');
+        let podData = {pods:[]};
+        try { podData = await api('/api/pods'); } catch (err) { toast('RunPod 목록: ' + err.message, true); }
+        appState = stateData; jobs = jobData.jobs || []; models = modelData.models || []; serving = modelData.serving || {running:false}; pods = podData.pods || [];
+        replaceOptions('trainPod', podOptions()); replaceOptions('servePod', podOptions());
+        replaceOptions('migrationSource', podOptions()); replaceOptions('migrationTarget', podOptions());
+        el('dataState').textContent = appState.experiment.data.train.toLocaleString() + ' train · ' + appState.experiment.data.heldout.toLocaleString() + ' held-out';
+        el('healthText').textContent = pods.filter((p) => p.status === 'running').length + '개 RunPod 연결';
+        el('healthDot').className = 'dot' + (pods.length ? '' : ' off');
+        activeJob = (runningJob() || {}).id || null;
+        renderBaseline(); renderModels(); renderComparison(); renderFlow();
+        drawFieldChart(appState.experiment.before, appState.experiment.after);
+        drawLossChart(appState.experiment.train);
+        renderQualityTiles(appState.experiment);
+        renderJob(runningJob() || jobs[0] || null);
+        el('trainBtn').disabled = !el('trainPod').value || Boolean(activeJob);
+        if (activeJob) pollJob();
       } catch (err) {
-        $('healthText').textContent = '연결 오류'; $('healthDot').className = 'dot off'; toast(err.message, true);
+        el('healthText').textContent = '대시보드 연결 오류'; el('healthDot').className = 'dot off'; toast(err.message, true);
       }
-    }
-
-    function renderJob(job) {
-      $('jobTitle').textContent = `${job.kind} · ${job.status}`;
-      $('progressBar').style.width = `${job.progress || 0}%`;
-      $('jobMeta').textContent = `${job.stage} · job ${job.id.slice(0,8)}`;
-      $('log').textContent = (job.logs || []).join('\n') || 'Waiting for output…';
-      $('log').scrollTop = $('log').scrollHeight;
-      $('cancelBtn').disabled = !['queued','running','cancelling'].includes(job.status);
-      if (job.status === 'complete' && job.result?.chosen) {
-        $('microBatch').value = job.result.chosen.micro_batch;
-      }
-      if (job.error) $('jobMeta').textContent += ` · ${job.error}`;
-    }
-
-    async function pollJob() {
-      if (!activeJob) return;
-      try {
-        const job = await api(`/api/jobs/${activeJob}`); renderJob(job);
-        if (['complete','failed','cancelled','interrupted'].includes(job.status)) {
-          toast(job.status === 'complete' ? '작업과 자동 검증이 완료됐습니다.' : `작업 종료: ${job.error || job.status}`, job.status !== 'complete');
-          activeJob = null; await load(); return;
-        }
-      } catch (err) { toast(err.message, true); activeJob = null; return; }
-      setTimeout(pollJob, 1800);
     }
 
     async function start(path, body) {
-      if (activeJob) return toast('이미 실행 중인 작업이 있습니다.', true);
+      if (activeJob) { toast('이미 실행 중인 작업이 있습니다.', true); return null; }
       try {
         const job = await api(path, {method:'POST', body:JSON.stringify(body)});
-        activeJob = job.id; renderJob(job); pollJob();
-      } catch (err) { toast(err.message, true); }
+        activeJob = job.id; jobs.unshift(job); renderJob(job); renderBaseline(); syncModelPod(); pollJob(); return job;
+      } catch (err) { toast(err.message, true); return null; }
     }
-
-    $('generateBtn').onclick = () => start('/api/jobs/data', {total:+$('dataTotal').value, heldout:+$('dataHeld').value, workers:8});
-    $('trainBtn').onclick = () => start('/api/jobs/train', {pod_id:$('trainPod').value, steps:+$('trainSteps').value, dtype:'bf16', attention:'sdpa', micro_batch:+$('microBatch').value, grad_accum:Math.max(1, Math.round(16 / +$('microBatch').value))});
-    $('optTrainBtn').onclick = () => start('/api/jobs/action/optimize-training', {pod_id:$('trainingOptPod').value});
-    $('optInferBtn').onclick = () => start('/api/jobs/action/optimize-inference', {pod_id:$('inferenceOptPod').value});
-    $('migrateAmdBtn').onclick = () => start('/api/jobs/action/migrate-amd-nvidia', {source_pod_id:$('amdSource').value, target_pod_id:$('amdTarget').value});
-    $('migrateNextBtn').onclick = () => start('/api/jobs/action/migrate-nextgen', {source_pod_id:$('nextSource').value, target_pod_id:$('nextTarget').value});
-    $('resultsBtn').onclick = () => $('results').scrollIntoView({behavior:'smooth'});
-    $('cancelBtn').onclick = async () => { if (activeJob) await api(`/api/jobs/${activeJob}/cancel`, {method:'POST'}); };
-    // ── Playground ────────────────────────────────────────────────────────
-    const EXAMPLES = [
-      "Sarah Chen, 34, joined Anthropic in 2023 as a research engineer.",
-      "It was in 1996 that Bogdan Ionescu, then 38, started working as a loan officer for Carpathian Savings Bank.",
-      "The startup NeuralLoop hired 24-year-old Kwame Mensah as a machine learning engineer back in 2021.",
-    ];
-
-    function renderServing(info) {
-      const pill = $('servingPill');
-      if (info && info.running) {
-        pill.innerHTML = `<span class="dot"></span>${e(info.model_id)} 상주 중 · ${e(info.dtype)}`;
-      } else if (info && info.model_id) {
-        // A recorded model with a dead tunnel is not "loaded"; saying so would
-        // make the next generate call fail with no explanation.
-        pill.innerHTML = `<span class="dot off"></span>${e(info.model_id)} 연결 끊김 — 다시 올리세요`;
-      } else {
-        pill.innerHTML = '<span class="dot off"></span>모델 없음';
-      }
-    }
-
-    async function loadModels() {
+    async function pollJob() {
+      if (!activeJob) return;
       try {
-        const data = await api('/api/models');
-        $('modelSelect').innerHTML = data.models
-          .map(m => `<option value="${e(m.id)}">${e(m.label)}</option>`).join('');
-        renderServing(data.serving);
-      } catch (err) { toast(err.message, true); }
+        const job = await api('/api/jobs/' + activeJob); renderJob(job);
+        if (['complete','failed','cancelled','interrupted'].includes(job.status)) {
+          toast(job.status === 'complete' ? '작업과 자동 검증이 완료됐습니다.' : friendlyFailure(job), job.status !== 'complete');
+          activeJob = null; await load(); return;
+        }
+      } catch (err) { activeJob = null; toast(err.message, true); return; }
+      setTimeout(pollJob, 1800);
     }
 
-    function renderGenerate(out) {
-      $('genRaw').textContent = out.raw_output || '(빈 출력)';
-      $('genParsed').textContent = out.parsed ? JSON.stringify(out.parsed, null, 2) : '파싱 실패';
-      // Icon + word, never colour alone.
-      $('genVerdict').innerHTML = out.parsed_ok
-        ? '<span class="verdict ok">&#10003; 유효한 JSON · 필수 키 전부</span>'
-        : '<span class="verdict bad">&#10007; 스키마 불일치</span>';
-      $('genLatency').innerHTML = `
-        <div>생성 시간<b>${out.latency_s.toFixed(2)}s</b></div>
-        <div>왕복 포함<b>${out.roundtrip_s.toFixed(2)}s</b></div>
-        <div>새 토큰<b>${out.new_tokens}</b></div>
-        <div>토큰/초 (batch 1)<b>${out.tokens_per_s.toFixed(1)}</b></div>
-        <div>모델<b>${e(out.model_id)}</b></div>`;
+    function appendMessage(kind, text) {
+      const node = document.createElement('div'); node.className = 'message ' + kind; node.textContent = text;
+      el('messages').appendChild(node); el('messages').scrollTop = el('messages').scrollHeight; return node;
     }
-
-    $('exampleChips').innerHTML = EXAMPLES
-      .map((t,i) => `<button class="chip" data-i="${i}">예문 ${i+1}</button>`).join('');
-    $('exampleChips').onclick = ev => {
-      const i = ev.target.dataset.i;
-      if (i !== undefined) $('sentence').value = EXAMPLES[+i];
-    };
-
-    $('loadModel').onclick = async () => {
-      const pod = $('servePod').value;
-      if (!pod) return toast('실행 중인 Pod이 없습니다', true);
-      await start('/api/serve', {pod_id: pod, model_id: $('modelSelect').value, dtype: 'bf16'});
-      // The load takes 10-20s on the pod; refresh the pill once it settles.
-      setTimeout(loadModels, 4000);
-    };
-
-    $('stopModel').onclick = async () => {
-      try { await api('/api/serve/stop', {method:'POST'}); await loadModels(); }
-      catch (err) { toast(err.message, true); }
-    };
-
-    $('runGenerate').onclick = async () => {
-      const sentence = $('sentence').value.trim();
-      if (!sentence) return toast('문장을 입력하세요', true);
-      const btn = $('runGenerate');
-      btn.disabled = true; btn.textContent = '생성 중...';
-      $('genRaw').textContent = ''; $('genRaw').classList.add('streaming');
-      $('genParsed').textContent = '—'; $('genVerdict').innerHTML = ''; $('genLatency').innerHTML = '';
-
-      const t0 = performance.now();
-      let firstPaint = null;
+    async function sendMessage() {
+      const sentence = el('chatInput').value.trim();
+      if (!serving.running) { toast('먼저 선택한 모델을 추론 준비하세요.', true); return; }
+      if (!sentence) return;
+      appendMessage('user', sentence); el('chatInput').value = '';
+      const bubble = appendMessage('assistant typing', ''); el('sendBtn').disabled = true;
       try {
-        const res = await fetch('/api/generate/stream', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({sentence}),
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-        // Read incrementally. res.json() or res.text() would wait for the whole
-        // body and rebuild exactly the blocking behaviour this replaces.
-        const reader = res.body.getReader();
-        const dec = new TextDecoder();
-        let buf = '';
-        for (;;) {
-          const {value, done} = await reader.read();
-          if (done) break;
-          buf += dec.decode(value, {stream: true});
-          // SSE frames are separated by a blank line; a partial frame stays in
-          // the buffer until its terminator arrives.
-          const frames = buf.split('\n\n');
-          buf = frames.pop();
-          for (const f of frames) {
-            if (!f.startsWith('data: ')) continue;
-            const ev = JSON.parse(f.slice(6));
-            if (ev.token !== undefined) {
-              if (firstPaint === null) firstPaint = performance.now() - t0;
-              $('genRaw').textContent += ev.token;
-            } else if (ev.done) {
-              $('genRaw').classList.remove('streaming');
-              if (ev.error) { toast(ev.error, true); break; }
-              renderStreamDone(ev, firstPaint, performance.now() - t0);
+        const res = await fetch('/api/generate/stream', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sentence:sentence,max_new_tokens:64})});
+        if (!res.ok || !res.body) throw new Error('stream HTTP ' + res.status);
+        const reader = res.body.getReader(), decoder = new TextDecoder(); let buffer = '', raw = '';
+        while (true) {
+          const part = await reader.read(); if (part.done) break;
+          buffer += decoder.decode(part.value, {stream:true});
+          const frames = buffer.split('\n\n'); buffer = frames.pop() || '';
+          for (const frame of frames) {
+            const line = frame.split('\n').find((x) => x.startsWith('data: ')); if (!line) continue;
+            const data = JSON.parse(line.slice(6));
+            if (data.token) { raw += data.token; bubble.textContent = raw; el('messages').scrollTop = el('messages').scrollHeight; }
+            if (data.done) {
+              bubble.classList.remove('typing');
+              if (data.error) { bubble.classList.add('error'); bubble.textContent = data.error; }
+              else {
+                lastInteractive = data;
+                const timing = document.createElement('div'); timing.className = 'timing';
+                timing.innerHTML = '<span class="pill">첫 토큰 ' + secs(data.ttft_s,2) + '</span><span class="pill">전체 ' + secs(data.latency_s,2) + '</span><span class="pill">' + (data.parsed_ok ? 'JSON ✓' : 'JSON 실패') + '</span>';
+                bubble.appendChild(timing);
+              }
             }
           }
         }
-      } catch (err) {
-        toast(err.message, true);
-      } finally {
-        $('genRaw').classList.remove('streaming');
-        btn.disabled = false; btn.textContent = '추출 실행';
-      }
-    };
-
-    function renderStreamDone(ev, firstPaintMs, totalMs) {
-      $('genParsed').textContent = ev.parsed ? JSON.stringify(ev.parsed, null, 2) : '파싱 실패';
-      $('genVerdict').innerHTML = ev.parsed_ok
-        ? '<span class="verdict ok">&#10003; 유효한 JSON · 필수 키 전부</span>'
-        : '<span class="verdict bad">&#10007; 스키마 불일치</span>';
-      // TTFT first and emphasised: it is what makes this feel fast, and it is
-      // a different number from total latency. Server-side and browser-side
-      // are both shown — the gap between them is the SSH hop, and collapsing
-      // them would hide it.
-      $('genLatency').innerHTML = `
-        <div>첫 토큰까지 (서버)<b class="hero">${ev.ttft_s ? ev.ttft_s.toFixed(2) + 's' : '—'}</b></div>
-        <div>첫 토큰까지 (화면)<b>${firstPaintMs ? (firstPaintMs/1000).toFixed(2) + 's' : '—'}</b></div>
-        <div>생성 완료 (서버)<b>${ev.latency_s.toFixed(2)}s</b></div>
-        <div>전체 (화면)<b>${(totalMs/1000).toFixed(2)}s</b></div>
-        <div>모델<b>${e(ev.model || '')}</b></div>`;
+      } catch (err) { bubble.classList.remove('typing'); bubble.classList.add('error'); bubble.textContent = err.message; }
+      finally { el('sendBtn').disabled = !serving.running; }
     }
 
-    $('sentence').addEventListener('keydown', ev => {
-      if ((ev.metaKey || ev.ctrlKey) && ev.key === 'Enter') $('runGenerate').click();
+    el('trainBtn').onclick = () => start('/api/jobs/train', {
+      pod_id:el('trainPod').value, steps:+el('trainSteps').value, dtype:'bf16', attention:'sdpa',
+      micro_batch:+el('microBatch').value, grad_accum:Math.max(1,Math.round(16/+el('microBatch').value))
     });
-
+    el('prepareBtn').onclick = () => start('/api/serve', {pod_id:el('servePod').value,model_id:el('serveModel').value,dtype:'bf16'});
+    el('stopBtn').onclick = async () => { try { await api('/api/serve/stop',{method:'POST'}); serving={running:false}; renderServing(); } catch (err) { toast(err.message,true); } };
+    el('serveModel').onchange = syncModelPod;
+    el('servePod').onchange = syncModelPod;
+    el('sendBtn').onclick = sendMessage;
+    el('chatInput').addEventListener('keydown',(ev) => { if ((ev.metaKey||ev.ctrlKey) && ev.key==='Enter') sendMessage(); });
+    el('trainAgentBtn').onclick = () => start('/api/jobs/action/optimize-training',{pod_id:el('trainPod').value});
+    el('inferAgentBtn').onclick = () => start('/api/jobs/action/optimize-inference',{pod_id:el('trainPod').value});
+    el('dataBtn').onclick = () => start('/api/jobs/data',{total:+el('dataTotal').value,heldout:+el('dataHeld').value,workers:8});
+    el('migrateBtn').onclick = () => start('/api/jobs/action/migrate-nextgen',{source_pod_id:el('migrationSource').value,target_pod_id:el('migrationTarget').value});
+    el('cancelBtn').onclick = async () => { if (activeJob) await api('/api/jobs/'+activeJob+'/cancel',{method:'POST'}); };
     load();
   </script>
 </body>
