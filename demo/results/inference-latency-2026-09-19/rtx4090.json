@@ -1,0 +1,4203 @@
+{
+  "schema_version": 1,
+  "status": "measured",
+  "contract": {
+    "cases_sha256": "c7124fad94b9c20d5fdd611f9a869a998237848cf85fd3d64a60945c9af7932e",
+    "model_sha256": "02b0532346e314750330c6301670c2d6af40b874faf952f76f5fa326160ffbfb",
+    "prompt": "Extract:\n{sentence}\nJSON:\n",
+    "precision": "bf16 base; fp32 PEFT adapter (existing evaluation policy)",
+    "batch_size": 1,
+    "decoding": "greedy",
+    "max_new_tokens": 128,
+    "rounds": 5,
+    "warmups_per_case": 2,
+    "timing_scope": "resident handler: prompt, tokenization, GPU transfer, generation, synchronization, decoding, JSON parsing; excludes model load, compilation warmup, and network",
+    "json_policy": "exact parsed field values; invalid output always fails parity"
+  },
+  "model_identity": {
+    "sha256": "02b0532346e314750330c6301670c2d6af40b874faf952f76f5fa326160ffbfb",
+    "files": {
+      "base/config.json": "479dcf0c5286339e41ad3992cd08ae88a467c4187587936248e2b7c96283484b",
+      "base/generation_config.json": "8c970692323e3ea0e9b8b0a4dca79388d31226e41f83c9fd6014804280ebf6e8",
+      "base/merges.txt": "599bab54075088774b1733fde865d5bd747cbcc7a547c5bc12610e874e26f5e3",
+      "base/model.safetensors": "88c142557820ccad55bb59756bfcfcf891de9cc6202816bd346445188a0ed342",
+      "base/tokenizer.json": "c0382117ea329cdf097041132f6d735924b697924d6f6fc3945713e96ce87539",
+      "base/tokenizer_config.json": "c91efca15ceff6e9ee9424db58a6f59cd41294e550a86cbd07e3c1fb500b34f9",
+      "base/vocab.json": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+      "adapter/adapter_config.json": "07d36e13b0d75ea18d9f0dde9fda49b13553639b337956b76030b3b645341dd1",
+      "adapter/adapter_model.safetensors": "600691de70c80f28743563212ef26b4dac61a1014effaafde5fec1a48020992d",
+      "adapter/tokenizer.json": "3fd169731d2cbde95e10bf356d66d5997fd885dd8dbb6fb4684da3f23b2585d8",
+      "adapter/tokenizer_config.json": "b271a1c91521384eb6d794eb27c9d55b3ff93ade6beb59e668d55411155ea16e"
+    }
+  },
+  "cases": [
+    {
+      "id": "original-0",
+      "sentence": "Mei-Ling Chang, 24, is a graduate teaching assistant in the linguistics department at Taipei National University, where she began in 2024.",
+      "record": {
+        "name": "Mei-Ling Chang",
+        "age": 24,
+        "org": "Taipei National University",
+        "role": "graduate teaching assistant",
+        "year": 2024
+      }
+    },
+    {
+      "id": "original-1",
+      "sentence": "The startup NeuralLoop hired 24-year-old Kwame Mensah as a machine learning engineer back in 2021.",
+      "record": {
+        "name": "Kwame Mensah",
+        "age": 24,
+        "org": "NeuralLoop",
+        "role": "machine learning engineer",
+        "year": 2021
+      }
+    },
+    {
+      "id": "original-2",
+      "sentence": "It was in 1996 that Bogdan Ionescu, then 38, started working as a loan officer for Carpathian Savings Bank.",
+      "record": {
+        "name": "Bogdan Ionescu",
+        "age": 38,
+        "org": "Carpathian Savings Bank",
+        "role": "loan officer",
+        "year": 1996
+      }
+    },
+    {
+      "id": "original-3",
+      "sentence": "Sanne de Vries, at 22, signed on as a junior archivist with the Rotterdam Maritime Museum in 2018.",
+      "record": {
+        "name": "Sanne de Vries",
+        "age": 22,
+        "org": "Rotterdam Maritime Museum",
+        "role": "junior archivist",
+        "year": 2018
+      }
+    },
+    {
+      "id": "original-4",
+      "sentence": "The environmental NGO TerraVerde recruited 24-year-old Ingrid Halvorsen as a field coordinator back in 2015.",
+      "record": {
+        "name": "Ingrid Halvorsen",
+        "age": 24,
+        "org": "TerraVerde",
+        "role": "field coordinator",
+        "year": 2015
+      }
+    },
+    {
+      "id": "original-5",
+      "sentence": "At 25, Fatima Al-Zahra was already a junior researcher at Helios Biotech Lab, where she had worked since 2019.",
+      "record": {
+        "name": "Fatima Al-Zahra",
+        "age": 25,
+        "org": "Helios Biotech Lab",
+        "role": "junior researcher",
+        "year": 2019
+      }
+    },
+    {
+      "id": "independent-0",
+      "sentence": "The observatory opened in 1964. Its annual report records that Helena Brooks became telescope maintenance supervisor at Ridgeline Observatory in 2017, when she was 36.",
+      "record": {
+        "name": "Helena Brooks",
+        "age": 36,
+        "org": "Ridgeline Observatory",
+        "role": "telescope maintenance supervisor",
+        "year": 2017
+      }
+    },
+    {
+      "id": "independent-1",
+      "sentence": "For the appointment record, use 2019: that was the year Felix Hart, aged 42, joined Marshwater Trust as wetland restoration adviser. The trust's 2022 newsletter described the appointment retrospectively.",
+      "record": {
+        "name": "Felix Hart",
+        "age": 42,
+        "org": "Marshwater Trust",
+        "role": "wetland restoration adviser",
+        "year": 2019
+      }
+    },
+    {
+      "id": "independent-2",
+      "sentence": "In a 2025 interview, Priya Deshmukh recalled starting at Beacon Food Cooperative in 2014. She was 27 when she started there as cold-chain operations planner.",
+      "record": {
+        "name": "Priya Deshmukh",
+        "age": 27,
+        "org": "Beacon Food Cooperative",
+        "role": "cold-chain operations planner",
+        "year": 2014
+      }
+    },
+    {
+      "id": "independent-3",
+      "sentence": "Northgate Dental Centre advertised the vacancy in 2016 and made the appointment in 2018. The person appointed in 2018 was Marcus Bell, then aged 31, and the post was dental equipment technician.",
+      "record": {
+        "name": "Marcus Bell",
+        "age": 31,
+        "org": "Northgate Dental Centre",
+        "role": "dental equipment technician",
+        "year": 2018
+      }
+    },
+    {
+      "id": "independent-4",
+      "sentence": "Evelyn Price was 48 at the time of her 2020 appointment as coastal erosion surveyor with Tidemark Field Office. The office had relocated in 2011.",
+      "record": {
+        "name": "Evelyn Price",
+        "age": 48,
+        "org": "Tidemark Field Office",
+        "role": "coastal erosion surveyor",
+        "year": 2020
+      }
+    },
+    {
+      "id": "independent-5",
+      "sentence": "The building dates to 1892; the employment record concerns 2021. In that year, Wesley Grant, aged 25 at the start of employment, became stained-glass conservator at Foundry Heritage Centre.",
+      "record": {
+        "name": "Wesley Grant",
+        "age": 25,
+        "org": "Foundry Heritage Centre",
+        "role": "stained-glass conservator",
+        "year": 2021
+      }
+    },
+    {
+      "id": "finn-demo",
+      "sentence": "In 2026, Finn, 18, became a student at the University of Toronto.",
+      "record": {
+        "name": "Finn",
+        "age": 18,
+        "org": "University of Toronto",
+        "role": "student",
+        "year": 2026
+      }
+    }
+  ],
+  "samples": [
+    {
+      "case_id": "original-0",
+      "raw_output": "{\"name\":\"Mei-Ling Chang\",\"age\":24,\"org\":\"Taipei National University\",\"role\":\"graduate teaching assistant\",\"year\":2024}",
+      "parsed": {
+        "name": "Mei-Ling Chang",
+        "age": 24,
+        "org": "Taipei National University",
+        "role": "graduate teaching assistant",
+        "year": 2024
+      },
+      "new_tokens": 35,
+      "latency_s": 0.638258071616292,
+      "engine": "baseline",
+      "round": 0,
+      "peak_allocated_bytes": 1026690560,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "original-0",
+      "raw_output": "{\"name\":\"Mei-Ling Chang\",\"age\":24,\"org\":\"Taipei National University\",\"role\":\"graduate teaching assistant\",\"year\":2024}",
+      "parsed": {
+        "name": "Mei-Ling Chang",
+        "age": 24,
+        "org": "Taipei National University",
+        "role": "graduate teaching assistant",
+        "year": 2024
+      },
+      "new_tokens": 35,
+      "latency_s": 0.16178021393716335,
+      "engine": "optimized",
+      "round": 0,
+      "peak_allocated_bytes": 1028447744,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "original-1",
+      "raw_output": "{\"name\":\"Kwame Mensah\",\"age\":24,\"org\":\"NeuralLoop\",\"role\":\"machine learning engineer\",\"year\":2021}",
+      "parsed": {
+        "name": "Kwame Mensah",
+        "age": 24,
+        "org": "NeuralLoop",
+        "role": "machine learning engineer",
+        "year": 2021
+      },
+      "new_tokens": 34,
+      "latency_s": 0.15189720503985882,
+      "engine": "optimized",
+      "round": 0,
+      "peak_allocated_bytes": 1027892736,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "original-1",
+      "raw_output": "{\"name\":\"Kwame Mensah\",\"age\":24,\"org\":\"NeuralLoop\",\"role\":\"machine learning engineer\",\"year\":2021}",
+      "parsed": {
+        "name": "Kwame Mensah",
+        "age": 24,
+        "org": "NeuralLoop",
+        "role": "machine learning engineer",
+        "year": 2021
+      },
+      "new_tokens": 34,
+      "latency_s": 0.6205052677541971,
+      "engine": "baseline",
+      "round": 0,
+      "peak_allocated_bytes": 1026037248,
+      "peak_reserved_bytes": 1182793728
+    },
+    {
+      "case_id": "original-2",
+      "raw_output": "{\"name\":\"Bogdan Ionescu\",\"age\":38,\"org\":\"Carpathian Savings Bank\",\"role\":\"loan officer\",\"year\":1996}",
+      "parsed": {
+        "name": "Bogdan Ionescu",
+        "age": 38,
+        "org": "Carpathian Savings Bank",
+        "role": "loan officer",
+        "year": 1996
+      },
+      "new_tokens": 36,
+      "latency_s": 0.6537608820945024,
+      "engine": "baseline",
+      "round": 0,
+      "peak_allocated_bytes": 1026527744,
+      "peak_reserved_bytes": 1182793728
+    },
+    {
+      "case_id": "original-2",
+      "raw_output": "{\"name\":\"Bogdan Ionescu\",\"age\":38,\"org\":\"Carpathian Savings Bank\",\"role\":\"loan officer\",\"year\":1996}",
+      "parsed": {
+        "name": "Bogdan Ionescu",
+        "age": 38,
+        "org": "Carpathian Savings Bank",
+        "role": "loan officer",
+        "year": 1996
+      },
+      "new_tokens": 36,
+      "latency_s": 0.15906484238803387,
+      "engine": "optimized",
+      "round": 0,
+      "peak_allocated_bytes": 1028309504,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "original-3",
+      "raw_output": "{\"name\":\"Sanne de Vries\",\"age\":22,\"org\":\"Rotterdam Maritime Museum\",\"role\":\"junior archivist\",\"year\":2018}",
+      "parsed": {
+        "name": "Sanne de Vries",
+        "age": 22,
+        "org": "Rotterdam Maritime Museum",
+        "role": "junior archivist",
+        "year": 2018
+      },
+      "new_tokens": 36,
+      "latency_s": 0.1570810079574585,
+      "engine": "optimized",
+      "round": 0,
+      "peak_allocated_bytes": 1028100096,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "original-3",
+      "raw_output": "{\"name\":\"Sanne de Vries\",\"age\":22,\"org\":\"Rotterdam Maritime Museum\",\"role\":\"junior archivist\",\"year\":2018}",
+      "parsed": {
+        "name": "Sanne de Vries",
+        "age": 22,
+        "org": "Rotterdam Maritime Museum",
+        "role": "junior archivist",
+        "year": 2018
+      },
+      "new_tokens": 36,
+      "latency_s": 0.6521716229617596,
+      "engine": "baseline",
+      "round": 0,
+      "peak_allocated_bytes": 1026269184,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "original-4",
+      "raw_output": "{\"name\":\"Ingrid Halvorsen\",\"age\":24,\"org\":\"TerraVerde\",\"role\":\"field coordinator\",\"year\":2015}",
+      "parsed": {
+        "name": "Ingrid Halvorsen",
+        "age": 24,
+        "org": "TerraVerde",
+        "role": "field coordinator",
+        "year": 2015
+      },
+      "new_tokens": 35,
+      "latency_s": 0.6356305703520775,
+      "engine": "baseline",
+      "round": 0,
+      "peak_allocated_bytes": 1026269184,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "original-4",
+      "raw_output": "{\"name\":\"Ingrid Halvorsen\",\"age\":24,\"org\":\"TerraVerde\",\"role\":\"field coordinator\",\"year\":2015}",
+      "parsed": {
+        "name": "Ingrid Halvorsen",
+        "age": 24,
+        "org": "TerraVerde",
+        "role": "field coordinator",
+        "year": 2015
+      },
+      "new_tokens": 35,
+      "latency_s": 0.13897820003330708,
+      "engine": "optimized",
+      "round": 0,
+      "peak_allocated_bytes": 1028100096,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "original-5",
+      "raw_output": "{\"name\":\"Fatima Al-Zahra\",\"age\":25,\"org\":\"Helios Biotech Lab\",\"role\":\"junior researcher\",\"year\":2019}",
+      "parsed": {
+        "name": "Fatima Al-Zahra",
+        "age": 25,
+        "org": "Helios Biotech Lab",
+        "role": "junior researcher",
+        "year": 2019
+      },
+      "new_tokens": 37,
+      "latency_s": 0.16045431420207024,
+      "engine": "optimized",
+      "round": 0,
+      "peak_allocated_bytes": 1028377600,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "original-5",
+      "raw_output": "{\"name\":\"Fatima Al-Zahra\",\"age\":25,\"org\":\"Helios Biotech Lab\",\"role\":\"junior researcher\",\"year\":2019}",
+      "parsed": {
+        "name": "Fatima Al-Zahra",
+        "age": 25,
+        "org": "Helios Biotech Lab",
+        "role": "junior researcher",
+        "year": 2019
+      },
+      "new_tokens": 37,
+      "latency_s": 0.6728625372052193,
+      "engine": "baseline",
+      "round": 0,
+      "peak_allocated_bytes": 1026595840,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "independent-0",
+      "raw_output": "{\"name\":\"Helena Brooks\",\"age\":36,\"org\":\"Ridgeline Observatory\",\"role\":\"telescope maintenance supervisor\",\"year\":2017}",
+      "parsed": {
+        "name": "Helena Brooks",
+        "age": 36,
+        "org": "Ridgeline Observatory",
+        "role": "telescope maintenance supervisor",
+        "year": 2017
+      },
+      "new_tokens": 35,
+      "latency_s": 0.6369075309485197,
+      "engine": "baseline",
+      "round": 0,
+      "peak_allocated_bytes": 1027181056,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "independent-0",
+      "raw_output": "{\"name\":\"Helena Brooks\",\"age\":36,\"org\":\"Ridgeline Observatory\",\"role\":\"telescope maintenance supervisor\",\"year\":2017}",
+      "parsed": {
+        "name": "Helena Brooks",
+        "age": 36,
+        "org": "Ridgeline Observatory",
+        "role": "telescope maintenance supervisor",
+        "year": 2017
+      },
+      "new_tokens": 35,
+      "latency_s": 0.155618691816926,
+      "engine": "optimized",
+      "round": 0,
+      "peak_allocated_bytes": 1028864512,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "independent-1",
+      "raw_output": "{\"name\":\"Felix Hart\",\"age\":42,\"org\":\"Marshwater Trust\",\"role\":\"wetland restoration adviser\",\"year\":2019}",
+      "parsed": {
+        "name": "Felix Hart",
+        "age": 42,
+        "org": "Marshwater Trust",
+        "role": "wetland restoration adviser",
+        "year": 2019
+      },
+      "new_tokens": 34,
+      "latency_s": 0.13482525758445263,
+      "engine": "optimized",
+      "round": 0,
+      "peak_allocated_bytes": 1029419520,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "independent-1",
+      "raw_output": "{\"name\":\"Felix Hart\",\"age\":42,\"org\":\"Marshwater Trust\",\"role\":\"wetland restoration adviser\",\"year\":2019}",
+      "parsed": {
+        "name": "Felix Hart",
+        "age": 42,
+        "org": "Marshwater Trust",
+        "role": "wetland restoration adviser",
+        "year": 2019
+      },
+      "new_tokens": 34,
+      "latency_s": 0.6233882661908865,
+      "engine": "baseline",
+      "round": 0,
+      "peak_allocated_bytes": 1027834368,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "independent-2",
+      "raw_output": "{\"name\":\"Priya Deshmukh\",\"age\":27,\"org\":\"Beacon Food Cooperative\",\"role\":\"cold-chain operations planner\",\"year\":2014}",
+      "parsed": {
+        "name": "Priya Deshmukh",
+        "age": 27,
+        "org": "Beacon Food Cooperative",
+        "role": "cold-chain operations planner",
+        "year": 2014
+      },
+      "new_tokens": 37,
+      "latency_s": 0.6768434215337038,
+      "engine": "baseline",
+      "round": 0,
+      "peak_allocated_bytes": 1027343872,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "independent-2",
+      "raw_output": "{\"name\":\"Priya Deshmukh\",\"age\":27,\"org\":\"Beacon Food Cooperative\",\"role\":\"cold-chain operations planner\",\"year\":2014}",
+      "parsed": {
+        "name": "Priya Deshmukh",
+        "age": 27,
+        "org": "Beacon Food Cooperative",
+        "role": "cold-chain operations planner",
+        "year": 2014
+      },
+      "new_tokens": 37,
+      "latency_s": 0.1626229416579008,
+      "engine": "optimized",
+      "round": 0,
+      "peak_allocated_bytes": 1029002752,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "independent-3",
+      "raw_output": "{\"name\":\"Marcus Bell\",\"age\":31,\"org\":\"Northgate Dental Centre\",\"role\":\"dental equipment technician\",\"year\":2018}",
+      "parsed": {
+        "name": "Marcus Bell",
+        "age": 31,
+        "org": "Northgate Dental Centre",
+        "role": "dental equipment technician",
+        "year": 2018
+      },
+      "new_tokens": 33,
+      "latency_s": 0.13323563151061535,
+      "engine": "optimized",
+      "round": 0,
+      "peak_allocated_bytes": 1029557760,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "independent-3",
+      "raw_output": "{\"name\":\"Marcus Bell\",\"age\":31,\"org\":\"Northgate Dental Centre\",\"role\":\"dental equipment technician\",\"year\":2018}",
+      "parsed": {
+        "name": "Marcus Bell",
+        "age": 31,
+        "org": "Northgate Dental Centre",
+        "role": "dental equipment technician",
+        "year": 2018
+      },
+      "new_tokens": 33,
+      "latency_s": 0.6018343679606915,
+      "engine": "baseline",
+      "round": 0,
+      "peak_allocated_bytes": 1027997184,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "independent-4",
+      "raw_output": "{\"name\":\"Evelyn Price\",\"age\":48,\"org\":\"Tidemark Field Office\",\"role\":\"coastal erosion surveyor\",\"year\":2020}",
+      "parsed": {
+        "name": "Evelyn Price",
+        "age": 48,
+        "org": "Tidemark Field Office",
+        "role": "coastal erosion surveyor",
+        "year": 2020
+      },
+      "new_tokens": 38,
+      "latency_s": 0.6923576034605503,
+      "engine": "baseline",
+      "round": 0,
+      "peak_allocated_bytes": 1027249152,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "independent-4",
+      "raw_output": "{\"name\":\"Evelyn Price\",\"age\":48,\"org\":\"Tidemark Field Office\",\"role\":\"coastal erosion surveyor\",\"year\":2020}",
+      "parsed": {
+        "name": "Evelyn Price",
+        "age": 48,
+        "org": "Tidemark Field Office",
+        "role": "coastal erosion surveyor",
+        "year": 2020
+      },
+      "new_tokens": 38,
+      "latency_s": 0.16574325412511826,
+      "engine": "optimized",
+      "round": 0,
+      "peak_allocated_bytes": 1028932608,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "independent-5",
+      "raw_output": "{\"name\":\"Wesley Grant\",\"age\":25,\"org\":\"Foundry Heritage Centre\",\"role\":\"stained-glass conservator\",\"year\":2021}",
+      "parsed": {
+        "name": "Wesley Grant",
+        "age": 25,
+        "org": "Foundry Heritage Centre",
+        "role": "stained-glass conservator",
+        "year": 2021
+      },
+      "new_tokens": 37,
+      "latency_s": 0.14503002911806107,
+      "engine": "optimized",
+      "round": 0,
+      "peak_allocated_bytes": 1029419520,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "independent-5",
+      "raw_output": "{\"name\":\"Wesley Grant\",\"age\":25,\"org\":\"Foundry Heritage Centre\",\"role\":\"stained-glass conservator\",\"year\":2021}",
+      "parsed": {
+        "name": "Wesley Grant",
+        "age": 25,
+        "org": "Foundry Heritage Centre",
+        "role": "stained-glass conservator",
+        "year": 2021
+      },
+      "new_tokens": 37,
+      "latency_s": 0.8174270484596491,
+      "engine": "baseline",
+      "round": 0,
+      "peak_allocated_bytes": 1027834368,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "finn-demo",
+      "raw_output": "{\"name\":\"Finn\",\"age\":18,\"org\":\"University of Toronto\",\"role\":\"student\",\"year\":2026}",
+      "parsed": {
+        "name": "Finn",
+        "age": 18,
+        "org": "University of Toronto",
+        "role": "student",
+        "year": 2026
+      },
+      "new_tokens": 29,
+      "latency_s": 0.5649195853620768,
+      "engine": "baseline",
+      "round": 0,
+      "peak_allocated_bytes": 1025678336,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "finn-demo",
+      "raw_output": "{\"name\":\"Finn\",\"age\":18,\"org\":\"University of Toronto\",\"role\":\"student\",\"year\":2026}",
+      "parsed": {
+        "name": "Finn",
+        "age": 18,
+        "org": "University of Toronto",
+        "role": "student",
+        "year": 2026
+      },
+      "new_tokens": 29,
+      "latency_s": 0.13688000291585922,
+      "engine": "optimized",
+      "round": 0,
+      "peak_allocated_bytes": 1027545088,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "original-1",
+      "raw_output": "{\"name\":\"Kwame Mensah\",\"age\":24,\"org\":\"NeuralLoop\",\"role\":\"machine learning engineer\",\"year\":2021}",
+      "parsed": {
+        "name": "Kwame Mensah",
+        "age": 24,
+        "org": "NeuralLoop",
+        "role": "machine learning engineer",
+        "year": 2021
+      },
+      "new_tokens": 34,
+      "latency_s": 0.13578113541007042,
+      "engine": "optimized",
+      "round": 1,
+      "peak_allocated_bytes": 1027892736,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "original-1",
+      "raw_output": "{\"name\":\"Kwame Mensah\",\"age\":24,\"org\":\"NeuralLoop\",\"role\":\"machine learning engineer\",\"year\":2021}",
+      "parsed": {
+        "name": "Kwame Mensah",
+        "age": 24,
+        "org": "NeuralLoop",
+        "role": "machine learning engineer",
+        "year": 2021
+      },
+      "new_tokens": 34,
+      "latency_s": 0.6183352675288916,
+      "engine": "baseline",
+      "round": 1,
+      "peak_allocated_bytes": 1026037248,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "original-2",
+      "raw_output": "{\"name\":\"Bogdan Ionescu\",\"age\":38,\"org\":\"Carpathian Savings Bank\",\"role\":\"loan officer\",\"year\":1996}",
+      "parsed": {
+        "name": "Bogdan Ionescu",
+        "age": 38,
+        "org": "Carpathian Savings Bank",
+        "role": "loan officer",
+        "year": 1996
+      },
+      "new_tokens": 36,
+      "latency_s": 0.6531654689460993,
+      "engine": "baseline",
+      "round": 1,
+      "peak_allocated_bytes": 1026527744,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "original-2",
+      "raw_output": "{\"name\":\"Bogdan Ionescu\",\"age\":38,\"org\":\"Carpathian Savings Bank\",\"role\":\"loan officer\",\"year\":1996}",
+      "parsed": {
+        "name": "Bogdan Ionescu",
+        "age": 38,
+        "org": "Carpathian Savings Bank",
+        "role": "loan officer",
+        "year": 1996
+      },
+      "new_tokens": 36,
+      "latency_s": 0.1426436435431242,
+      "engine": "optimized",
+      "round": 1,
+      "peak_allocated_bytes": 1028309504,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "original-3",
+      "raw_output": "{\"name\":\"Sanne de Vries\",\"age\":22,\"org\":\"Rotterdam Maritime Museum\",\"role\":\"junior archivist\",\"year\":2018}",
+      "parsed": {
+        "name": "Sanne de Vries",
+        "age": 22,
+        "org": "Rotterdam Maritime Museum",
+        "role": "junior archivist",
+        "year": 2018
+      },
+      "new_tokens": 36,
+      "latency_s": 0.14131024666130543,
+      "engine": "optimized",
+      "round": 1,
+      "peak_allocated_bytes": 1028100096,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "original-3",
+      "raw_output": "{\"name\":\"Sanne de Vries\",\"age\":22,\"org\":\"Rotterdam Maritime Museum\",\"role\":\"junior archivist\",\"year\":2018}",
+      "parsed": {
+        "name": "Sanne de Vries",
+        "age": 22,
+        "org": "Rotterdam Maritime Museum",
+        "role": "junior archivist",
+        "year": 2018
+      },
+      "new_tokens": 36,
+      "latency_s": 0.6544538773596287,
+      "engine": "baseline",
+      "round": 1,
+      "peak_allocated_bytes": 1026269184,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "original-4",
+      "raw_output": "{\"name\":\"Ingrid Halvorsen\",\"age\":24,\"org\":\"TerraVerde\",\"role\":\"field coordinator\",\"year\":2015}",
+      "parsed": {
+        "name": "Ingrid Halvorsen",
+        "age": 24,
+        "org": "TerraVerde",
+        "role": "field coordinator",
+        "year": 2015
+      },
+      "new_tokens": 35,
+      "latency_s": 0.6358030159026384,
+      "engine": "baseline",
+      "round": 1,
+      "peak_allocated_bytes": 1026269184,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "original-4",
+      "raw_output": "{\"name\":\"Ingrid Halvorsen\",\"age\":24,\"org\":\"TerraVerde\",\"role\":\"field coordinator\",\"year\":2015}",
+      "parsed": {
+        "name": "Ingrid Halvorsen",
+        "age": 24,
+        "org": "TerraVerde",
+        "role": "field coordinator",
+        "year": 2015
+      },
+      "new_tokens": 35,
+      "latency_s": 0.14014117792248726,
+      "engine": "optimized",
+      "round": 1,
+      "peak_allocated_bytes": 1028100096,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "original-5",
+      "raw_output": "{\"name\":\"Fatima Al-Zahra\",\"age\":25,\"org\":\"Helios Biotech Lab\",\"role\":\"junior researcher\",\"year\":2019}",
+      "parsed": {
+        "name": "Fatima Al-Zahra",
+        "age": 25,
+        "org": "Helios Biotech Lab",
+        "role": "junior researcher",
+        "year": 2019
+      },
+      "new_tokens": 37,
+      "latency_s": 0.14428981393575668,
+      "engine": "optimized",
+      "round": 1,
+      "peak_allocated_bytes": 1028377600,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "original-5",
+      "raw_output": "{\"name\":\"Fatima Al-Zahra\",\"age\":25,\"org\":\"Helios Biotech Lab\",\"role\":\"junior researcher\",\"year\":2019}",
+      "parsed": {
+        "name": "Fatima Al-Zahra",
+        "age": 25,
+        "org": "Helios Biotech Lab",
+        "role": "junior researcher",
+        "year": 2019
+      },
+      "new_tokens": 37,
+      "latency_s": 0.6713785920292139,
+      "engine": "baseline",
+      "round": 1,
+      "peak_allocated_bytes": 1026595840,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "independent-0",
+      "raw_output": "{\"name\":\"Helena Brooks\",\"age\":36,\"org\":\"Ridgeline Observatory\",\"role\":\"telescope maintenance supervisor\",\"year\":2017}",
+      "parsed": {
+        "name": "Helena Brooks",
+        "age": 36,
+        "org": "Ridgeline Observatory",
+        "role": "telescope maintenance supervisor",
+        "year": 2017
+      },
+      "new_tokens": 35,
+      "latency_s": 0.6337541975080967,
+      "engine": "baseline",
+      "round": 1,
+      "peak_allocated_bytes": 1027181056,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "independent-0",
+      "raw_output": "{\"name\":\"Helena Brooks\",\"age\":36,\"org\":\"Ridgeline Observatory\",\"role\":\"telescope maintenance supervisor\",\"year\":2017}",
+      "parsed": {
+        "name": "Helena Brooks",
+        "age": 36,
+        "org": "Ridgeline Observatory",
+        "role": "telescope maintenance supervisor",
+        "year": 2017
+      },
+      "new_tokens": 35,
+      "latency_s": 0.13923813961446285,
+      "engine": "optimized",
+      "round": 1,
+      "peak_allocated_bytes": 1028864512,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "independent-1",
+      "raw_output": "{\"name\":\"Felix Hart\",\"age\":42,\"org\":\"Marshwater Trust\",\"role\":\"wetland restoration adviser\",\"year\":2019}",
+      "parsed": {
+        "name": "Felix Hart",
+        "age": 42,
+        "org": "Marshwater Trust",
+        "role": "wetland restoration adviser",
+        "year": 2019
+      },
+      "new_tokens": 34,
+      "latency_s": 0.13415450043976307,
+      "engine": "optimized",
+      "round": 1,
+      "peak_allocated_bytes": 1029419520,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "independent-1",
+      "raw_output": "{\"name\":\"Felix Hart\",\"age\":42,\"org\":\"Marshwater Trust\",\"role\":\"wetland restoration adviser\",\"year\":2019}",
+      "parsed": {
+        "name": "Felix Hart",
+        "age": 42,
+        "org": "Marshwater Trust",
+        "role": "wetland restoration adviser",
+        "year": 2019
+      },
+      "new_tokens": 34,
+      "latency_s": 0.6196760255843401,
+      "engine": "baseline",
+      "round": 1,
+      "peak_allocated_bytes": 1027834368,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "independent-2",
+      "raw_output": "{\"name\":\"Priya Deshmukh\",\"age\":27,\"org\":\"Beacon Food Cooperative\",\"role\":\"cold-chain operations planner\",\"year\":2014}",
+      "parsed": {
+        "name": "Priya Deshmukh",
+        "age": 27,
+        "org": "Beacon Food Cooperative",
+        "role": "cold-chain operations planner",
+        "year": 2014
+      },
+      "new_tokens": 37,
+      "latency_s": 0.6754613239318132,
+      "engine": "baseline",
+      "round": 1,
+      "peak_allocated_bytes": 1027343872,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "independent-2",
+      "raw_output": "{\"name\":\"Priya Deshmukh\",\"age\":27,\"org\":\"Beacon Food Cooperative\",\"role\":\"cold-chain operations planner\",\"year\":2014}",
+      "parsed": {
+        "name": "Priya Deshmukh",
+        "age": 27,
+        "org": "Beacon Food Cooperative",
+        "role": "cold-chain operations planner",
+        "year": 2014
+      },
+      "new_tokens": 37,
+      "latency_s": 0.16245394386351109,
+      "engine": "optimized",
+      "round": 1,
+      "peak_allocated_bytes": 1029002752,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "independent-3",
+      "raw_output": "{\"name\":\"Marcus Bell\",\"age\":31,\"org\":\"Northgate Dental Centre\",\"role\":\"dental equipment technician\",\"year\":2018}",
+      "parsed": {
+        "name": "Marcus Bell",
+        "age": 31,
+        "org": "Northgate Dental Centre",
+        "role": "dental equipment technician",
+        "year": 2018
+      },
+      "new_tokens": 33,
+      "latency_s": 0.13117523677647114,
+      "engine": "optimized",
+      "round": 1,
+      "peak_allocated_bytes": 1029557760,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "independent-3",
+      "raw_output": "{\"name\":\"Marcus Bell\",\"age\":31,\"org\":\"Northgate Dental Centre\",\"role\":\"dental equipment technician\",\"year\":2018}",
+      "parsed": {
+        "name": "Marcus Bell",
+        "age": 31,
+        "org": "Northgate Dental Centre",
+        "role": "dental equipment technician",
+        "year": 2018
+      },
+      "new_tokens": 33,
+      "latency_s": 0.5997692905366421,
+      "engine": "baseline",
+      "round": 1,
+      "peak_allocated_bytes": 1027997184,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "independent-4",
+      "raw_output": "{\"name\":\"Evelyn Price\",\"age\":48,\"org\":\"Tidemark Field Office\",\"role\":\"coastal erosion surveyor\",\"year\":2020}",
+      "parsed": {
+        "name": "Evelyn Price",
+        "age": 48,
+        "org": "Tidemark Field Office",
+        "role": "coastal erosion surveyor",
+        "year": 2020
+      },
+      "new_tokens": 38,
+      "latency_s": 0.6891856137663126,
+      "engine": "baseline",
+      "round": 1,
+      "peak_allocated_bytes": 1027249152,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "independent-4",
+      "raw_output": "{\"name\":\"Evelyn Price\",\"age\":48,\"org\":\"Tidemark Field Office\",\"role\":\"coastal erosion surveyor\",\"year\":2020}",
+      "parsed": {
+        "name": "Evelyn Price",
+        "age": 48,
+        "org": "Tidemark Field Office",
+        "role": "coastal erosion surveyor",
+        "year": 2020
+      },
+      "new_tokens": 38,
+      "latency_s": 0.15040198341012,
+      "engine": "optimized",
+      "round": 1,
+      "peak_allocated_bytes": 1028932608,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "independent-5",
+      "raw_output": "{\"name\":\"Wesley Grant\",\"age\":25,\"org\":\"Foundry Heritage Centre\",\"role\":\"stained-glass conservator\",\"year\":2021}",
+      "parsed": {
+        "name": "Wesley Grant",
+        "age": 25,
+        "org": "Foundry Heritage Centre",
+        "role": "stained-glass conservator",
+        "year": 2021
+      },
+      "new_tokens": 37,
+      "latency_s": 0.16064796596765518,
+      "engine": "optimized",
+      "round": 1,
+      "peak_allocated_bytes": 1029419520,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "independent-5",
+      "raw_output": "{\"name\":\"Wesley Grant\",\"age\":25,\"org\":\"Foundry Heritage Centre\",\"role\":\"stained-glass conservator\",\"year\":2021}",
+      "parsed": {
+        "name": "Wesley Grant",
+        "age": 25,
+        "org": "Foundry Heritage Centre",
+        "role": "stained-glass conservator",
+        "year": 2021
+      },
+      "new_tokens": 37,
+      "latency_s": 0.6688359100371599,
+      "engine": "baseline",
+      "round": 1,
+      "peak_allocated_bytes": 1027834368,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "finn-demo",
+      "raw_output": "{\"name\":\"Finn\",\"age\":18,\"org\":\"University of Toronto\",\"role\":\"student\",\"year\":2026}",
+      "parsed": {
+        "name": "Finn",
+        "age": 18,
+        "org": "University of Toronto",
+        "role": "student",
+        "year": 2026
+      },
+      "new_tokens": 29,
+      "latency_s": 0.5236286707222462,
+      "engine": "baseline",
+      "round": 1,
+      "peak_allocated_bytes": 1025678336,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "finn-demo",
+      "raw_output": "{\"name\":\"Finn\",\"age\":18,\"org\":\"University of Toronto\",\"role\":\"student\",\"year\":2026}",
+      "parsed": {
+        "name": "Finn",
+        "age": 18,
+        "org": "University of Toronto",
+        "role": "student",
+        "year": 2026
+      },
+      "new_tokens": 29,
+      "latency_s": 0.11857806146144867,
+      "engine": "optimized",
+      "round": 1,
+      "peak_allocated_bytes": 1027545088,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "original-0",
+      "raw_output": "{\"name\":\"Mei-Ling Chang\",\"age\":24,\"org\":\"Taipei National University\",\"role\":\"graduate teaching assistant\",\"year\":2024}",
+      "parsed": {
+        "name": "Mei-Ling Chang",
+        "age": 24,
+        "org": "Taipei National University",
+        "role": "graduate teaching assistant",
+        "year": 2024
+      },
+      "new_tokens": 35,
+      "latency_s": 0.15365550853312016,
+      "engine": "optimized",
+      "round": 1,
+      "peak_allocated_bytes": 1028447744,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "original-0",
+      "raw_output": "{\"name\":\"Mei-Ling Chang\",\"age\":24,\"org\":\"Taipei National University\",\"role\":\"graduate teaching assistant\",\"year\":2024}",
+      "parsed": {
+        "name": "Mei-Ling Chang",
+        "age": 24,
+        "org": "Taipei National University",
+        "role": "graduate teaching assistant",
+        "year": 2024
+      },
+      "new_tokens": 35,
+      "latency_s": 0.6362897157669067,
+      "engine": "baseline",
+      "round": 1,
+      "peak_allocated_bytes": 1026690560,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "original-2",
+      "raw_output": "{\"name\":\"Bogdan Ionescu\",\"age\":38,\"org\":\"Carpathian Savings Bank\",\"role\":\"loan officer\",\"year\":1996}",
+      "parsed": {
+        "name": "Bogdan Ionescu",
+        "age": 38,
+        "org": "Carpathian Savings Bank",
+        "role": "loan officer",
+        "year": 1996
+      },
+      "new_tokens": 36,
+      "latency_s": 0.650387816131115,
+      "engine": "baseline",
+      "round": 2,
+      "peak_allocated_bytes": 1026527744,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "original-2",
+      "raw_output": "{\"name\":\"Bogdan Ionescu\",\"age\":38,\"org\":\"Carpathian Savings Bank\",\"role\":\"loan officer\",\"year\":1996}",
+      "parsed": {
+        "name": "Bogdan Ionescu",
+        "age": 38,
+        "org": "Carpathian Savings Bank",
+        "role": "loan officer",
+        "year": 1996
+      },
+      "new_tokens": 36,
+      "latency_s": 0.14460179768502712,
+      "engine": "optimized",
+      "round": 2,
+      "peak_allocated_bytes": 1028309504,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "original-3",
+      "raw_output": "{\"name\":\"Sanne de Vries\",\"age\":22,\"org\":\"Rotterdam Maritime Museum\",\"role\":\"junior archivist\",\"year\":2018}",
+      "parsed": {
+        "name": "Sanne de Vries",
+        "age": 22,
+        "org": "Rotterdam Maritime Museum",
+        "role": "junior archivist",
+        "year": 2018
+      },
+      "new_tokens": 36,
+      "latency_s": 0.1433793269097805,
+      "engine": "optimized",
+      "round": 2,
+      "peak_allocated_bytes": 1028100096,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "original-3",
+      "raw_output": "{\"name\":\"Sanne de Vries\",\"age\":22,\"org\":\"Rotterdam Maritime Museum\",\"role\":\"junior archivist\",\"year\":2018}",
+      "parsed": {
+        "name": "Sanne de Vries",
+        "age": 22,
+        "org": "Rotterdam Maritime Museum",
+        "role": "junior archivist",
+        "year": 2018
+      },
+      "new_tokens": 36,
+      "latency_s": 0.6495604887604713,
+      "engine": "baseline",
+      "round": 2,
+      "peak_allocated_bytes": 1026269184,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "original-4",
+      "raw_output": "{\"name\":\"Ingrid Halvorsen\",\"age\":24,\"org\":\"TerraVerde\",\"role\":\"field coordinator\",\"year\":2015}",
+      "parsed": {
+        "name": "Ingrid Halvorsen",
+        "age": 24,
+        "org": "TerraVerde",
+        "role": "field coordinator",
+        "year": 2015
+      },
+      "new_tokens": 35,
+      "latency_s": 0.6399130765348673,
+      "engine": "baseline",
+      "round": 2,
+      "peak_allocated_bytes": 1026269184,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "original-4",
+      "raw_output": "{\"name\":\"Ingrid Halvorsen\",\"age\":24,\"org\":\"TerraVerde\",\"role\":\"field coordinator\",\"year\":2015}",
+      "parsed": {
+        "name": "Ingrid Halvorsen",
+        "age": 24,
+        "org": "TerraVerde",
+        "role": "field coordinator",
+        "year": 2015
+      },
+      "new_tokens": 35,
+      "latency_s": 0.13972526043653488,
+      "engine": "optimized",
+      "round": 2,
+      "peak_allocated_bytes": 1028100096,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "original-5",
+      "raw_output": "{\"name\":\"Fatima Al-Zahra\",\"age\":25,\"org\":\"Helios Biotech Lab\",\"role\":\"junior researcher\",\"year\":2019}",
+      "parsed": {
+        "name": "Fatima Al-Zahra",
+        "age": 25,
+        "org": "Helios Biotech Lab",
+        "role": "junior researcher",
+        "year": 2019
+      },
+      "new_tokens": 37,
+      "latency_s": 0.14458687976002693,
+      "engine": "optimized",
+      "round": 2,
+      "peak_allocated_bytes": 1028377600,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "original-5",
+      "raw_output": "{\"name\":\"Fatima Al-Zahra\",\"age\":25,\"org\":\"Helios Biotech Lab\",\"role\":\"junior researcher\",\"year\":2019}",
+      "parsed": {
+        "name": "Fatima Al-Zahra",
+        "age": 25,
+        "org": "Helios Biotech Lab",
+        "role": "junior researcher",
+        "year": 2019
+      },
+      "new_tokens": 37,
+      "latency_s": 0.6673804353922606,
+      "engine": "baseline",
+      "round": 2,
+      "peak_allocated_bytes": 1026595840,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "independent-0",
+      "raw_output": "{\"name\":\"Helena Brooks\",\"age\":36,\"org\":\"Ridgeline Observatory\",\"role\":\"telescope maintenance supervisor\",\"year\":2017}",
+      "parsed": {
+        "name": "Helena Brooks",
+        "age": 36,
+        "org": "Ridgeline Observatory",
+        "role": "telescope maintenance supervisor",
+        "year": 2017
+      },
+      "new_tokens": 35,
+      "latency_s": 0.6338158044964075,
+      "engine": "baseline",
+      "round": 2,
+      "peak_allocated_bytes": 1027181056,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "independent-0",
+      "raw_output": "{\"name\":\"Helena Brooks\",\"age\":36,\"org\":\"Ridgeline Observatory\",\"role\":\"telescope maintenance supervisor\",\"year\":2017}",
+      "parsed": {
+        "name": "Helena Brooks",
+        "age": 36,
+        "org": "Ridgeline Observatory",
+        "role": "telescope maintenance supervisor",
+        "year": 2017
+      },
+      "new_tokens": 35,
+      "latency_s": 0.14003157429397106,
+      "engine": "optimized",
+      "round": 2,
+      "peak_allocated_bytes": 1028864512,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "independent-1",
+      "raw_output": "{\"name\":\"Felix Hart\",\"age\":42,\"org\":\"Marshwater Trust\",\"role\":\"wetland restoration adviser\",\"year\":2019}",
+      "parsed": {
+        "name": "Felix Hart",
+        "age": 42,
+        "org": "Marshwater Trust",
+        "role": "wetland restoration adviser",
+        "year": 2019
+      },
+      "new_tokens": 34,
+      "latency_s": 0.1343075279146433,
+      "engine": "optimized",
+      "round": 2,
+      "peak_allocated_bytes": 1029419520,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "independent-1",
+      "raw_output": "{\"name\":\"Felix Hart\",\"age\":42,\"org\":\"Marshwater Trust\",\"role\":\"wetland restoration adviser\",\"year\":2019}",
+      "parsed": {
+        "name": "Felix Hart",
+        "age": 42,
+        "org": "Marshwater Trust",
+        "role": "wetland restoration adviser",
+        "year": 2019
+      },
+      "new_tokens": 34,
+      "latency_s": 0.6145835127681494,
+      "engine": "baseline",
+      "round": 2,
+      "peak_allocated_bytes": 1027834368,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "independent-2",
+      "raw_output": "{\"name\":\"Priya Deshmukh\",\"age\":27,\"org\":\"Beacon Food Cooperative\",\"role\":\"cold-chain operations planner\",\"year\":2014}",
+      "parsed": {
+        "name": "Priya Deshmukh",
+        "age": 27,
+        "org": "Beacon Food Cooperative",
+        "role": "cold-chain operations planner",
+        "year": 2014
+      },
+      "new_tokens": 37,
+      "latency_s": 0.6684793941676617,
+      "engine": "baseline",
+      "round": 2,
+      "peak_allocated_bytes": 1027343872,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "independent-2",
+      "raw_output": "{\"name\":\"Priya Deshmukh\",\"age\":27,\"org\":\"Beacon Food Cooperative\",\"role\":\"cold-chain operations planner\",\"year\":2014}",
+      "parsed": {
+        "name": "Priya Deshmukh",
+        "age": 27,
+        "org": "Beacon Food Cooperative",
+        "role": "cold-chain operations planner",
+        "year": 2014
+      },
+      "new_tokens": 37,
+      "latency_s": 0.1465369127690792,
+      "engine": "optimized",
+      "round": 2,
+      "peak_allocated_bytes": 1029002752,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "independent-3",
+      "raw_output": "{\"name\":\"Marcus Bell\",\"age\":31,\"org\":\"Northgate Dental Centre\",\"role\":\"dental equipment technician\",\"year\":2018}",
+      "parsed": {
+        "name": "Marcus Bell",
+        "age": 31,
+        "org": "Northgate Dental Centre",
+        "role": "dental equipment technician",
+        "year": 2018
+      },
+      "new_tokens": 33,
+      "latency_s": 0.13306875713169575,
+      "engine": "optimized",
+      "round": 2,
+      "peak_allocated_bytes": 1029557760,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "independent-3",
+      "raw_output": "{\"name\":\"Marcus Bell\",\"age\":31,\"org\":\"Northgate Dental Centre\",\"role\":\"dental equipment technician\",\"year\":2018}",
+      "parsed": {
+        "name": "Marcus Bell",
+        "age": 31,
+        "org": "Northgate Dental Centre",
+        "role": "dental equipment technician",
+        "year": 2018
+      },
+      "new_tokens": 33,
+      "latency_s": 0.6004543136805296,
+      "engine": "baseline",
+      "round": 2,
+      "peak_allocated_bytes": 1027997184,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "independent-4",
+      "raw_output": "{\"name\":\"Evelyn Price\",\"age\":48,\"org\":\"Tidemark Field Office\",\"role\":\"coastal erosion surveyor\",\"year\":2020}",
+      "parsed": {
+        "name": "Evelyn Price",
+        "age": 48,
+        "org": "Tidemark Field Office",
+        "role": "coastal erosion surveyor",
+        "year": 2020
+      },
+      "new_tokens": 38,
+      "latency_s": 0.6908979564905167,
+      "engine": "baseline",
+      "round": 2,
+      "peak_allocated_bytes": 1027249152,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "independent-4",
+      "raw_output": "{\"name\":\"Evelyn Price\",\"age\":48,\"org\":\"Tidemark Field Office\",\"role\":\"coastal erosion surveyor\",\"year\":2020}",
+      "parsed": {
+        "name": "Evelyn Price",
+        "age": 48,
+        "org": "Tidemark Field Office",
+        "role": "coastal erosion surveyor",
+        "year": 2020
+      },
+      "new_tokens": 38,
+      "latency_s": 0.15020300261676311,
+      "engine": "optimized",
+      "round": 2,
+      "peak_allocated_bytes": 1028932608,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "independent-5",
+      "raw_output": "{\"name\":\"Wesley Grant\",\"age\":25,\"org\":\"Foundry Heritage Centre\",\"role\":\"stained-glass conservator\",\"year\":2021}",
+      "parsed": {
+        "name": "Wesley Grant",
+        "age": 25,
+        "org": "Foundry Heritage Centre",
+        "role": "stained-glass conservator",
+        "year": 2021
+      },
+      "new_tokens": 37,
+      "latency_s": 0.1449214145541191,
+      "engine": "optimized",
+      "round": 2,
+      "peak_allocated_bytes": 1029419520,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "independent-5",
+      "raw_output": "{\"name\":\"Wesley Grant\",\"age\":25,\"org\":\"Foundry Heritage Centre\",\"role\":\"stained-glass conservator\",\"year\":2021}",
+      "parsed": {
+        "name": "Wesley Grant",
+        "age": 25,
+        "org": "Foundry Heritage Centre",
+        "role": "stained-glass conservator",
+        "year": 2021
+      },
+      "new_tokens": 37,
+      "latency_s": 0.6663825679570436,
+      "engine": "baseline",
+      "round": 2,
+      "peak_allocated_bytes": 1027834368,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "finn-demo",
+      "raw_output": "{\"name\":\"Finn\",\"age\":18,\"org\":\"University of Toronto\",\"role\":\"student\",\"year\":2026}",
+      "parsed": {
+        "name": "Finn",
+        "age": 18,
+        "org": "University of Toronto",
+        "role": "student",
+        "year": 2026
+      },
+      "new_tokens": 29,
+      "latency_s": 0.525673808529973,
+      "engine": "baseline",
+      "round": 2,
+      "peak_allocated_bytes": 1025678336,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "finn-demo",
+      "raw_output": "{\"name\":\"Finn\",\"age\":18,\"org\":\"University of Toronto\",\"role\":\"student\",\"year\":2026}",
+      "parsed": {
+        "name": "Finn",
+        "age": 18,
+        "org": "University of Toronto",
+        "role": "student",
+        "year": 2026
+      },
+      "new_tokens": 29,
+      "latency_s": 0.11983381398022175,
+      "engine": "optimized",
+      "round": 2,
+      "peak_allocated_bytes": 1027545088,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "original-0",
+      "raw_output": "{\"name\":\"Mei-Ling Chang\",\"age\":24,\"org\":\"Taipei National University\",\"role\":\"graduate teaching assistant\",\"year\":2024}",
+      "parsed": {
+        "name": "Mei-Ling Chang",
+        "age": 24,
+        "org": "Taipei National University",
+        "role": "graduate teaching assistant",
+        "year": 2024
+      },
+      "new_tokens": 35,
+      "latency_s": 0.14027869515120983,
+      "engine": "optimized",
+      "round": 2,
+      "peak_allocated_bytes": 1028447744,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "original-0",
+      "raw_output": "{\"name\":\"Mei-Ling Chang\",\"age\":24,\"org\":\"Taipei National University\",\"role\":\"graduate teaching assistant\",\"year\":2024}",
+      "parsed": {
+        "name": "Mei-Ling Chang",
+        "age": 24,
+        "org": "Taipei National University",
+        "role": "graduate teaching assistant",
+        "year": 2024
+      },
+      "new_tokens": 35,
+      "latency_s": 0.6376848872750998,
+      "engine": "baseline",
+      "round": 2,
+      "peak_allocated_bytes": 1026690560,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "original-1",
+      "raw_output": "{\"name\":\"Kwame Mensah\",\"age\":24,\"org\":\"NeuralLoop\",\"role\":\"machine learning engineer\",\"year\":2021}",
+      "parsed": {
+        "name": "Kwame Mensah",
+        "age": 24,
+        "org": "NeuralLoop",
+        "role": "machine learning engineer",
+        "year": 2021
+      },
+      "new_tokens": 34,
+      "latency_s": 0.6201396938413382,
+      "engine": "baseline",
+      "round": 2,
+      "peak_allocated_bytes": 1026037248,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "original-1",
+      "raw_output": "{\"name\":\"Kwame Mensah\",\"age\":24,\"org\":\"NeuralLoop\",\"role\":\"machine learning engineer\",\"year\":2021}",
+      "parsed": {
+        "name": "Kwame Mensah",
+        "age": 24,
+        "org": "NeuralLoop",
+        "role": "machine learning engineer",
+        "year": 2021
+      },
+      "new_tokens": 34,
+      "latency_s": 0.13640178740024567,
+      "engine": "optimized",
+      "round": 2,
+      "peak_allocated_bytes": 1027892736,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "original-3",
+      "raw_output": "{\"name\":\"Sanne de Vries\",\"age\":22,\"org\":\"Rotterdam Maritime Museum\",\"role\":\"junior archivist\",\"year\":2018}",
+      "parsed": {
+        "name": "Sanne de Vries",
+        "age": 22,
+        "org": "Rotterdam Maritime Museum",
+        "role": "junior archivist",
+        "year": 2018
+      },
+      "new_tokens": 36,
+      "latency_s": 0.1416596006602049,
+      "engine": "optimized",
+      "round": 3,
+      "peak_allocated_bytes": 1028100096,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "original-3",
+      "raw_output": "{\"name\":\"Sanne de Vries\",\"age\":22,\"org\":\"Rotterdam Maritime Museum\",\"role\":\"junior archivist\",\"year\":2018}",
+      "parsed": {
+        "name": "Sanne de Vries",
+        "age": 22,
+        "org": "Rotterdam Maritime Museum",
+        "role": "junior archivist",
+        "year": 2018
+      },
+      "new_tokens": 36,
+      "latency_s": 0.6555181927978992,
+      "engine": "baseline",
+      "round": 3,
+      "peak_allocated_bytes": 1026269184,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "original-4",
+      "raw_output": "{\"name\":\"Ingrid Halvorsen\",\"age\":24,\"org\":\"TerraVerde\",\"role\":\"field coordinator\",\"year\":2015}",
+      "parsed": {
+        "name": "Ingrid Halvorsen",
+        "age": 24,
+        "org": "TerraVerde",
+        "role": "field coordinator",
+        "year": 2015
+      },
+      "new_tokens": 35,
+      "latency_s": 0.6352716274559498,
+      "engine": "baseline",
+      "round": 3,
+      "peak_allocated_bytes": 1026269184,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "original-4",
+      "raw_output": "{\"name\":\"Ingrid Halvorsen\",\"age\":24,\"org\":\"TerraVerde\",\"role\":\"field coordinator\",\"year\":2015}",
+      "parsed": {
+        "name": "Ingrid Halvorsen",
+        "age": 24,
+        "org": "TerraVerde",
+        "role": "field coordinator",
+        "year": 2015
+      },
+      "new_tokens": 35,
+      "latency_s": 0.13869314454495907,
+      "engine": "optimized",
+      "round": 3,
+      "peak_allocated_bytes": 1028100096,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "original-5",
+      "raw_output": "{\"name\":\"Fatima Al-Zahra\",\"age\":25,\"org\":\"Helios Biotech Lab\",\"role\":\"junior researcher\",\"year\":2019}",
+      "parsed": {
+        "name": "Fatima Al-Zahra",
+        "age": 25,
+        "org": "Helios Biotech Lab",
+        "role": "junior researcher",
+        "year": 2019
+      },
+      "new_tokens": 37,
+      "latency_s": 0.14472381584346294,
+      "engine": "optimized",
+      "round": 3,
+      "peak_allocated_bytes": 1028377600,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "original-5",
+      "raw_output": "{\"name\":\"Fatima Al-Zahra\",\"age\":25,\"org\":\"Helios Biotech Lab\",\"role\":\"junior researcher\",\"year\":2019}",
+      "parsed": {
+        "name": "Fatima Al-Zahra",
+        "age": 25,
+        "org": "Helios Biotech Lab",
+        "role": "junior researcher",
+        "year": 2019
+      },
+      "new_tokens": 37,
+      "latency_s": 0.6774342954158783,
+      "engine": "baseline",
+      "round": 3,
+      "peak_allocated_bytes": 1026595840,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "independent-0",
+      "raw_output": "{\"name\":\"Helena Brooks\",\"age\":36,\"org\":\"Ridgeline Observatory\",\"role\":\"telescope maintenance supervisor\",\"year\":2017}",
+      "parsed": {
+        "name": "Helena Brooks",
+        "age": 36,
+        "org": "Ridgeline Observatory",
+        "role": "telescope maintenance supervisor",
+        "year": 2017
+      },
+      "new_tokens": 35,
+      "latency_s": 0.6394276600331068,
+      "engine": "baseline",
+      "round": 3,
+      "peak_allocated_bytes": 1027181056,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "independent-0",
+      "raw_output": "{\"name\":\"Helena Brooks\",\"age\":36,\"org\":\"Ridgeline Observatory\",\"role\":\"telescope maintenance supervisor\",\"year\":2017}",
+      "parsed": {
+        "name": "Helena Brooks",
+        "age": 36,
+        "org": "Ridgeline Observatory",
+        "role": "telescope maintenance supervisor",
+        "year": 2017
+      },
+      "new_tokens": 35,
+      "latency_s": 0.15778153017163277,
+      "engine": "optimized",
+      "round": 3,
+      "peak_allocated_bytes": 1028864512,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "independent-1",
+      "raw_output": "{\"name\":\"Felix Hart\",\"age\":42,\"org\":\"Marshwater Trust\",\"role\":\"wetland restoration adviser\",\"year\":2019}",
+      "parsed": {
+        "name": "Felix Hart",
+        "age": 42,
+        "org": "Marshwater Trust",
+        "role": "wetland restoration adviser",
+        "year": 2019
+      },
+      "new_tokens": 34,
+      "latency_s": 0.1350217554718256,
+      "engine": "optimized",
+      "round": 3,
+      "peak_allocated_bytes": 1029419520,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "independent-1",
+      "raw_output": "{\"name\":\"Felix Hart\",\"age\":42,\"org\":\"Marshwater Trust\",\"role\":\"wetland restoration adviser\",\"year\":2019}",
+      "parsed": {
+        "name": "Felix Hart",
+        "age": 42,
+        "org": "Marshwater Trust",
+        "role": "wetland restoration adviser",
+        "year": 2019
+      },
+      "new_tokens": 34,
+      "latency_s": 0.6299147121608257,
+      "engine": "baseline",
+      "round": 3,
+      "peak_allocated_bytes": 1027834368,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "independent-2",
+      "raw_output": "{\"name\":\"Priya Deshmukh\",\"age\":27,\"org\":\"Beacon Food Cooperative\",\"role\":\"cold-chain operations planner\",\"year\":2014}",
+      "parsed": {
+        "name": "Priya Deshmukh",
+        "age": 27,
+        "org": "Beacon Food Cooperative",
+        "role": "cold-chain operations planner",
+        "year": 2014
+      },
+      "new_tokens": 37,
+      "latency_s": 0.6714271418750286,
+      "engine": "baseline",
+      "round": 3,
+      "peak_allocated_bytes": 1027343872,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "independent-2",
+      "raw_output": "{\"name\":\"Priya Deshmukh\",\"age\":27,\"org\":\"Beacon Food Cooperative\",\"role\":\"cold-chain operations planner\",\"year\":2014}",
+      "parsed": {
+        "name": "Priya Deshmukh",
+        "age": 27,
+        "org": "Beacon Food Cooperative",
+        "role": "cold-chain operations planner",
+        "year": 2014
+      },
+      "new_tokens": 37,
+      "latency_s": 0.14704169519245625,
+      "engine": "optimized",
+      "round": 3,
+      "peak_allocated_bytes": 1029002752,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "independent-3",
+      "raw_output": "{\"name\":\"Marcus Bell\",\"age\":31,\"org\":\"Northgate Dental Centre\",\"role\":\"dental equipment technician\",\"year\":2018}",
+      "parsed": {
+        "name": "Marcus Bell",
+        "age": 31,
+        "org": "Northgate Dental Centre",
+        "role": "dental equipment technician",
+        "year": 2018
+      },
+      "new_tokens": 33,
+      "latency_s": 0.14768067188560963,
+      "engine": "optimized",
+      "round": 3,
+      "peak_allocated_bytes": 1029557760,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "independent-3",
+      "raw_output": "{\"name\":\"Marcus Bell\",\"age\":31,\"org\":\"Northgate Dental Centre\",\"role\":\"dental equipment technician\",\"year\":2018}",
+      "parsed": {
+        "name": "Marcus Bell",
+        "age": 31,
+        "org": "Northgate Dental Centre",
+        "role": "dental equipment technician",
+        "year": 2018
+      },
+      "new_tokens": 33,
+      "latency_s": 0.6020387578755617,
+      "engine": "baseline",
+      "round": 3,
+      "peak_allocated_bytes": 1027997184,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "independent-4",
+      "raw_output": "{\"name\":\"Evelyn Price\",\"age\":48,\"org\":\"Tidemark Field Office\",\"role\":\"coastal erosion surveyor\",\"year\":2020}",
+      "parsed": {
+        "name": "Evelyn Price",
+        "age": 48,
+        "org": "Tidemark Field Office",
+        "role": "coastal erosion surveyor",
+        "year": 2020
+      },
+      "new_tokens": 38,
+      "latency_s": 0.6882626079022884,
+      "engine": "baseline",
+      "round": 3,
+      "peak_allocated_bytes": 1027249152,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "independent-4",
+      "raw_output": "{\"name\":\"Evelyn Price\",\"age\":48,\"org\":\"Tidemark Field Office\",\"role\":\"coastal erosion surveyor\",\"year\":2020}",
+      "parsed": {
+        "name": "Evelyn Price",
+        "age": 48,
+        "org": "Tidemark Field Office",
+        "role": "coastal erosion surveyor",
+        "year": 2020
+      },
+      "new_tokens": 38,
+      "latency_s": 0.1494492720812559,
+      "engine": "optimized",
+      "round": 3,
+      "peak_allocated_bytes": 1028932608,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "independent-5",
+      "raw_output": "{\"name\":\"Wesley Grant\",\"age\":25,\"org\":\"Foundry Heritage Centre\",\"role\":\"stained-glass conservator\",\"year\":2021}",
+      "parsed": {
+        "name": "Wesley Grant",
+        "age": 25,
+        "org": "Foundry Heritage Centre",
+        "role": "stained-glass conservator",
+        "year": 2021
+      },
+      "new_tokens": 37,
+      "latency_s": 0.14485383965075016,
+      "engine": "optimized",
+      "round": 3,
+      "peak_allocated_bytes": 1029419520,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "independent-5",
+      "raw_output": "{\"name\":\"Wesley Grant\",\"age\":25,\"org\":\"Foundry Heritage Centre\",\"role\":\"stained-glass conservator\",\"year\":2021}",
+      "parsed": {
+        "name": "Wesley Grant",
+        "age": 25,
+        "org": "Foundry Heritage Centre",
+        "role": "stained-glass conservator",
+        "year": 2021
+      },
+      "new_tokens": 37,
+      "latency_s": 0.6703358069062233,
+      "engine": "baseline",
+      "round": 3,
+      "peak_allocated_bytes": 1027834368,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "finn-demo",
+      "raw_output": "{\"name\":\"Finn\",\"age\":18,\"org\":\"University of Toronto\",\"role\":\"student\",\"year\":2026}",
+      "parsed": {
+        "name": "Finn",
+        "age": 18,
+        "org": "University of Toronto",
+        "role": "student",
+        "year": 2026
+      },
+      "new_tokens": 29,
+      "latency_s": 0.5263637788593769,
+      "engine": "baseline",
+      "round": 3,
+      "peak_allocated_bytes": 1025678336,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "finn-demo",
+      "raw_output": "{\"name\":\"Finn\",\"age\":18,\"org\":\"University of Toronto\",\"role\":\"student\",\"year\":2026}",
+      "parsed": {
+        "name": "Finn",
+        "age": 18,
+        "org": "University of Toronto",
+        "role": "student",
+        "year": 2026
+      },
+      "new_tokens": 29,
+      "latency_s": 0.13584656082093716,
+      "engine": "optimized",
+      "round": 3,
+      "peak_allocated_bytes": 1027545088,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "original-0",
+      "raw_output": "{\"name\":\"Mei-Ling Chang\",\"age\":24,\"org\":\"Taipei National University\",\"role\":\"graduate teaching assistant\",\"year\":2024}",
+      "parsed": {
+        "name": "Mei-Ling Chang",
+        "age": 24,
+        "org": "Taipei National University",
+        "role": "graduate teaching assistant",
+        "year": 2024
+      },
+      "new_tokens": 35,
+      "latency_s": 0.13840499706566334,
+      "engine": "optimized",
+      "round": 3,
+      "peak_allocated_bytes": 1028447744,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "original-0",
+      "raw_output": "{\"name\":\"Mei-Ling Chang\",\"age\":24,\"org\":\"Taipei National University\",\"role\":\"graduate teaching assistant\",\"year\":2024}",
+      "parsed": {
+        "name": "Mei-Ling Chang",
+        "age": 24,
+        "org": "Taipei National University",
+        "role": "graduate teaching assistant",
+        "year": 2024
+      },
+      "new_tokens": 35,
+      "latency_s": 0.6338961850851774,
+      "engine": "baseline",
+      "round": 3,
+      "peak_allocated_bytes": 1026690560,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "original-1",
+      "raw_output": "{\"name\":\"Kwame Mensah\",\"age\":24,\"org\":\"NeuralLoop\",\"role\":\"machine learning engineer\",\"year\":2021}",
+      "parsed": {
+        "name": "Kwame Mensah",
+        "age": 24,
+        "org": "NeuralLoop",
+        "role": "machine learning engineer",
+        "year": 2021
+      },
+      "new_tokens": 34,
+      "latency_s": 0.6179558355361223,
+      "engine": "baseline",
+      "round": 3,
+      "peak_allocated_bytes": 1026037248,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "original-1",
+      "raw_output": "{\"name\":\"Kwame Mensah\",\"age\":24,\"org\":\"NeuralLoop\",\"role\":\"machine learning engineer\",\"year\":2021}",
+      "parsed": {
+        "name": "Kwame Mensah",
+        "age": 24,
+        "org": "NeuralLoop",
+        "role": "machine learning engineer",
+        "year": 2021
+      },
+      "new_tokens": 34,
+      "latency_s": 0.13574025966227055,
+      "engine": "optimized",
+      "round": 3,
+      "peak_allocated_bytes": 1027892736,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "original-2",
+      "raw_output": "{\"name\":\"Bogdan Ionescu\",\"age\":38,\"org\":\"Carpathian Savings Bank\",\"role\":\"loan officer\",\"year\":1996}",
+      "parsed": {
+        "name": "Bogdan Ionescu",
+        "age": 38,
+        "org": "Carpathian Savings Bank",
+        "role": "loan officer",
+        "year": 1996
+      },
+      "new_tokens": 36,
+      "latency_s": 0.14131218940019608,
+      "engine": "optimized",
+      "round": 3,
+      "peak_allocated_bytes": 1028309504,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "original-2",
+      "raw_output": "{\"name\":\"Bogdan Ionescu\",\"age\":38,\"org\":\"Carpathian Savings Bank\",\"role\":\"loan officer\",\"year\":1996}",
+      "parsed": {
+        "name": "Bogdan Ionescu",
+        "age": 38,
+        "org": "Carpathian Savings Bank",
+        "role": "loan officer",
+        "year": 1996
+      },
+      "new_tokens": 36,
+      "latency_s": 0.6512750368565321,
+      "engine": "baseline",
+      "round": 3,
+      "peak_allocated_bytes": 1026527744,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "original-4",
+      "raw_output": "{\"name\":\"Ingrid Halvorsen\",\"age\":24,\"org\":\"TerraVerde\",\"role\":\"field coordinator\",\"year\":2015}",
+      "parsed": {
+        "name": "Ingrid Halvorsen",
+        "age": 24,
+        "org": "TerraVerde",
+        "role": "field coordinator",
+        "year": 2015
+      },
+      "new_tokens": 35,
+      "latency_s": 0.632104679942131,
+      "engine": "baseline",
+      "round": 4,
+      "peak_allocated_bytes": 1026269184,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "original-4",
+      "raw_output": "{\"name\":\"Ingrid Halvorsen\",\"age\":24,\"org\":\"TerraVerde\",\"role\":\"field coordinator\",\"year\":2015}",
+      "parsed": {
+        "name": "Ingrid Halvorsen",
+        "age": 24,
+        "org": "TerraVerde",
+        "role": "field coordinator",
+        "year": 2015
+      },
+      "new_tokens": 35,
+      "latency_s": 0.1397998407483101,
+      "engine": "optimized",
+      "round": 4,
+      "peak_allocated_bytes": 1028100096,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "original-5",
+      "raw_output": "{\"name\":\"Fatima Al-Zahra\",\"age\":25,\"org\":\"Helios Biotech Lab\",\"role\":\"junior researcher\",\"year\":2019}",
+      "parsed": {
+        "name": "Fatima Al-Zahra",
+        "age": 25,
+        "org": "Helios Biotech Lab",
+        "role": "junior researcher",
+        "year": 2019
+      },
+      "new_tokens": 37,
+      "latency_s": 0.14507798850536346,
+      "engine": "optimized",
+      "round": 4,
+      "peak_allocated_bytes": 1028377600,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "original-5",
+      "raw_output": "{\"name\":\"Fatima Al-Zahra\",\"age\":25,\"org\":\"Helios Biotech Lab\",\"role\":\"junior researcher\",\"year\":2019}",
+      "parsed": {
+        "name": "Fatima Al-Zahra",
+        "age": 25,
+        "org": "Helios Biotech Lab",
+        "role": "junior researcher",
+        "year": 2019
+      },
+      "new_tokens": 37,
+      "latency_s": 0.6837136503309011,
+      "engine": "baseline",
+      "round": 4,
+      "peak_allocated_bytes": 1026595840,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "independent-0",
+      "raw_output": "{\"name\":\"Helena Brooks\",\"age\":36,\"org\":\"Ridgeline Observatory\",\"role\":\"telescope maintenance supervisor\",\"year\":2017}",
+      "parsed": {
+        "name": "Helena Brooks",
+        "age": 36,
+        "org": "Ridgeline Observatory",
+        "role": "telescope maintenance supervisor",
+        "year": 2017
+      },
+      "new_tokens": 35,
+      "latency_s": 0.6401696410030127,
+      "engine": "baseline",
+      "round": 4,
+      "peak_allocated_bytes": 1027181056,
+      "peak_reserved_bytes": 1184890880
+    },
+    {
+      "case_id": "independent-0",
+      "raw_output": "{\"name\":\"Helena Brooks\",\"age\":36,\"org\":\"Ridgeline Observatory\",\"role\":\"telescope maintenance supervisor\",\"year\":2017}",
+      "parsed": {
+        "name": "Helena Brooks",
+        "age": 36,
+        "org": "Ridgeline Observatory",
+        "role": "telescope maintenance supervisor",
+        "year": 2017
+      },
+      "new_tokens": 35,
+      "latency_s": 0.13930858857929707,
+      "engine": "optimized",
+      "round": 4,
+      "peak_allocated_bytes": 1028864512,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "independent-1",
+      "raw_output": "{\"name\":\"Felix Hart\",\"age\":42,\"org\":\"Marshwater Trust\",\"role\":\"wetland restoration adviser\",\"year\":2019}",
+      "parsed": {
+        "name": "Felix Hart",
+        "age": 42,
+        "org": "Marshwater Trust",
+        "role": "wetland restoration adviser",
+        "year": 2019
+      },
+      "new_tokens": 34,
+      "latency_s": 0.13461149483919144,
+      "engine": "optimized",
+      "round": 4,
+      "peak_allocated_bytes": 1029419520,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "independent-1",
+      "raw_output": "{\"name\":\"Felix Hart\",\"age\":42,\"org\":\"Marshwater Trust\",\"role\":\"wetland restoration adviser\",\"year\":2019}",
+      "parsed": {
+        "name": "Felix Hart",
+        "age": 42,
+        "org": "Marshwater Trust",
+        "role": "wetland restoration adviser",
+        "year": 2019
+      },
+      "new_tokens": 34,
+      "latency_s": 0.6193953696638346,
+      "engine": "baseline",
+      "round": 4,
+      "peak_allocated_bytes": 1027834368,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "independent-2",
+      "raw_output": "{\"name\":\"Priya Deshmukh\",\"age\":27,\"org\":\"Beacon Food Cooperative\",\"role\":\"cold-chain operations planner\",\"year\":2014}",
+      "parsed": {
+        "name": "Priya Deshmukh",
+        "age": 27,
+        "org": "Beacon Food Cooperative",
+        "role": "cold-chain operations planner",
+        "year": 2014
+      },
+      "new_tokens": 37,
+      "latency_s": 0.6716297697275877,
+      "engine": "baseline",
+      "round": 4,
+      "peak_allocated_bytes": 1027343872,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "independent-2",
+      "raw_output": "{\"name\":\"Priya Deshmukh\",\"age\":27,\"org\":\"Beacon Food Cooperative\",\"role\":\"cold-chain operations planner\",\"year\":2014}",
+      "parsed": {
+        "name": "Priya Deshmukh",
+        "age": 27,
+        "org": "Beacon Food Cooperative",
+        "role": "cold-chain operations planner",
+        "year": 2014
+      },
+      "new_tokens": 37,
+      "latency_s": 0.14680157601833344,
+      "engine": "optimized",
+      "round": 4,
+      "peak_allocated_bytes": 1029002752,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "independent-3",
+      "raw_output": "{\"name\":\"Marcus Bell\",\"age\":31,\"org\":\"Northgate Dental Centre\",\"role\":\"dental equipment technician\",\"year\":2018}",
+      "parsed": {
+        "name": "Marcus Bell",
+        "age": 31,
+        "org": "Northgate Dental Centre",
+        "role": "dental equipment technician",
+        "year": 2018
+      },
+      "new_tokens": 33,
+      "latency_s": 0.1310326475650072,
+      "engine": "optimized",
+      "round": 4,
+      "peak_allocated_bytes": 1029557760,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "independent-3",
+      "raw_output": "{\"name\":\"Marcus Bell\",\"age\":31,\"org\":\"Northgate Dental Centre\",\"role\":\"dental equipment technician\",\"year\":2018}",
+      "parsed": {
+        "name": "Marcus Bell",
+        "age": 31,
+        "org": "Northgate Dental Centre",
+        "role": "dental equipment technician",
+        "year": 2018
+      },
+      "new_tokens": 33,
+      "latency_s": 0.6016071010380983,
+      "engine": "baseline",
+      "round": 4,
+      "peak_allocated_bytes": 1027997184,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "independent-4",
+      "raw_output": "{\"name\":\"Evelyn Price\",\"age\":48,\"org\":\"Tidemark Field Office\",\"role\":\"coastal erosion surveyor\",\"year\":2020}",
+      "parsed": {
+        "name": "Evelyn Price",
+        "age": 48,
+        "org": "Tidemark Field Office",
+        "role": "coastal erosion surveyor",
+        "year": 2020
+      },
+      "new_tokens": 38,
+      "latency_s": 0.6968546584248543,
+      "engine": "baseline",
+      "round": 4,
+      "peak_allocated_bytes": 1027249152,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "independent-4",
+      "raw_output": "{\"name\":\"Evelyn Price\",\"age\":48,\"org\":\"Tidemark Field Office\",\"role\":\"coastal erosion surveyor\",\"year\":2020}",
+      "parsed": {
+        "name": "Evelyn Price",
+        "age": 48,
+        "org": "Tidemark Field Office",
+        "role": "coastal erosion surveyor",
+        "year": 2020
+      },
+      "new_tokens": 38,
+      "latency_s": 0.15155975334346294,
+      "engine": "optimized",
+      "round": 4,
+      "peak_allocated_bytes": 1028932608,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "independent-5",
+      "raw_output": "{\"name\":\"Wesley Grant\",\"age\":25,\"org\":\"Foundry Heritage Centre\",\"role\":\"stained-glass conservator\",\"year\":2021}",
+      "parsed": {
+        "name": "Wesley Grant",
+        "age": 25,
+        "org": "Foundry Heritage Centre",
+        "role": "stained-glass conservator",
+        "year": 2021
+      },
+      "new_tokens": 37,
+      "latency_s": 0.14514642767608166,
+      "engine": "optimized",
+      "round": 4,
+      "peak_allocated_bytes": 1029419520,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "independent-5",
+      "raw_output": "{\"name\":\"Wesley Grant\",\"age\":25,\"org\":\"Foundry Heritage Centre\",\"role\":\"stained-glass conservator\",\"year\":2021}",
+      "parsed": {
+        "name": "Wesley Grant",
+        "age": 25,
+        "org": "Foundry Heritage Centre",
+        "role": "stained-glass conservator",
+        "year": 2021
+      },
+      "new_tokens": 37,
+      "latency_s": 0.6736632883548737,
+      "engine": "baseline",
+      "round": 4,
+      "peak_allocated_bytes": 1027834368,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "finn-demo",
+      "raw_output": "{\"name\":\"Finn\",\"age\":18,\"org\":\"University of Toronto\",\"role\":\"student\",\"year\":2026}",
+      "parsed": {
+        "name": "Finn",
+        "age": 18,
+        "org": "University of Toronto",
+        "role": "student",
+        "year": 2026
+      },
+      "new_tokens": 29,
+      "latency_s": 0.5267160981893539,
+      "engine": "baseline",
+      "round": 4,
+      "peak_allocated_bytes": 1025678336,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "finn-demo",
+      "raw_output": "{\"name\":\"Finn\",\"age\":18,\"org\":\"University of Toronto\",\"role\":\"student\",\"year\":2026}",
+      "parsed": {
+        "name": "Finn",
+        "age": 18,
+        "org": "University of Toronto",
+        "role": "student",
+        "year": 2026
+      },
+      "new_tokens": 29,
+      "latency_s": 0.11903349310159683,
+      "engine": "optimized",
+      "round": 4,
+      "peak_allocated_bytes": 1027545088,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "original-0",
+      "raw_output": "{\"name\":\"Mei-Ling Chang\",\"age\":24,\"org\":\"Taipei National University\",\"role\":\"graduate teaching assistant\",\"year\":2024}",
+      "parsed": {
+        "name": "Mei-Ling Chang",
+        "age": 24,
+        "org": "Taipei National University",
+        "role": "graduate teaching assistant",
+        "year": 2024
+      },
+      "new_tokens": 35,
+      "latency_s": 0.13838475197553635,
+      "engine": "optimized",
+      "round": 4,
+      "peak_allocated_bytes": 1028447744,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "original-0",
+      "raw_output": "{\"name\":\"Mei-Ling Chang\",\"age\":24,\"org\":\"Taipei National University\",\"role\":\"graduate teaching assistant\",\"year\":2024}",
+      "parsed": {
+        "name": "Mei-Ling Chang",
+        "age": 24,
+        "org": "Taipei National University",
+        "role": "graduate teaching assistant",
+        "year": 2024
+      },
+      "new_tokens": 35,
+      "latency_s": 0.6351767405867577,
+      "engine": "baseline",
+      "round": 4,
+      "peak_allocated_bytes": 1026690560,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "original-1",
+      "raw_output": "{\"name\":\"Kwame Mensah\",\"age\":24,\"org\":\"NeuralLoop\",\"role\":\"machine learning engineer\",\"year\":2021}",
+      "parsed": {
+        "name": "Kwame Mensah",
+        "age": 24,
+        "org": "NeuralLoop",
+        "role": "machine learning engineer",
+        "year": 2021
+      },
+      "new_tokens": 34,
+      "latency_s": 0.6207090374082327,
+      "engine": "baseline",
+      "round": 4,
+      "peak_allocated_bytes": 1026037248,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "original-1",
+      "raw_output": "{\"name\":\"Kwame Mensah\",\"age\":24,\"org\":\"NeuralLoop\",\"role\":\"machine learning engineer\",\"year\":2021}",
+      "parsed": {
+        "name": "Kwame Mensah",
+        "age": 24,
+        "org": "NeuralLoop",
+        "role": "machine learning engineer",
+        "year": 2021
+      },
+      "new_tokens": 34,
+      "latency_s": 0.1372683309018612,
+      "engine": "optimized",
+      "round": 4,
+      "peak_allocated_bytes": 1027892736,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "original-2",
+      "raw_output": "{\"name\":\"Bogdan Ionescu\",\"age\":38,\"org\":\"Carpathian Savings Bank\",\"role\":\"loan officer\",\"year\":1996}",
+      "parsed": {
+        "name": "Bogdan Ionescu",
+        "age": 38,
+        "org": "Carpathian Savings Bank",
+        "role": "loan officer",
+        "year": 1996
+      },
+      "new_tokens": 36,
+      "latency_s": 0.1416314896196127,
+      "engine": "optimized",
+      "round": 4,
+      "peak_allocated_bytes": 1028309504,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "original-2",
+      "raw_output": "{\"name\":\"Bogdan Ionescu\",\"age\":38,\"org\":\"Carpathian Savings Bank\",\"role\":\"loan officer\",\"year\":1996}",
+      "parsed": {
+        "name": "Bogdan Ionescu",
+        "age": 38,
+        "org": "Carpathian Savings Bank",
+        "role": "loan officer",
+        "year": 1996
+      },
+      "new_tokens": 36,
+      "latency_s": 0.6529851593077183,
+      "engine": "baseline",
+      "round": 4,
+      "peak_allocated_bytes": 1026527744,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "original-3",
+      "raw_output": "{\"name\":\"Sanne de Vries\",\"age\":22,\"org\":\"Rotterdam Maritime Museum\",\"role\":\"junior archivist\",\"year\":2018}",
+      "parsed": {
+        "name": "Sanne de Vries",
+        "age": 22,
+        "org": "Rotterdam Maritime Museum",
+        "role": "junior archivist",
+        "year": 2018
+      },
+      "new_tokens": 36,
+      "latency_s": 0.6560875363647938,
+      "engine": "baseline",
+      "round": 4,
+      "peak_allocated_bytes": 1026269184,
+      "peak_reserved_bytes": 1186988032
+    },
+    {
+      "case_id": "original-3",
+      "raw_output": "{\"name\":\"Sanne de Vries\",\"age\":22,\"org\":\"Rotterdam Maritime Museum\",\"role\":\"junior archivist\",\"year\":2018}",
+      "parsed": {
+        "name": "Sanne de Vries",
+        "age": 22,
+        "org": "Rotterdam Maritime Museum",
+        "role": "junior archivist",
+        "year": 2018
+      },
+      "new_tokens": 36,
+      "latency_s": 0.14407793432474136,
+      "engine": "optimized",
+      "round": 4,
+      "peak_allocated_bytes": 1028100096,
+      "peak_reserved_bytes": 1186988032
+    }
+  ],
+  "warmup_samples": [
+    {
+      "case_id": "original-0",
+      "raw_output": "{\"name\":\"Mei-Ling Chang\",\"age\":24,\"org\":\"Taipei National University\",\"role\":\"graduate teaching assistant\",\"year\":2024}",
+      "parsed": {
+        "name": "Mei-Ling Chang",
+        "age": 24,
+        "org": "Taipei National University",
+        "role": "graduate teaching assistant",
+        "year": 2024
+      },
+      "new_tokens": 35,
+      "latency_s": 0.9048393107950687,
+      "engine": "baseline",
+      "round": 0
+    },
+    {
+      "case_id": "original-0",
+      "raw_output": "{\"name\":\"Mei-Ling Chang\",\"age\":24,\"org\":\"Taipei National University\",\"role\":\"graduate teaching assistant\",\"year\":2024}",
+      "parsed": {
+        "name": "Mei-Ling Chang",
+        "age": 24,
+        "org": "Taipei National University",
+        "role": "graduate teaching assistant",
+        "year": 2024
+      },
+      "new_tokens": 35,
+      "latency_s": 0.5123198516666889,
+      "engine": "baseline",
+      "round": 1
+    },
+    {
+      "case_id": "original-1",
+      "raw_output": "{\"name\":\"Kwame Mensah\",\"age\":24,\"org\":\"NeuralLoop\",\"role\":\"machine learning engineer\",\"year\":2021}",
+      "parsed": {
+        "name": "Kwame Mensah",
+        "age": 24,
+        "org": "NeuralLoop",
+        "role": "machine learning engineer",
+        "year": 2021
+      },
+      "new_tokens": 34,
+      "latency_s": 0.5008679125458002,
+      "engine": "baseline",
+      "round": 0
+    },
+    {
+      "case_id": "original-1",
+      "raw_output": "{\"name\":\"Kwame Mensah\",\"age\":24,\"org\":\"NeuralLoop\",\"role\":\"machine learning engineer\",\"year\":2021}",
+      "parsed": {
+        "name": "Kwame Mensah",
+        "age": 24,
+        "org": "NeuralLoop",
+        "role": "machine learning engineer",
+        "year": 2021
+      },
+      "new_tokens": 34,
+      "latency_s": 0.5000081844627857,
+      "engine": "baseline",
+      "round": 1
+    },
+    {
+      "case_id": "original-2",
+      "raw_output": "{\"name\":\"Bogdan Ionescu\",\"age\":38,\"org\":\"Carpathian Savings Bank\",\"role\":\"loan officer\",\"year\":1996}",
+      "parsed": {
+        "name": "Bogdan Ionescu",
+        "age": 38,
+        "org": "Carpathian Savings Bank",
+        "role": "loan officer",
+        "year": 1996
+      },
+      "new_tokens": 36,
+      "latency_s": 0.5285586267709732,
+      "engine": "baseline",
+      "round": 0
+    },
+    {
+      "case_id": "original-2",
+      "raw_output": "{\"name\":\"Bogdan Ionescu\",\"age\":38,\"org\":\"Carpathian Savings Bank\",\"role\":\"loan officer\",\"year\":1996}",
+      "parsed": {
+        "name": "Bogdan Ionescu",
+        "age": 38,
+        "org": "Carpathian Savings Bank",
+        "role": "loan officer",
+        "year": 1996
+      },
+      "new_tokens": 36,
+      "latency_s": 0.529126001521945,
+      "engine": "baseline",
+      "round": 1
+    },
+    {
+      "case_id": "original-3",
+      "raw_output": "{\"name\":\"Sanne de Vries\",\"age\":22,\"org\":\"Rotterdam Maritime Museum\",\"role\":\"junior archivist\",\"year\":2018}",
+      "parsed": {
+        "name": "Sanne de Vries",
+        "age": 22,
+        "org": "Rotterdam Maritime Museum",
+        "role": "junior archivist",
+        "year": 2018
+      },
+      "new_tokens": 36,
+      "latency_s": 0.528155142441392,
+      "engine": "baseline",
+      "round": 0
+    },
+    {
+      "case_id": "original-3",
+      "raw_output": "{\"name\":\"Sanne de Vries\",\"age\":22,\"org\":\"Rotterdam Maritime Museum\",\"role\":\"junior archivist\",\"year\":2018}",
+      "parsed": {
+        "name": "Sanne de Vries",
+        "age": 22,
+        "org": "Rotterdam Maritime Museum",
+        "role": "junior archivist",
+        "year": 2018
+      },
+      "new_tokens": 36,
+      "latency_s": 0.5276771485805511,
+      "engine": "baseline",
+      "round": 1
+    },
+    {
+      "case_id": "original-4",
+      "raw_output": "{\"name\":\"Ingrid Halvorsen\",\"age\":24,\"org\":\"TerraVerde\",\"role\":\"field coordinator\",\"year\":2015}",
+      "parsed": {
+        "name": "Ingrid Halvorsen",
+        "age": 24,
+        "org": "TerraVerde",
+        "role": "field coordinator",
+        "year": 2015
+      },
+      "new_tokens": 35,
+      "latency_s": 0.5130467992275953,
+      "engine": "baseline",
+      "round": 0
+    },
+    {
+      "case_id": "original-4",
+      "raw_output": "{\"name\":\"Ingrid Halvorsen\",\"age\":24,\"org\":\"TerraVerde\",\"role\":\"field coordinator\",\"year\":2015}",
+      "parsed": {
+        "name": "Ingrid Halvorsen",
+        "age": 24,
+        "org": "TerraVerde",
+        "role": "field coordinator",
+        "year": 2015
+      },
+      "new_tokens": 35,
+      "latency_s": 0.5158743113279343,
+      "engine": "baseline",
+      "round": 1
+    },
+    {
+      "case_id": "original-5",
+      "raw_output": "{\"name\":\"Fatima Al-Zahra\",\"age\":25,\"org\":\"Helios Biotech Lab\",\"role\":\"junior researcher\",\"year\":2019}",
+      "parsed": {
+        "name": "Fatima Al-Zahra",
+        "age": 25,
+        "org": "Helios Biotech Lab",
+        "role": "junior researcher",
+        "year": 2019
+      },
+      "new_tokens": 37,
+      "latency_s": 0.5400545690208673,
+      "engine": "baseline",
+      "round": 0
+    },
+    {
+      "case_id": "original-5",
+      "raw_output": "{\"name\":\"Fatima Al-Zahra\",\"age\":25,\"org\":\"Helios Biotech Lab\",\"role\":\"junior researcher\",\"year\":2019}",
+      "parsed": {
+        "name": "Fatima Al-Zahra",
+        "age": 25,
+        "org": "Helios Biotech Lab",
+        "role": "junior researcher",
+        "year": 2019
+      },
+      "new_tokens": 37,
+      "latency_s": 0.5476103015244007,
+      "engine": "baseline",
+      "round": 1
+    },
+    {
+      "case_id": "independent-0",
+      "raw_output": "{\"name\":\"Helena Brooks\",\"age\":36,\"org\":\"Ridgeline Observatory\",\"role\":\"telescope maintenance supervisor\",\"year\":2017}",
+      "parsed": {
+        "name": "Helena Brooks",
+        "age": 36,
+        "org": "Ridgeline Observatory",
+        "role": "telescope maintenance supervisor",
+        "year": 2017
+      },
+      "new_tokens": 35,
+      "latency_s": 0.5129265561699867,
+      "engine": "baseline",
+      "round": 0
+    },
+    {
+      "case_id": "independent-0",
+      "raw_output": "{\"name\":\"Helena Brooks\",\"age\":36,\"org\":\"Ridgeline Observatory\",\"role\":\"telescope maintenance supervisor\",\"year\":2017}",
+      "parsed": {
+        "name": "Helena Brooks",
+        "age": 36,
+        "org": "Ridgeline Observatory",
+        "role": "telescope maintenance supervisor",
+        "year": 2017
+      },
+      "new_tokens": 35,
+      "latency_s": 0.5153285823762417,
+      "engine": "baseline",
+      "round": 1
+    },
+    {
+      "case_id": "independent-1",
+      "raw_output": "{\"name\":\"Felix Hart\",\"age\":42,\"org\":\"Marshwater Trust\",\"role\":\"wetland restoration adviser\",\"year\":2019}",
+      "parsed": {
+        "name": "Felix Hart",
+        "age": 42,
+        "org": "Marshwater Trust",
+        "role": "wetland restoration adviser",
+        "year": 2019
+      },
+      "new_tokens": 34,
+      "latency_s": 0.4970699120312929,
+      "engine": "baseline",
+      "round": 0
+    },
+    {
+      "case_id": "independent-1",
+      "raw_output": "{\"name\":\"Felix Hart\",\"age\":42,\"org\":\"Marshwater Trust\",\"role\":\"wetland restoration adviser\",\"year\":2019}",
+      "parsed": {
+        "name": "Felix Hart",
+        "age": 42,
+        "org": "Marshwater Trust",
+        "role": "wetland restoration adviser",
+        "year": 2019
+      },
+      "new_tokens": 34,
+      "latency_s": 0.500224044546485,
+      "engine": "baseline",
+      "round": 1
+    },
+    {
+      "case_id": "independent-2",
+      "raw_output": "{\"name\":\"Priya Deshmukh\",\"age\":27,\"org\":\"Beacon Food Cooperative\",\"role\":\"cold-chain operations planner\",\"year\":2014}",
+      "parsed": {
+        "name": "Priya Deshmukh",
+        "age": 27,
+        "org": "Beacon Food Cooperative",
+        "role": "cold-chain operations planner",
+        "year": 2014
+      },
+      "new_tokens": 37,
+      "latency_s": 0.5434609241783619,
+      "engine": "baseline",
+      "round": 0
+    },
+    {
+      "case_id": "independent-2",
+      "raw_output": "{\"name\":\"Priya Deshmukh\",\"age\":27,\"org\":\"Beacon Food Cooperative\",\"role\":\"cold-chain operations planner\",\"year\":2014}",
+      "parsed": {
+        "name": "Priya Deshmukh",
+        "age": 27,
+        "org": "Beacon Food Cooperative",
+        "role": "cold-chain operations planner",
+        "year": 2014
+      },
+      "new_tokens": 37,
+      "latency_s": 0.5410162191838026,
+      "engine": "baseline",
+      "round": 1
+    },
+    {
+      "case_id": "independent-3",
+      "raw_output": "{\"name\":\"Marcus Bell\",\"age\":31,\"org\":\"Northgate Dental Centre\",\"role\":\"dental equipment technician\",\"year\":2018}",
+      "parsed": {
+        "name": "Marcus Bell",
+        "age": 31,
+        "org": "Northgate Dental Centre",
+        "role": "dental equipment technician",
+        "year": 2018
+      },
+      "new_tokens": 33,
+      "latency_s": 0.4817892983555794,
+      "engine": "baseline",
+      "round": 0
+    },
+    {
+      "case_id": "independent-3",
+      "raw_output": "{\"name\":\"Marcus Bell\",\"age\":31,\"org\":\"Northgate Dental Centre\",\"role\":\"dental equipment technician\",\"year\":2018}",
+      "parsed": {
+        "name": "Marcus Bell",
+        "age": 31,
+        "org": "Northgate Dental Centre",
+        "role": "dental equipment technician",
+        "year": 2018
+      },
+      "new_tokens": 33,
+      "latency_s": 0.48423292115330696,
+      "engine": "baseline",
+      "round": 1
+    },
+    {
+      "case_id": "independent-4",
+      "raw_output": "{\"name\":\"Evelyn Price\",\"age\":48,\"org\":\"Tidemark Field Office\",\"role\":\"coastal erosion surveyor\",\"year\":2020}",
+      "parsed": {
+        "name": "Evelyn Price",
+        "age": 48,
+        "org": "Tidemark Field Office",
+        "role": "coastal erosion surveyor",
+        "year": 2020
+      },
+      "new_tokens": 38,
+      "latency_s": 0.5534599591046572,
+      "engine": "baseline",
+      "round": 0
+    },
+    {
+      "case_id": "independent-4",
+      "raw_output": "{\"name\":\"Evelyn Price\",\"age\":48,\"org\":\"Tidemark Field Office\",\"role\":\"coastal erosion surveyor\",\"year\":2020}",
+      "parsed": {
+        "name": "Evelyn Price",
+        "age": 48,
+        "org": "Tidemark Field Office",
+        "role": "coastal erosion surveyor",
+        "year": 2020
+      },
+      "new_tokens": 38,
+      "latency_s": 0.5548631493002176,
+      "engine": "baseline",
+      "round": 1
+    },
+    {
+      "case_id": "independent-5",
+      "raw_output": "{\"name\":\"Wesley Grant\",\"age\":25,\"org\":\"Foundry Heritage Centre\",\"role\":\"stained-glass conservator\",\"year\":2021}",
+      "parsed": {
+        "name": "Wesley Grant",
+        "age": 25,
+        "org": "Foundry Heritage Centre",
+        "role": "stained-glass conservator",
+        "year": 2021
+      },
+      "new_tokens": 37,
+      "latency_s": 0.5427315086126328,
+      "engine": "baseline",
+      "round": 0
+    },
+    {
+      "case_id": "independent-5",
+      "raw_output": "{\"name\":\"Wesley Grant\",\"age\":25,\"org\":\"Foundry Heritage Centre\",\"role\":\"stained-glass conservator\",\"year\":2021}",
+      "parsed": {
+        "name": "Wesley Grant",
+        "age": 25,
+        "org": "Foundry Heritage Centre",
+        "role": "stained-glass conservator",
+        "year": 2021
+      },
+      "new_tokens": 37,
+      "latency_s": 0.547727769240737,
+      "engine": "baseline",
+      "round": 1
+    },
+    {
+      "case_id": "finn-demo",
+      "raw_output": "{\"name\":\"Finn\",\"age\":18,\"org\":\"University of Toronto\",\"role\":\"student\",\"year\":2026}",
+      "parsed": {
+        "name": "Finn",
+        "age": 18,
+        "org": "University of Toronto",
+        "role": "student",
+        "year": 2026
+      },
+      "new_tokens": 29,
+      "latency_s": 0.42374067567288876,
+      "engine": "baseline",
+      "round": 0
+    },
+    {
+      "case_id": "finn-demo",
+      "raw_output": "{\"name\":\"Finn\",\"age\":18,\"org\":\"University of Toronto\",\"role\":\"student\",\"year\":2026}",
+      "parsed": {
+        "name": "Finn",
+        "age": 18,
+        "org": "University of Toronto",
+        "role": "student",
+        "year": 2026
+      },
+      "new_tokens": 29,
+      "latency_s": 0.4272200856357813,
+      "engine": "baseline",
+      "round": 1
+    },
+    {
+      "case_id": "original-0",
+      "raw_output": "{\"name\":\"Mei-Ling Chang\",\"age\":24,\"org\":\"Taipei National University\",\"role\":\"graduate teaching assistant\",\"year\":2024}",
+      "parsed": {
+        "name": "Mei-Ling Chang",
+        "age": 24,
+        "org": "Taipei National University",
+        "role": "graduate teaching assistant",
+        "year": 2024
+      },
+      "new_tokens": 35,
+      "latency_s": 21.755985517054796,
+      "engine": "optimized",
+      "round": 0
+    },
+    {
+      "case_id": "original-0",
+      "raw_output": "{\"name\":\"Mei-Ling Chang\",\"age\":24,\"org\":\"Taipei National University\",\"role\":\"graduate teaching assistant\",\"year\":2024}",
+      "parsed": {
+        "name": "Mei-Ling Chang",
+        "age": 24,
+        "org": "Taipei National University",
+        "role": "graduate teaching assistant",
+        "year": 2024
+      },
+      "new_tokens": 35,
+      "latency_s": 0.15206875652074814,
+      "engine": "optimized",
+      "round": 1
+    },
+    {
+      "case_id": "original-1",
+      "raw_output": "{\"name\":\"Kwame Mensah\",\"age\":24,\"org\":\"NeuralLoop\",\"role\":\"machine learning engineer\",\"year\":2021}",
+      "parsed": {
+        "name": "Kwame Mensah",
+        "age": 24,
+        "org": "NeuralLoop",
+        "role": "machine learning engineer",
+        "year": 2021
+      },
+      "new_tokens": 34,
+      "latency_s": 0.14862089976668358,
+      "engine": "optimized",
+      "round": 0
+    },
+    {
+      "case_id": "original-1",
+      "raw_output": "{\"name\":\"Kwame Mensah\",\"age\":24,\"org\":\"NeuralLoop\",\"role\":\"machine learning engineer\",\"year\":2021}",
+      "parsed": {
+        "name": "Kwame Mensah",
+        "age": 24,
+        "org": "NeuralLoop",
+        "role": "machine learning engineer",
+        "year": 2021
+      },
+      "new_tokens": 34,
+      "latency_s": 0.12904411368072033,
+      "engine": "optimized",
+      "round": 1
+    },
+    {
+      "case_id": "original-2",
+      "raw_output": "{\"name\":\"Bogdan Ionescu\",\"age\":38,\"org\":\"Carpathian Savings Bank\",\"role\":\"loan officer\",\"year\":1996}",
+      "parsed": {
+        "name": "Bogdan Ionescu",
+        "age": 38,
+        "org": "Carpathian Savings Bank",
+        "role": "loan officer",
+        "year": 1996
+      },
+      "new_tokens": 36,
+      "latency_s": 0.1553677525371313,
+      "engine": "optimized",
+      "round": 0
+    },
+    {
+      "case_id": "original-2",
+      "raw_output": "{\"name\":\"Bogdan Ionescu\",\"age\":38,\"org\":\"Carpathian Savings Bank\",\"role\":\"loan officer\",\"year\":1996}",
+      "parsed": {
+        "name": "Bogdan Ionescu",
+        "age": 38,
+        "org": "Carpathian Savings Bank",
+        "role": "loan officer",
+        "year": 1996
+      },
+      "new_tokens": 36,
+      "latency_s": 0.13331334851682186,
+      "engine": "optimized",
+      "round": 1
+    },
+    {
+      "case_id": "original-3",
+      "raw_output": "{\"name\":\"Sanne de Vries\",\"age\":22,\"org\":\"Rotterdam Maritime Museum\",\"role\":\"junior archivist\",\"year\":2018}",
+      "parsed": {
+        "name": "Sanne de Vries",
+        "age": 22,
+        "org": "Rotterdam Maritime Museum",
+        "role": "junior archivist",
+        "year": 2018
+      },
+      "new_tokens": 36,
+      "latency_s": 0.15489714220166206,
+      "engine": "optimized",
+      "round": 0
+    },
+    {
+      "case_id": "original-3",
+      "raw_output": "{\"name\":\"Sanne de Vries\",\"age\":22,\"org\":\"Rotterdam Maritime Museum\",\"role\":\"junior archivist\",\"year\":2018}",
+      "parsed": {
+        "name": "Sanne de Vries",
+        "age": 22,
+        "org": "Rotterdam Maritime Museum",
+        "role": "junior archivist",
+        "year": 2018
+      },
+      "new_tokens": 36,
+      "latency_s": 0.133344154804945,
+      "engine": "optimized",
+      "round": 1
+    },
+    {
+      "case_id": "original-4",
+      "raw_output": "{\"name\":\"Ingrid Halvorsen\",\"age\":24,\"org\":\"TerraVerde\",\"role\":\"field coordinator\",\"year\":2015}",
+      "parsed": {
+        "name": "Ingrid Halvorsen",
+        "age": 24,
+        "org": "TerraVerde",
+        "role": "field coordinator",
+        "year": 2015
+      },
+      "new_tokens": 35,
+      "latency_s": 0.129492724314332,
+      "engine": "optimized",
+      "round": 0
+    },
+    {
+      "case_id": "original-4",
+      "raw_output": "{\"name\":\"Ingrid Halvorsen\",\"age\":24,\"org\":\"TerraVerde\",\"role\":\"field coordinator\",\"year\":2015}",
+      "parsed": {
+        "name": "Ingrid Halvorsen",
+        "age": 24,
+        "org": "TerraVerde",
+        "role": "field coordinator",
+        "year": 2015
+      },
+      "new_tokens": 35,
+      "latency_s": 0.12923702783882618,
+      "engine": "optimized",
+      "round": 1
+    },
+    {
+      "case_id": "original-5",
+      "raw_output": "{\"name\":\"Fatima Al-Zahra\",\"age\":25,\"org\":\"Helios Biotech Lab\",\"role\":\"junior researcher\",\"year\":2019}",
+      "parsed": {
+        "name": "Fatima Al-Zahra",
+        "age": 25,
+        "org": "Helios Biotech Lab",
+        "role": "junior researcher",
+        "year": 2019
+      },
+      "new_tokens": 37,
+      "latency_s": 0.1584783848375082,
+      "engine": "optimized",
+      "round": 0
+    },
+    {
+      "case_id": "original-5",
+      "raw_output": "{\"name\":\"Fatima Al-Zahra\",\"age\":25,\"org\":\"Helios Biotech Lab\",\"role\":\"junior researcher\",\"year\":2019}",
+      "parsed": {
+        "name": "Fatima Al-Zahra",
+        "age": 25,
+        "org": "Helios Biotech Lab",
+        "role": "junior researcher",
+        "year": 2019
+      },
+      "new_tokens": 37,
+      "latency_s": 0.1366093885153532,
+      "engine": "optimized",
+      "round": 1
+    },
+    {
+      "case_id": "independent-0",
+      "raw_output": "{\"name\":\"Helena Brooks\",\"age\":36,\"org\":\"Ridgeline Observatory\",\"role\":\"telescope maintenance supervisor\",\"year\":2017}",
+      "parsed": {
+        "name": "Helena Brooks",
+        "age": 36,
+        "org": "Ridgeline Observatory",
+        "role": "telescope maintenance supervisor",
+        "year": 2017
+      },
+      "new_tokens": 35,
+      "latency_s": 27.020133145153522,
+      "engine": "optimized",
+      "round": 0
+    },
+    {
+      "case_id": "independent-0",
+      "raw_output": "{\"name\":\"Helena Brooks\",\"age\":36,\"org\":\"Ridgeline Observatory\",\"role\":\"telescope maintenance supervisor\",\"year\":2017}",
+      "parsed": {
+        "name": "Helena Brooks",
+        "age": 36,
+        "org": "Ridgeline Observatory",
+        "role": "telescope maintenance supervisor",
+        "year": 2017
+      },
+      "new_tokens": 35,
+      "latency_s": 0.1335254441946745,
+      "engine": "optimized",
+      "round": 1
+    },
+    {
+      "case_id": "independent-1",
+      "raw_output": "{\"name\":\"Felix Hart\",\"age\":42,\"org\":\"Marshwater Trust\",\"role\":\"wetland restoration adviser\",\"year\":2019}",
+      "parsed": {
+        "name": "Felix Hart",
+        "age": 42,
+        "org": "Marshwater Trust",
+        "role": "wetland restoration adviser",
+        "year": 2019
+      },
+      "new_tokens": 34,
+      "latency_s": 0.15270579978823662,
+      "engine": "optimized",
+      "round": 0
+    },
+    {
+      "case_id": "independent-1",
+      "raw_output": "{\"name\":\"Felix Hart\",\"age\":42,\"org\":\"Marshwater Trust\",\"role\":\"wetland restoration adviser\",\"year\":2019}",
+      "parsed": {
+        "name": "Felix Hart",
+        "age": 42,
+        "org": "Marshwater Trust",
+        "role": "wetland restoration adviser",
+        "year": 2019
+      },
+      "new_tokens": 34,
+      "latency_s": 0.1479171309620142,
+      "engine": "optimized",
+      "round": 1
+    },
+    {
+      "case_id": "independent-2",
+      "raw_output": "{\"name\":\"Priya Deshmukh\",\"age\":27,\"org\":\"Beacon Food Cooperative\",\"role\":\"cold-chain operations planner\",\"year\":2014}",
+      "parsed": {
+        "name": "Priya Deshmukh",
+        "age": 27,
+        "org": "Beacon Food Cooperative",
+        "role": "cold-chain operations planner",
+        "year": 2014
+      },
+      "new_tokens": 37,
+      "latency_s": 0.15403014793992043,
+      "engine": "optimized",
+      "round": 0
+    },
+    {
+      "case_id": "independent-2",
+      "raw_output": "{\"name\":\"Priya Deshmukh\",\"age\":27,\"org\":\"Beacon Food Cooperative\",\"role\":\"cold-chain operations planner\",\"year\":2014}",
+      "parsed": {
+        "name": "Priya Deshmukh",
+        "age": 27,
+        "org": "Beacon Food Cooperative",
+        "role": "cold-chain operations planner",
+        "year": 2014
+      },
+      "new_tokens": 37,
+      "latency_s": 0.13905966468155384,
+      "engine": "optimized",
+      "round": 1
+    },
+    {
+      "case_id": "independent-3",
+      "raw_output": "{\"name\":\"Marcus Bell\",\"age\":31,\"org\":\"Northgate Dental Centre\",\"role\":\"dental equipment technician\",\"year\":2018}",
+      "parsed": {
+        "name": "Marcus Bell",
+        "age": 31,
+        "org": "Northgate Dental Centre",
+        "role": "dental equipment technician",
+        "year": 2018
+      },
+      "new_tokens": 33,
+      "latency_s": 0.1480634082108736,
+      "engine": "optimized",
+      "round": 0
+    },
+    {
+      "case_id": "independent-3",
+      "raw_output": "{\"name\":\"Marcus Bell\",\"age\":31,\"org\":\"Northgate Dental Centre\",\"role\":\"dental equipment technician\",\"year\":2018}",
+      "parsed": {
+        "name": "Marcus Bell",
+        "age": 31,
+        "org": "Northgate Dental Centre",
+        "role": "dental equipment technician",
+        "year": 2018
+      },
+      "new_tokens": 33,
+      "latency_s": 0.14035142213106155,
+      "engine": "optimized",
+      "round": 1
+    },
+    {
+      "case_id": "independent-4",
+      "raw_output": "{\"name\":\"Evelyn Price\",\"age\":48,\"org\":\"Tidemark Field Office\",\"role\":\"coastal erosion surveyor\",\"year\":2020}",
+      "parsed": {
+        "name": "Evelyn Price",
+        "age": 48,
+        "org": "Tidemark Field Office",
+        "role": "coastal erosion surveyor",
+        "year": 2020
+      },
+      "new_tokens": 38,
+      "latency_s": 0.15764210000634193,
+      "engine": "optimized",
+      "round": 0
+    },
+    {
+      "case_id": "independent-4",
+      "raw_output": "{\"name\":\"Evelyn Price\",\"age\":48,\"org\":\"Tidemark Field Office\",\"role\":\"coastal erosion surveyor\",\"year\":2020}",
+      "parsed": {
+        "name": "Evelyn Price",
+        "age": 48,
+        "org": "Tidemark Field Office",
+        "role": "coastal erosion surveyor",
+        "year": 2020
+      },
+      "new_tokens": 38,
+      "latency_s": 0.14246764406561852,
+      "engine": "optimized",
+      "round": 1
+    },
+    {
+      "case_id": "independent-5",
+      "raw_output": "{\"name\":\"Wesley Grant\",\"age\":25,\"org\":\"Foundry Heritage Centre\",\"role\":\"stained-glass conservator\",\"year\":2021}",
+      "parsed": {
+        "name": "Wesley Grant",
+        "age": 25,
+        "org": "Foundry Heritage Centre",
+        "role": "stained-glass conservator",
+        "year": 2021
+      },
+      "new_tokens": 37,
+      "latency_s": 0.15499011613428593,
+      "engine": "optimized",
+      "round": 0
+    },
+    {
+      "case_id": "independent-5",
+      "raw_output": "{\"name\":\"Wesley Grant\",\"age\":25,\"org\":\"Foundry Heritage Centre\",\"role\":\"stained-glass conservator\",\"year\":2021}",
+      "parsed": {
+        "name": "Wesley Grant",
+        "age": 25,
+        "org": "Foundry Heritage Centre",
+        "role": "stained-glass conservator",
+        "year": 2021
+      },
+      "new_tokens": 37,
+      "latency_s": 0.15640145540237427,
+      "engine": "optimized",
+      "round": 1
+    },
+    {
+      "case_id": "finn-demo",
+      "raw_output": "{\"name\":\"Finn\",\"age\":18,\"org\":\"University of Toronto\",\"role\":\"student\",\"year\":2026}",
+      "parsed": {
+        "name": "Finn",
+        "age": 18,
+        "org": "University of Toronto",
+        "role": "student",
+        "year": 2026
+      },
+      "new_tokens": 29,
+      "latency_s": 0.1288282498717308,
+      "engine": "optimized",
+      "round": 0
+    },
+    {
+      "case_id": "finn-demo",
+      "raw_output": "{\"name\":\"Finn\",\"age\":18,\"org\":\"University of Toronto\",\"role\":\"student\",\"year\":2026}",
+      "parsed": {
+        "name": "Finn",
+        "age": 18,
+        "org": "University of Toronto",
+        "role": "student",
+        "year": 2026
+      },
+      "new_tokens": 29,
+      "latency_s": 0.11270068027079105,
+      "engine": "optimized",
+      "round": 1
+    }
+  ],
+  "gpu_verified": true,
+  "setup": {
+    "model_load_s": 0.4842981845140457,
+    "baseline_warmup_s": 13.780094012618065,
+    "optimized_warmup_s": 52.214637354016304
+  },
+  "errors": [],
+  "optimization": "compile-strict",
+  "environment": {
+    "gpu": "NVIDIA GeForce RTX 4090",
+    "gpu_uuid": "33c4f7a4-bd98-ee0d-7404-f86b78ca23c0",
+    "vendor": "nvidia",
+    "torch": "2.10.0+cu128",
+    "cuda": "12.8",
+    "hip": null,
+    "transformers": "5.17.0",
+    "peft": "0.21.0",
+    "python": "3.11.11",
+    "cpu_count": 32,
+    "torch_threads": 4,
+    "visible_devices": 1,
+    "vram_bytes": 25250627584,
+    "parameter_dtypes": [
+      "torch.bfloat16",
+      "torch.float32"
+    ]
+  },
+  "profiler": {
+    "device_events": 81039,
+    "device_time_us": 160405.89299998508
+  },
+  "summaries": {
+    "baseline": {
+      "engine": "baseline",
+      "requests": 65,
+      "median_s": 0.6394276600331068,
+      "p95_s": 0.6908979564905167,
+      "json_valid_rate": 1.0,
+      "strict_exact_match_rate": 1.0,
+      "outputs_stable_and_valid": true,
+      "cases": [
+        {
+          "id": "original-0",
+          "median_s": 0.6362897157669067,
+          "parsed": {
+            "name": "Mei-Ling Chang",
+            "age": 24,
+            "org": "Taipei National University",
+            "role": "graduate teaching assistant",
+            "year": 2024
+          },
+          "expected": {
+            "name": "Mei-Ling Chang",
+            "age": 24,
+            "org": "Taipei National University",
+            "role": "graduate teaching assistant",
+            "year": 2024
+          }
+        },
+        {
+          "id": "original-1",
+          "median_s": 0.6201396938413382,
+          "parsed": {
+            "name": "Kwame Mensah",
+            "age": 24,
+            "org": "NeuralLoop",
+            "role": "machine learning engineer",
+            "year": 2021
+          },
+          "expected": {
+            "name": "Kwame Mensah",
+            "age": 24,
+            "org": "NeuralLoop",
+            "role": "machine learning engineer",
+            "year": 2021
+          }
+        },
+        {
+          "id": "original-2",
+          "median_s": 0.6529851593077183,
+          "parsed": {
+            "name": "Bogdan Ionescu",
+            "age": 38,
+            "org": "Carpathian Savings Bank",
+            "role": "loan officer",
+            "year": 1996
+          },
+          "expected": {
+            "name": "Bogdan Ionescu",
+            "age": 38,
+            "org": "Carpathian Savings Bank",
+            "role": "loan officer",
+            "year": 1996
+          }
+        },
+        {
+          "id": "original-3",
+          "median_s": 0.6544538773596287,
+          "parsed": {
+            "name": "Sanne de Vries",
+            "age": 22,
+            "org": "Rotterdam Maritime Museum",
+            "role": "junior archivist",
+            "year": 2018
+          },
+          "expected": {
+            "name": "Sanne de Vries",
+            "age": 22,
+            "org": "Rotterdam Maritime Museum",
+            "role": "junior archivist",
+            "year": 2018
+          }
+        },
+        {
+          "id": "original-4",
+          "median_s": 0.6356305703520775,
+          "parsed": {
+            "name": "Ingrid Halvorsen",
+            "age": 24,
+            "org": "TerraVerde",
+            "role": "field coordinator",
+            "year": 2015
+          },
+          "expected": {
+            "name": "Ingrid Halvorsen",
+            "age": 24,
+            "org": "TerraVerde",
+            "role": "field coordinator",
+            "year": 2015
+          }
+        },
+        {
+          "id": "original-5",
+          "median_s": 0.6728625372052193,
+          "parsed": {
+            "name": "Fatima Al-Zahra",
+            "age": 25,
+            "org": "Helios Biotech Lab",
+            "role": "junior researcher",
+            "year": 2019
+          },
+          "expected": {
+            "name": "Fatima Al-Zahra",
+            "age": 25,
+            "org": "Helios Biotech Lab",
+            "role": "junior researcher",
+            "year": 2019
+          }
+        },
+        {
+          "id": "independent-0",
+          "median_s": 0.6369075309485197,
+          "parsed": {
+            "name": "Helena Brooks",
+            "age": 36,
+            "org": "Ridgeline Observatory",
+            "role": "telescope maintenance supervisor",
+            "year": 2017
+          },
+          "expected": {
+            "name": "Helena Brooks",
+            "age": 36,
+            "org": "Ridgeline Observatory",
+            "role": "telescope maintenance supervisor",
+            "year": 2017
+          }
+        },
+        {
+          "id": "independent-1",
+          "median_s": 0.6196760255843401,
+          "parsed": {
+            "name": "Felix Hart",
+            "age": 42,
+            "org": "Marshwater Trust",
+            "role": "wetland restoration adviser",
+            "year": 2019
+          },
+          "expected": {
+            "name": "Felix Hart",
+            "age": 42,
+            "org": "Marshwater Trust",
+            "role": "wetland restoration adviser",
+            "year": 2019
+          }
+        },
+        {
+          "id": "independent-2",
+          "median_s": 0.6716297697275877,
+          "parsed": {
+            "name": "Priya Deshmukh",
+            "age": 27,
+            "org": "Beacon Food Cooperative",
+            "role": "cold-chain operations planner",
+            "year": 2014
+          },
+          "expected": {
+            "name": "Priya Deshmukh",
+            "age": 27,
+            "org": "Beacon Food Cooperative",
+            "role": "cold-chain operations planner",
+            "year": 2014
+          }
+        },
+        {
+          "id": "independent-3",
+          "median_s": 0.6016071010380983,
+          "parsed": {
+            "name": "Marcus Bell",
+            "age": 31,
+            "org": "Northgate Dental Centre",
+            "role": "dental equipment technician",
+            "year": 2018
+          },
+          "expected": {
+            "name": "Marcus Bell",
+            "age": 31,
+            "org": "Northgate Dental Centre",
+            "role": "dental equipment technician",
+            "year": 2018
+          }
+        },
+        {
+          "id": "independent-4",
+          "median_s": 0.6908979564905167,
+          "parsed": {
+            "name": "Evelyn Price",
+            "age": 48,
+            "org": "Tidemark Field Office",
+            "role": "coastal erosion surveyor",
+            "year": 2020
+          },
+          "expected": {
+            "name": "Evelyn Price",
+            "age": 48,
+            "org": "Tidemark Field Office",
+            "role": "coastal erosion surveyor",
+            "year": 2020
+          }
+        },
+        {
+          "id": "independent-5",
+          "median_s": 0.6703358069062233,
+          "parsed": {
+            "name": "Wesley Grant",
+            "age": 25,
+            "org": "Foundry Heritage Centre",
+            "role": "stained-glass conservator",
+            "year": 2021
+          },
+          "expected": {
+            "name": "Wesley Grant",
+            "age": 25,
+            "org": "Foundry Heritage Centre",
+            "role": "stained-glass conservator",
+            "year": 2021
+          }
+        },
+        {
+          "id": "finn-demo",
+          "median_s": 0.5263637788593769,
+          "parsed": {
+            "name": "Finn",
+            "age": 18,
+            "org": "University of Toronto",
+            "role": "student",
+            "year": 2026
+          },
+          "expected": {
+            "name": "Finn",
+            "age": 18,
+            "org": "University of Toronto",
+            "role": "student",
+            "year": 2026
+          }
+        }
+      ]
+    },
+    "optimized": {
+      "engine": "optimized",
+      "requests": 65,
+      "median_s": 0.1416596006602049,
+      "p95_s": 0.16178021393716335,
+      "json_valid_rate": 1.0,
+      "strict_exact_match_rate": 1.0,
+      "outputs_stable_and_valid": true,
+      "cases": [
+        {
+          "id": "original-0",
+          "median_s": 0.14027869515120983,
+          "parsed": {
+            "name": "Mei-Ling Chang",
+            "age": 24,
+            "org": "Taipei National University",
+            "role": "graduate teaching assistant",
+            "year": 2024
+          },
+          "expected": {
+            "name": "Mei-Ling Chang",
+            "age": 24,
+            "org": "Taipei National University",
+            "role": "graduate teaching assistant",
+            "year": 2024
+          }
+        },
+        {
+          "id": "original-1",
+          "median_s": 0.13640178740024567,
+          "parsed": {
+            "name": "Kwame Mensah",
+            "age": 24,
+            "org": "NeuralLoop",
+            "role": "machine learning engineer",
+            "year": 2021
+          },
+          "expected": {
+            "name": "Kwame Mensah",
+            "age": 24,
+            "org": "NeuralLoop",
+            "role": "machine learning engineer",
+            "year": 2021
+          }
+        },
+        {
+          "id": "original-2",
+          "median_s": 0.1426436435431242,
+          "parsed": {
+            "name": "Bogdan Ionescu",
+            "age": 38,
+            "org": "Carpathian Savings Bank",
+            "role": "loan officer",
+            "year": 1996
+          },
+          "expected": {
+            "name": "Bogdan Ionescu",
+            "age": 38,
+            "org": "Carpathian Savings Bank",
+            "role": "loan officer",
+            "year": 1996
+          }
+        },
+        {
+          "id": "original-3",
+          "median_s": 0.1433793269097805,
+          "parsed": {
+            "name": "Sanne de Vries",
+            "age": 22,
+            "org": "Rotterdam Maritime Museum",
+            "role": "junior archivist",
+            "year": 2018
+          },
+          "expected": {
+            "name": "Sanne de Vries",
+            "age": 22,
+            "org": "Rotterdam Maritime Museum",
+            "role": "junior archivist",
+            "year": 2018
+          }
+        },
+        {
+          "id": "original-4",
+          "median_s": 0.13972526043653488,
+          "parsed": {
+            "name": "Ingrid Halvorsen",
+            "age": 24,
+            "org": "TerraVerde",
+            "role": "field coordinator",
+            "year": 2015
+          },
+          "expected": {
+            "name": "Ingrid Halvorsen",
+            "age": 24,
+            "org": "TerraVerde",
+            "role": "field coordinator",
+            "year": 2015
+          }
+        },
+        {
+          "id": "original-5",
+          "median_s": 0.14472381584346294,
+          "parsed": {
+            "name": "Fatima Al-Zahra",
+            "age": 25,
+            "org": "Helios Biotech Lab",
+            "role": "junior researcher",
+            "year": 2019
+          },
+          "expected": {
+            "name": "Fatima Al-Zahra",
+            "age": 25,
+            "org": "Helios Biotech Lab",
+            "role": "junior researcher",
+            "year": 2019
+          }
+        },
+        {
+          "id": "independent-0",
+          "median_s": 0.14003157429397106,
+          "parsed": {
+            "name": "Helena Brooks",
+            "age": 36,
+            "org": "Ridgeline Observatory",
+            "role": "telescope maintenance supervisor",
+            "year": 2017
+          },
+          "expected": {
+            "name": "Helena Brooks",
+            "age": 36,
+            "org": "Ridgeline Observatory",
+            "role": "telescope maintenance supervisor",
+            "year": 2017
+          }
+        },
+        {
+          "id": "independent-1",
+          "median_s": 0.13461149483919144,
+          "parsed": {
+            "name": "Felix Hart",
+            "age": 42,
+            "org": "Marshwater Trust",
+            "role": "wetland restoration adviser",
+            "year": 2019
+          },
+          "expected": {
+            "name": "Felix Hart",
+            "age": 42,
+            "org": "Marshwater Trust",
+            "role": "wetland restoration adviser",
+            "year": 2019
+          }
+        },
+        {
+          "id": "independent-2",
+          "median_s": 0.14704169519245625,
+          "parsed": {
+            "name": "Priya Deshmukh",
+            "age": 27,
+            "org": "Beacon Food Cooperative",
+            "role": "cold-chain operations planner",
+            "year": 2014
+          },
+          "expected": {
+            "name": "Priya Deshmukh",
+            "age": 27,
+            "org": "Beacon Food Cooperative",
+            "role": "cold-chain operations planner",
+            "year": 2014
+          }
+        },
+        {
+          "id": "independent-3",
+          "median_s": 0.13306875713169575,
+          "parsed": {
+            "name": "Marcus Bell",
+            "age": 31,
+            "org": "Northgate Dental Centre",
+            "role": "dental equipment technician",
+            "year": 2018
+          },
+          "expected": {
+            "name": "Marcus Bell",
+            "age": 31,
+            "org": "Northgate Dental Centre",
+            "role": "dental equipment technician",
+            "year": 2018
+          }
+        },
+        {
+          "id": "independent-4",
+          "median_s": 0.15040198341012,
+          "parsed": {
+            "name": "Evelyn Price",
+            "age": 48,
+            "org": "Tidemark Field Office",
+            "role": "coastal erosion surveyor",
+            "year": 2020
+          },
+          "expected": {
+            "name": "Evelyn Price",
+            "age": 48,
+            "org": "Tidemark Field Office",
+            "role": "coastal erosion surveyor",
+            "year": 2020
+          }
+        },
+        {
+          "id": "independent-5",
+          "median_s": 0.14503002911806107,
+          "parsed": {
+            "name": "Wesley Grant",
+            "age": 25,
+            "org": "Foundry Heritage Centre",
+            "role": "stained-glass conservator",
+            "year": 2021
+          },
+          "expected": {
+            "name": "Wesley Grant",
+            "age": 25,
+            "org": "Foundry Heritage Centre",
+            "role": "stained-glass conservator",
+            "year": 2021
+          }
+        },
+        {
+          "id": "finn-demo",
+          "median_s": 0.11983381398022175,
+          "parsed": {
+            "name": "Finn",
+            "age": 18,
+            "org": "University of Toronto",
+            "role": "student",
+            "year": 2026
+          },
+          "expected": {
+            "name": "Finn",
+            "age": 18,
+            "org": "University of Toronto",
+            "role": "student",
+            "year": 2026
+          }
+        }
+      ]
+    }
+  },
+  "compilation": {
+    "requested": true,
+    "emulate_precision_casts": true,
+    "unique_graphs": 2,
+    "calls_captured": 5194
+  },
+  "comparison": {
+    "same_json_values": true,
+    "mismatches": [],
+    "before": {
+      "engine": "baseline",
+      "requests": 65,
+      "median_s": 0.6394276600331068,
+      "p95_s": 0.6908979564905167,
+      "json_valid_rate": 1.0,
+      "strict_exact_match_rate": 1.0,
+      "outputs_stable_and_valid": true,
+      "cases": [
+        {
+          "id": "original-0",
+          "median_s": 0.6362897157669067,
+          "parsed": {
+            "name": "Mei-Ling Chang",
+            "age": 24,
+            "org": "Taipei National University",
+            "role": "graduate teaching assistant",
+            "year": 2024
+          },
+          "expected": {
+            "name": "Mei-Ling Chang",
+            "age": 24,
+            "org": "Taipei National University",
+            "role": "graduate teaching assistant",
+            "year": 2024
+          }
+        },
+        {
+          "id": "original-1",
+          "median_s": 0.6201396938413382,
+          "parsed": {
+            "name": "Kwame Mensah",
+            "age": 24,
+            "org": "NeuralLoop",
+            "role": "machine learning engineer",
+            "year": 2021
+          },
+          "expected": {
+            "name": "Kwame Mensah",
+            "age": 24,
+            "org": "NeuralLoop",
+            "role": "machine learning engineer",
+            "year": 2021
+          }
+        },
+        {
+          "id": "original-2",
+          "median_s": 0.6529851593077183,
+          "parsed": {
+            "name": "Bogdan Ionescu",
+            "age": 38,
+            "org": "Carpathian Savings Bank",
+            "role": "loan officer",
+            "year": 1996
+          },
+          "expected": {
+            "name": "Bogdan Ionescu",
+            "age": 38,
+            "org": "Carpathian Savings Bank",
+            "role": "loan officer",
+            "year": 1996
+          }
+        },
+        {
+          "id": "original-3",
+          "median_s": 0.6544538773596287,
+          "parsed": {
+            "name": "Sanne de Vries",
+            "age": 22,
+            "org": "Rotterdam Maritime Museum",
+            "role": "junior archivist",
+            "year": 2018
+          },
+          "expected": {
+            "name": "Sanne de Vries",
+            "age": 22,
+            "org": "Rotterdam Maritime Museum",
+            "role": "junior archivist",
+            "year": 2018
+          }
+        },
+        {
+          "id": "original-4",
+          "median_s": 0.6356305703520775,
+          "parsed": {
+            "name": "Ingrid Halvorsen",
+            "age": 24,
+            "org": "TerraVerde",
+            "role": "field coordinator",
+            "year": 2015
+          },
+          "expected": {
+            "name": "Ingrid Halvorsen",
+            "age": 24,
+            "org": "TerraVerde",
+            "role": "field coordinator",
+            "year": 2015
+          }
+        },
+        {
+          "id": "original-5",
+          "median_s": 0.6728625372052193,
+          "parsed": {
+            "name": "Fatima Al-Zahra",
+            "age": 25,
+            "org": "Helios Biotech Lab",
+            "role": "junior researcher",
+            "year": 2019
+          },
+          "expected": {
+            "name": "Fatima Al-Zahra",
+            "age": 25,
+            "org": "Helios Biotech Lab",
+            "role": "junior researcher",
+            "year": 2019
+          }
+        },
+        {
+          "id": "independent-0",
+          "median_s": 0.6369075309485197,
+          "parsed": {
+            "name": "Helena Brooks",
+            "age": 36,
+            "org": "Ridgeline Observatory",
+            "role": "telescope maintenance supervisor",
+            "year": 2017
+          },
+          "expected": {
+            "name": "Helena Brooks",
+            "age": 36,
+            "org": "Ridgeline Observatory",
+            "role": "telescope maintenance supervisor",
+            "year": 2017
+          }
+        },
+        {
+          "id": "independent-1",
+          "median_s": 0.6196760255843401,
+          "parsed": {
+            "name": "Felix Hart",
+            "age": 42,
+            "org": "Marshwater Trust",
+            "role": "wetland restoration adviser",
+            "year": 2019
+          },
+          "expected": {
+            "name": "Felix Hart",
+            "age": 42,
+            "org": "Marshwater Trust",
+            "role": "wetland restoration adviser",
+            "year": 2019
+          }
+        },
+        {
+          "id": "independent-2",
+          "median_s": 0.6716297697275877,
+          "parsed": {
+            "name": "Priya Deshmukh",
+            "age": 27,
+            "org": "Beacon Food Cooperative",
+            "role": "cold-chain operations planner",
+            "year": 2014
+          },
+          "expected": {
+            "name": "Priya Deshmukh",
+            "age": 27,
+            "org": "Beacon Food Cooperative",
+            "role": "cold-chain operations planner",
+            "year": 2014
+          }
+        },
+        {
+          "id": "independent-3",
+          "median_s": 0.6016071010380983,
+          "parsed": {
+            "name": "Marcus Bell",
+            "age": 31,
+            "org": "Northgate Dental Centre",
+            "role": "dental equipment technician",
+            "year": 2018
+          },
+          "expected": {
+            "name": "Marcus Bell",
+            "age": 31,
+            "org": "Northgate Dental Centre",
+            "role": "dental equipment technician",
+            "year": 2018
+          }
+        },
+        {
+          "id": "independent-4",
+          "median_s": 0.6908979564905167,
+          "parsed": {
+            "name": "Evelyn Price",
+            "age": 48,
+            "org": "Tidemark Field Office",
+            "role": "coastal erosion surveyor",
+            "year": 2020
+          },
+          "expected": {
+            "name": "Evelyn Price",
+            "age": 48,
+            "org": "Tidemark Field Office",
+            "role": "coastal erosion surveyor",
+            "year": 2020
+          }
+        },
+        {
+          "id": "independent-5",
+          "median_s": 0.6703358069062233,
+          "parsed": {
+            "name": "Wesley Grant",
+            "age": 25,
+            "org": "Foundry Heritage Centre",
+            "role": "stained-glass conservator",
+            "year": 2021
+          },
+          "expected": {
+            "name": "Wesley Grant",
+            "age": 25,
+            "org": "Foundry Heritage Centre",
+            "role": "stained-glass conservator",
+            "year": 2021
+          }
+        },
+        {
+          "id": "finn-demo",
+          "median_s": 0.5263637788593769,
+          "parsed": {
+            "name": "Finn",
+            "age": 18,
+            "org": "University of Toronto",
+            "role": "student",
+            "year": 2026
+          },
+          "expected": {
+            "name": "Finn",
+            "age": 18,
+            "org": "University of Toronto",
+            "role": "student",
+            "year": 2026
+          }
+        }
+      ]
+    },
+    "after": {
+      "engine": "optimized",
+      "requests": 65,
+      "median_s": 0.1416596006602049,
+      "p95_s": 0.16178021393716335,
+      "json_valid_rate": 1.0,
+      "strict_exact_match_rate": 1.0,
+      "outputs_stable_and_valid": true,
+      "cases": [
+        {
+          "id": "original-0",
+          "median_s": 0.14027869515120983,
+          "parsed": {
+            "name": "Mei-Ling Chang",
+            "age": 24,
+            "org": "Taipei National University",
+            "role": "graduate teaching assistant",
+            "year": 2024
+          },
+          "expected": {
+            "name": "Mei-Ling Chang",
+            "age": 24,
+            "org": "Taipei National University",
+            "role": "graduate teaching assistant",
+            "year": 2024
+          }
+        },
+        {
+          "id": "original-1",
+          "median_s": 0.13640178740024567,
+          "parsed": {
+            "name": "Kwame Mensah",
+            "age": 24,
+            "org": "NeuralLoop",
+            "role": "machine learning engineer",
+            "year": 2021
+          },
+          "expected": {
+            "name": "Kwame Mensah",
+            "age": 24,
+            "org": "NeuralLoop",
+            "role": "machine learning engineer",
+            "year": 2021
+          }
+        },
+        {
+          "id": "original-2",
+          "median_s": 0.1426436435431242,
+          "parsed": {
+            "name": "Bogdan Ionescu",
+            "age": 38,
+            "org": "Carpathian Savings Bank",
+            "role": "loan officer",
+            "year": 1996
+          },
+          "expected": {
+            "name": "Bogdan Ionescu",
+            "age": 38,
+            "org": "Carpathian Savings Bank",
+            "role": "loan officer",
+            "year": 1996
+          }
+        },
+        {
+          "id": "original-3",
+          "median_s": 0.1433793269097805,
+          "parsed": {
+            "name": "Sanne de Vries",
+            "age": 22,
+            "org": "Rotterdam Maritime Museum",
+            "role": "junior archivist",
+            "year": 2018
+          },
+          "expected": {
+            "name": "Sanne de Vries",
+            "age": 22,
+            "org": "Rotterdam Maritime Museum",
+            "role": "junior archivist",
+            "year": 2018
+          }
+        },
+        {
+          "id": "original-4",
+          "median_s": 0.13972526043653488,
+          "parsed": {
+            "name": "Ingrid Halvorsen",
+            "age": 24,
+            "org": "TerraVerde",
+            "role": "field coordinator",
+            "year": 2015
+          },
+          "expected": {
+            "name": "Ingrid Halvorsen",
+            "age": 24,
+            "org": "TerraVerde",
+            "role": "field coordinator",
+            "year": 2015
+          }
+        },
+        {
+          "id": "original-5",
+          "median_s": 0.14472381584346294,
+          "parsed": {
+            "name": "Fatima Al-Zahra",
+            "age": 25,
+            "org": "Helios Biotech Lab",
+            "role": "junior researcher",
+            "year": 2019
+          },
+          "expected": {
+            "name": "Fatima Al-Zahra",
+            "age": 25,
+            "org": "Helios Biotech Lab",
+            "role": "junior researcher",
+            "year": 2019
+          }
+        },
+        {
+          "id": "independent-0",
+          "median_s": 0.14003157429397106,
+          "parsed": {
+            "name": "Helena Brooks",
+            "age": 36,
+            "org": "Ridgeline Observatory",
+            "role": "telescope maintenance supervisor",
+            "year": 2017
+          },
+          "expected": {
+            "name": "Helena Brooks",
+            "age": 36,
+            "org": "Ridgeline Observatory",
+            "role": "telescope maintenance supervisor",
+            "year": 2017
+          }
+        },
+        {
+          "id": "independent-1",
+          "median_s": 0.13461149483919144,
+          "parsed": {
+            "name": "Felix Hart",
+            "age": 42,
+            "org": "Marshwater Trust",
+            "role": "wetland restoration adviser",
+            "year": 2019
+          },
+          "expected": {
+            "name": "Felix Hart",
+            "age": 42,
+            "org": "Marshwater Trust",
+            "role": "wetland restoration adviser",
+            "year": 2019
+          }
+        },
+        {
+          "id": "independent-2",
+          "median_s": 0.14704169519245625,
+          "parsed": {
+            "name": "Priya Deshmukh",
+            "age": 27,
+            "org": "Beacon Food Cooperative",
+            "role": "cold-chain operations planner",
+            "year": 2014
+          },
+          "expected": {
+            "name": "Priya Deshmukh",
+            "age": 27,
+            "org": "Beacon Food Cooperative",
+            "role": "cold-chain operations planner",
+            "year": 2014
+          }
+        },
+        {
+          "id": "independent-3",
+          "median_s": 0.13306875713169575,
+          "parsed": {
+            "name": "Marcus Bell",
+            "age": 31,
+            "org": "Northgate Dental Centre",
+            "role": "dental equipment technician",
+            "year": 2018
+          },
+          "expected": {
+            "name": "Marcus Bell",
+            "age": 31,
+            "org": "Northgate Dental Centre",
+            "role": "dental equipment technician",
+            "year": 2018
+          }
+        },
+        {
+          "id": "independent-4",
+          "median_s": 0.15040198341012,
+          "parsed": {
+            "name": "Evelyn Price",
+            "age": 48,
+            "org": "Tidemark Field Office",
+            "role": "coastal erosion surveyor",
+            "year": 2020
+          },
+          "expected": {
+            "name": "Evelyn Price",
+            "age": 48,
+            "org": "Tidemark Field Office",
+            "role": "coastal erosion surveyor",
+            "year": 2020
+          }
+        },
+        {
+          "id": "independent-5",
+          "median_s": 0.14503002911806107,
+          "parsed": {
+            "name": "Wesley Grant",
+            "age": 25,
+            "org": "Foundry Heritage Centre",
+            "role": "stained-glass conservator",
+            "year": 2021
+          },
+          "expected": {
+            "name": "Wesley Grant",
+            "age": 25,
+            "org": "Foundry Heritage Centre",
+            "role": "stained-glass conservator",
+            "year": 2021
+          }
+        },
+        {
+          "id": "finn-demo",
+          "median_s": 0.11983381398022175,
+          "parsed": {
+            "name": "Finn",
+            "age": 18,
+            "org": "University of Toronto",
+            "role": "student",
+            "year": 2026
+          },
+          "expected": {
+            "name": "Finn",
+            "age": 18,
+            "org": "University of Toronto",
+            "role": "student",
+            "year": 2026
+          }
+        }
+      ]
+    },
+    "same_device": true,
+    "comparison_kind": "optimization",
+    "median_latency_ratio": 4.513832151531226,
+    "median_paired_improvement": 0.7807906809879525,
+    "faster_fraction": 1.0,
+    "speedup_verified": true,
+    "gate": "Every JSON value unchanged and valid; stable repeated outputs; >5% median improvement and >=75% faster trials",
+    "sampling_note": "Alternating engines on one host; cross-host trials are matched by case/round but not simultaneous."
+  }
+}

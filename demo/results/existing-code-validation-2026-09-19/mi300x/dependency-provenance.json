@@ -1,0 +1,5 @@
+{
+  "path": "scripts/train.py",
+  "sha256": "832a025228081feb6e1fbcfdc7247d6ce25510da5f562717cf87660624f34da7",
+  "reason": "Unchanged evaluator imports encode from this unchanged helper during held-out loss; omitted from initial archive."
+}

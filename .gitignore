@@ -6,9 +6,29 @@ __pycache__/
 *.db
 .pytest_cache/
 .ruff_cache/
+.cache/
 .DS_Store
 .gpushare/
 
-# Checkpoint weights are large and reproducible; *.safetensors above already
-# excludes them. ckpt/*/meta.json is small and IS the measurement evidence,
-# so the directory itself is deliberately NOT ignored.
+# Keep measurements; only the two handoff adapters below are published.
+ckpt/**
+!ckpt/**/
+!ckpt/**/meta.json
+!ckpt/laptop-lora-v2/adapter_config.json
+!ckpt/laptop-lora-v2/adapter_model.safetensors
+!ckpt/laptop-lora-v2/tokenizer.json
+!ckpt/laptop-lora-v2/tokenizer_config.json
+!ckpt/laptop-lora-v2/chat_template.jinja
+!ckpt/laptop-lora-v3b/adapter_config.json
+!ckpt/laptop-lora-v3b/adapter_model.safetensors
+!ckpt/laptop-lora-v3b/tokenizer.json
+!ckpt/laptop-lora-v3b/tokenizer_config.json
+!ckpt/laptop-lora-v3b/chat_template.jinja
+
+# Local drafts and superseded partial evaluations; final reports are published.
+data/experiments/binding-v3/
+experiments/token-audit-binding-v3.json
+eval/laptop-control-challenge.json
+eval/laptop-lora-original.json
+eval/laptop-mixed-challenge.json
+eval/laptop-mixed-validation.json

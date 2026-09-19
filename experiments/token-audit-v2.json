@@ -1,0 +1,103 @@
+{
+  "model": "Qwen/Qwen2.5-0.5B",
+  "seq_len": 256,
+  "max_new_tokens": 128,
+  "files": [
+    {
+      "file": "data\\experiments\\extraction-v2\\train_mixed.jsonl",
+      "sha256": "207c761c1540826bce5016e1fd3bf25aeff7d2ea239e139d65f111ef5569e274",
+      "rows": 9768,
+      "max_sequence_tokens": 102,
+      "p95_sequence_tokens": 91,
+      "max_answer_tokens": 47,
+      "categories": {
+        "two_sentences": 500,
+        "role_first": 500,
+        "original": 1768,
+        "explicit_fields": 500,
+        "plain": 500,
+        "previous_employer": 500,
+        "line_break": 500,
+        "year_first": 500,
+        "date_distractor": 500,
+        "subject_marker": 500,
+        "org_first": 500,
+        "unrelated_date": 500,
+        "appositive": 500,
+        "irrelevant_identifier": 500,
+        "number_distractor": 500,
+        "quoted_employer": 500,
+        "role_delimiters": 500
+      },
+      "overlong_rows": 0,
+      "overlong_examples": [],
+      "fixed_padding_fraction": 0.694574279535217
+    },
+    {
+      "file": "data\\experiments\\extraction-v2\\heldout.jsonl",
+      "sha256": "d625e5a6223d103f6a4e26e3c84c5fa2250e37fc00c9c35fb377cfecaa891f93",
+      "rows": 800,
+      "max_sequence_tokens": 102,
+      "p95_sequence_tokens": 93,
+      "max_answer_tokens": 45,
+      "categories": {
+        "plain": 50,
+        "unrelated_date": 50,
+        "role_first": 50,
+        "subject_marker": 50,
+        "date_distractor": 50,
+        "irrelevant_identifier": 50,
+        "line_break": 50,
+        "explicit_fields": 50,
+        "quoted_employer": 50,
+        "year_first": 50,
+        "org_first": 50,
+        "number_distractor": 50,
+        "appositive": 50,
+        "role_delimiters": 50,
+        "two_sentences": 50,
+        "previous_employer": 50
+      },
+      "overlong_rows": 0,
+      "overlong_examples": [],
+      "fixed_padding_fraction": 0.6811181640625
+    },
+    {
+      "file": "data\\experiments\\extraction-v2\\challenge.jsonl",
+      "sha256": "30b771ef33b268295dc40d46e7f9f6d20d5380abd3f2f2464c85c4909ccc17e7",
+      "rows": 800,
+      "max_sequence_tokens": 100,
+      "p95_sequence_tokens": 94,
+      "max_answer_tokens": 45,
+      "categories": {
+        "tabular_note": 80,
+        "nested_punctuation": 80,
+        "unrelated_age": 80,
+        "correction": 80,
+        "reverse_note": 80,
+        "distractor_person": 80,
+        "quoted_title": 80,
+        "labelled_note": 80,
+        "parenthetical_dates": 80,
+        "irrelevant_numbers": 80
+      },
+      "overlong_rows": 0,
+      "overlong_examples": [],
+      "fixed_padding_fraction": 0.66384765625
+    },
+    {
+      "file": "data\\heldout.jsonl",
+      "sha256": "4b978b0aaa4d3e149d1030b491f6db1ed13c0c70880e033f1094360d8090f760",
+      "rows": 200,
+      "max_sequence_tokens": 87,
+      "p95_sequence_tokens": 81,
+      "max_answer_tokens": 42,
+      "categories": {
+        "original": 200
+      },
+      "overlong_rows": 0,
+      "overlong_examples": [],
+      "fixed_padding_fraction": 0.71501953125
+    }
+  ]
+}

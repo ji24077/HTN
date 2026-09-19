@@ -1,0 +1,11 @@
+{
+  "inputs.json": "54d9c54a726144a14b6e9d3083a6b85e7fee0144dd95f5375188742a48489475",
+  "mi300x-default-compile-rejected.json": "30eb795d0fb69e5c4b5aea7a7cdd30a0e79965f26f3dea46e007183af2bd4838",
+  "mi300x.json": "2f84dd6cdf91b88c2a5414000c0ec72ba33df63b0661d95036f2976247b9d7f1",
+  "rtx3090-torch26-compile-rejected.json": "5323374ef33aac822a220a8b9e6ec0c967dc090587c212244aa1726a4347f896",
+  "rtx3090.json": "5d8b991ef7ada86a3e373ad95134ad22b70ccd07480b0ce5eb50c0536b56527f",
+  "rtx4090-torch26-compile-rejected.json": "5a5b33bf989adfd9f9631988db9d109c59492be6da43c1f55975069ea1535413",
+  "rtx4090.json": "f48b0ede3a0cf9ce6d97bc7ba523bba1da0569f6d1d51ac5008de80f046cb13a",
+  "source-provenance.json": "da0e5e3006751d795fd7cbdbdf73bc29c56408ea3aa5def231ca0f877e9efc14",
+  "summary.json": "a268c694cd1482ede51117a27875485b70fe36611d8a3a43be1ea8107262c601"
+}

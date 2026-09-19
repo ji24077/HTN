@@ -69,7 +69,7 @@ MODEL_KEY = "qwen2.5-0.5b"
 # ─────────────────────────────────────────────────────────────────────────────
 def _read(path: Path) -> dict | None:
     try:
-        return json.loads(path.read_text())
+        return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
 
@@ -114,7 +114,7 @@ def experiment() -> dict[str, Any]:
 
 def _count(p: Path) -> int:
     try:
-        return sum(1 for ln in p.read_text().splitlines() if ln.strip())
+        return sum(1 for ln in p.read_text(encoding="utf-8").splitlines() if ln.strip())
     except OSError:
         return 0
 
@@ -435,6 +435,11 @@ class GenerateRequest(BaseModel):
 class MigrationRequest(BaseModel):
     source_pod_id: str
     target_pod_id: str
+    total_steps: int = Field(default=8, ge=2, le=10000)
+    stop_after: int = Field(default=4, ge=1, le=9999)
+    eval_n: int = Field(default=50, ge=1, le=2000)
+    initial_adapter: str | None = None
+    prepare_pods: bool = True
 
 
 def build_app():
@@ -599,6 +604,11 @@ def build_app():
                 kind=name,
                 source_pod_id=req.source_pod_id,
                 target_pod_id=req.target_pod_id,
+                total_steps=req.total_steps,
+                stop_after=req.stop_after,
+                eval_n=req.eval_n,
+                initial_adapter=req.initial_adapter,
+                prepare_pods=req.prepare_pods,
             ).public()
         except JobError as e:
             raise HTTPException(400, str(e)) from e

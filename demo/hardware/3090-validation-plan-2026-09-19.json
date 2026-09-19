@@ -1,0 +1,19 @@
+{
+  "budget": {
+    "total_budget_usd": 15.0,
+    "prior_reserve_usd": 11.870000000000001,
+    "new_reservations_usd": 0.28,
+    "unreserved_usd": 2.85,
+    "reservations": [
+      {
+        "key": "rtx3090",
+        "gpu_id": "NVIDIA GeForce RTX 3090",
+        "profile": "inference-latency-3090",
+        "max_duration_seconds": 2700,
+        "hourly_gpu_limit_usd": 0.22,
+        "storage_allowance_per_hour": 0.15,
+        "budget_usd": 0.28
+      }
+    ]
+  }
+}

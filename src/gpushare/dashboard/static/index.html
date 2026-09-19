@@ -533,7 +533,14 @@
     function drawLossChart(train) {
       const host = el('lossChart');
       host.innerHTML = '';
-      const curve = train?.loss_curve;
+      // Two shapes, one source. train.py records loss_history as a flat list
+      // of floats and knows start_step because it can resume; the earlier
+      // loss_curve carried {step, loss} pairs. Reading both means the chart
+      // does not need its own copy of the data — which would drift.
+      const hist = train?.loss_history;
+      const curve = Array.isArray(hist) && hist.length
+        ? hist.map((loss, i) => ({step: (train.start_step || 0) + i, loss}))
+        : train?.loss_curve;
       el('lossTableWrap').style.display = 'none';
       if (!Array.isArray(curve) || curve.length < 2) {
         // Deliberately not reconstructed from the job log: that log keeps only

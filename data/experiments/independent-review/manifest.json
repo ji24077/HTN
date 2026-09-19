@@ -1,0 +1,37 @@
+{
+  "benchmark": "independent-review-v1",
+  "frozen_at_utc": "2026-09-19T08:40:55.448684+00:00",
+  "status": "frozen_before_inference",
+  "files": {
+    "heldout.jsonl": {
+      "rows": 50,
+      "sha256": "f80445ab9b3d6f0f93bd1281654c29846ed53b7072bc347112a064321a9b67be",
+      "categories": {
+        "chronology": 10,
+        "subject_selection": 10,
+        "diacritics": 10,
+        "punctuation": 10,
+        "record_formats": 10
+      }
+    }
+  },
+  "authoring": "50 individually composed fictional records by a separate reviewing agent; no generator was used.",
+  "author_exposure": "Author previously inspected the original synthetic generator and evaluation failures. This is not blinded human evaluation.",
+  "training_separation": "Author did not inspect concurrently authored new training data or share benchmark contents with its author. Evaluation-only: do not train on this file.",
+  "label_policy": "All five facts explicit; name/org/role labels are exact verbatim spans; age is age at appointment; year is appointment year.",
+  "validation": {
+    "strict_record_schema": true,
+    "all_label_values_present": true,
+    "unique_ids_sentences_records": true,
+    "author_label_review": true,
+    "independent_human_review": false
+  },
+  "inference_at_freeze": false,
+  "limitations": [
+    "Small authored diagnostic set, not a random real-world sample.",
+    "Author knew previous model failure modes.",
+    "No missing-fact or ambiguous-target evaluation because schema lacks abstention.",
+    "Ten examples per category give coarse estimates."
+  ],
+  "methodology": "docs/independent-benchmark.md"
+}

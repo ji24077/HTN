@@ -1,0 +1,7 @@
+{
+  "benchmark_script": "scripts/benchmark_latency.py",
+  "benchmark_script_sha256": "16e27fe04590385935abbde206f610d4476a52cd2375e7c065e4a426f8401bd0",
+  "comparison_module": "src/gpushare/agent/latency.py",
+  "comparison_module_sha256": "cf11e0ac8906e032df4d5b55419fe8c3914cdfc1c5ddfc6a61d3652f09efcb65",
+  "note": "These source hashes identify the final compile-strict runs; retained earlier rejected trials used the earlier benchmark version."
+}

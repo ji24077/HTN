@@ -1,0 +1,15 @@
+{
+  "file": "data\\experiments\\binding-v3b\\train_replay.jsonl",
+  "rows": 5168,
+  "original": 1768,
+  "targeted": 2400,
+  "v2_replay": 1000,
+  "selection_seed": 431,
+  "shuffle_seed": 1337,
+  "sha256": "b3a7903d5e8ba97b9079ebeba28d2a6192fd426f6410ca35b39f2bc57340a78a",
+  "sources": {
+    "data\\experiments\\binding-v3b\\train_mixed.jsonl": "81d5ec85a79abc8baa4c2ce922ab4fd84ac9bb7c0adc857ded5d9eaefd3bb43b",
+    "data\\experiments\\extraction-v2\\train.jsonl": "ee36a74d0266d36de67f27a9e1eb80711e763b1e7c7aa457cdc6d64c08079afc"
+  },
+  "source_policy": "Only training files; no evaluation rows used."
+}

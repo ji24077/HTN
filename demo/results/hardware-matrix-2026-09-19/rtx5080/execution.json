@@ -1,0 +1,12 @@
+{
+  "status": "rejected",
+  "setup_seconds": 21.008098200007225,
+  "validation_exit_code": 2,
+  "latency_exit_code": 0,
+  "terminated": true,
+  "finished_at": 1789835573.5187688,
+  "session_id": "hardware-rtx5080-f99e5b49",
+  "profile": "hardware-rtx5080",
+  "cleanup_verified": true,
+  "estimate_usd": 0.1257781932036082
+}

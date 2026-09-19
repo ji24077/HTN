@@ -1,0 +1,97 @@
+{
+  "seed": 20260919,
+  "generator": "deterministic fictional biography templates v2",
+  "generator_sha256": "c28b70f25e7291441d9e93370c37bef57c87f1abe419971ea2a0287b83688376",
+  "excluded_rows": 4368,
+  "limitations": "Controlled copy/extraction stress test, not natural-language generalization evidence. All people/appointments are synthetic. Never train on heldout or challenge.",
+  "evaluation": "Retain original data/heldout.jsonl; also evaluate new heldout and challenge separately. Challenge uses unseen template families. Synthetic splits have disjoint names and organizations.",
+  "base_sha256": {
+    "train.jsonl": "42f582b3e8f3a70f25a8ac50136881cedfc5d23e0b9f9998ca5232add88d4782",
+    "heldout.jsonl": "4b978b0aaa4d3e149d1030b491f6db1ed13c0c70880e033f1094360d8090f760"
+  },
+  "files": {
+    "train.jsonl": {
+      "rows": 8000,
+      "sha256": "ee36a74d0266d36de67f27a9e1eb80711e763b1e7c7aa457cdc6d64c08079afc",
+      "categories": {
+        "unrelated_date": 500,
+        "year_first": 500,
+        "quoted_employer": 500,
+        "plain": 500,
+        "two_sentences": 500,
+        "org_first": 500,
+        "role_first": 500,
+        "number_distractor": 500,
+        "previous_employer": 500,
+        "appositive": 500,
+        "line_break": 500,
+        "explicit_fields": 500,
+        "date_distractor": 500,
+        "subject_marker": 500,
+        "irrelevant_identifier": 500,
+        "role_delimiters": 500
+      }
+    },
+    "heldout.jsonl": {
+      "rows": 800,
+      "sha256": "d625e5a6223d103f6a4e26e3c84c5fa2250e37fc00c9c35fb377cfecaa891f93",
+      "categories": {
+        "plain": 50,
+        "unrelated_date": 50,
+        "role_first": 50,
+        "subject_marker": 50,
+        "date_distractor": 50,
+        "irrelevant_identifier": 50,
+        "line_break": 50,
+        "explicit_fields": 50,
+        "quoted_employer": 50,
+        "year_first": 50,
+        "org_first": 50,
+        "number_distractor": 50,
+        "appositive": 50,
+        "role_delimiters": 50,
+        "two_sentences": 50,
+        "previous_employer": 50
+      }
+    },
+    "challenge.jsonl": {
+      "rows": 800,
+      "sha256": "30b771ef33b268295dc40d46e7f9f6d20d5380abd3f2f2464c85c4909ccc17e7",
+      "categories": {
+        "tabular_note": 80,
+        "nested_punctuation": 80,
+        "unrelated_age": 80,
+        "correction": 80,
+        "reverse_note": 80,
+        "distractor_person": 80,
+        "quoted_title": 80,
+        "labelled_note": 80,
+        "parenthetical_dates": 80,
+        "irrelevant_numbers": 80
+      }
+    },
+    "train_mixed.jsonl": {
+      "rows": 9768,
+      "sha256": "207c761c1540826bce5016e1fd3bf25aeff7d2ea239e139d65f111ef5569e274",
+      "categories": {
+        "two_sentences": 500,
+        "role_first": 500,
+        "original": 1768,
+        "explicit_fields": 500,
+        "plain": 500,
+        "previous_employer": 500,
+        "line_break": 500,
+        "year_first": 500,
+        "date_distractor": 500,
+        "subject_marker": 500,
+        "org_first": 500,
+        "unrelated_date": 500,
+        "appositive": 500,
+        "irrelevant_identifier": 500,
+        "number_distractor": 500,
+        "quoted_employer": 500,
+        "role_delimiters": 500
+      }
+    }
+  }
+}

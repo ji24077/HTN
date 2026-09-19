@@ -1,0 +1,308 @@
+{
+  "train": {
+    "rows": 9768,
+    "duplicate_sentences": 0,
+    "fields_not_verbatim": {
+      "role": 91,
+      "org": 11,
+      "name": 3,
+      "age": 1
+    },
+    "rows_to_review": 106,
+    "review_examples": [
+      {
+        "line": 94,
+        "fields": [
+          "role"
+        ],
+        "sentence": "Dr. Elena Vasquez, 40, was recruited to teach immunology at the University of Santiago in 2017.",
+        "record": {
+          "name": "Elena Vasquez",
+          "age": 40,
+          "org": "University of Santiago",
+          "role": "immunology professor",
+          "year": 2017
+        }
+      },
+      {
+        "line": 107,
+        "fields": [
+          "org"
+        ],
+        "sentence": "In 1991, Seamus O'Callaghan, then aged 39, was named station chief for the rural fire service in County Mayo.",
+        "record": {
+          "name": "Seamus O'Callaghan",
+          "age": 39,
+          "org": "County Mayo rural fire service",
+          "role": "station chief",
+          "year": 1991
+        }
+      },
+      {
+        "line": 211,
+        "fields": [
+          "role"
+        ],
+        "sentence": "During 1986, 51-year-old Stefan Brandtner accepted a professorship in civil engineering at TH Karlsfeld.",
+        "record": {
+          "name": "Stefan Brandtner",
+          "age": 51,
+          "org": "TH Karlsfeld",
+          "role": "professor of civil engineering",
+          "year": 1986
+        }
+      },
+      {
+        "line": 450,
+        "fields": [
+          "role"
+        ],
+        "sentence": "Leading the quantum optics group at Nordlys Laboratory since 2016 has been Professor Astrid Halvorsen, aged 58.",
+        "record": {
+          "name": "Astrid Halvorsen",
+          "age": 58,
+          "org": "Nordlys Laboratory",
+          "role": "quantum optics group leader",
+          "year": 2016
+        }
+      },
+      {
+        "line": 631,
+        "fields": [
+          "role"
+        ],
+        "sentence": "Who is 62 and edits the opinion page at the Lisbon Daily Herald? That would be Joaquim Fereira, who has held that job since 2004.",
+        "record": {
+          "name": "Joaquim Fereira",
+          "age": 62,
+          "org": "Lisbon Daily Herald",
+          "role": "opinion page editor",
+          "year": 2004
+        }
+      },
+      {
+        "line": 769,
+        "fields": [
+          "role"
+        ],
+        "sentence": "It was in 1988 that 58-year-old Émile Bouchard accepted the deanship of the Faculty of Medicine at Université Laval.",
+        "record": {
+          "name": "Émile Bouchard",
+          "age": 58,
+          "org": "Université Laval",
+          "role": "dean of the Faculty of Medicine",
+          "year": 1988
+        }
+      },
+      {
+        "line": 800,
+        "fields": [
+          "role"
+        ],
+        "sentence": "In 2026, semiconductor lab QubitForge announced that 61-year-old engineer Ingrid Halvorsen would lead its cryogenics division.",
+        "record": {
+          "name": "Ingrid Halvorsen",
+          "age": 61,
+          "org": "QubitForge",
+          "role": "head of cryogenics division",
+          "year": 2026
+        }
+      },
+      {
+        "line": 871,
+        "fields": [
+          "role"
+        ],
+        "sentence": "Sitting on the board of GreenFields Alliance since 2022 is 66-year-old environmental lawyer Tariq Al-Mansouri.",
+        "record": {
+          "name": "Tariq Al-Mansouri",
+          "age": 66,
+          "org": "GreenFields Alliance",
+          "role": "board member",
+          "year": 2022
+        }
+      },
+      {
+        "line": 877,
+        "fields": [
+          "role"
+        ],
+        "sentence": "Fresh out of law school, 25-year-old Thandiwe Mbeki secured a clerkship with the Constitutional Court of South Africa in 2019.",
+        "record": {
+          "name": "Thandiwe Mbeki",
+          "age": 25,
+          "org": "Constitutional Court of South Africa",
+          "role": "law clerk",
+          "year": 2019
+        }
+      },
+      {
+        "line": 880,
+        "fields": [
+          "role"
+        ],
+        "sentence": "Rurik Sigurðarson, 42, coaches figure skating at the Reykjavik Olympic Centre, a role he began in 2020.",
+        "record": {
+          "name": "Rurik Sigurðarson",
+          "age": 42,
+          "org": "Reykjavik Olympic Centre",
+          "role": "figure skating coach",
+          "year": 2020
+        }
+      },
+      {
+        "line": 915,
+        "fields": [
+          "role"
+        ],
+        "sentence": "Solveig Røed came aboard Nordic Photonics Lab in 2016 at 38 to lead its quantum optics group.",
+        "record": {
+          "name": "Solveig Røed",
+          "age": 38,
+          "org": "Nordic Photonics Lab",
+          "role": "head of the quantum optics group",
+          "year": 2016
+        }
+      },
+      {
+        "line": 934,
+        "fields": [
+          "role"
+        ],
+        "sentence": "Dr. Kwame Asante, a 66-year-old retired general, took a post teaching military history at Sandhurst Military Academy in 2005.",
+        "record": {
+          "name": "Kwame Asante",
+          "age": 66,
+          "org": "Sandhurst Military Academy",
+          "role": "military history instructor",
+          "year": 2005
+        }
+      },
+      {
+        "line": 997,
+        "fields": [
+          "role"
+        ],
+        "sentence": "Whose job was it to edit the obituaries desk at the Winnipeg Evening Signal in 2005? Douglas Whitford, 49.",
+        "record": {
+          "name": "Douglas Whitford",
+          "age": 49,
+          "org": "Winnipeg Evening Signal",
+          "role": "obituaries editor",
+          "year": 2005
+        }
+      },
+      {
+        "line": 1034,
+        "fields": [
+          "role"
+        ],
+        "sentence": "Mei-Ling Chen, 55, chairs the oncology department at Taipei General Hospital, where she arrived in 2012.",
+        "record": {
+          "name": "Mei-Ling Chen",
+          "age": 55,
+          "org": "Taipei General Hospital",
+          "role": "chair of the oncology department",
+          "year": 2012
+        }
+      },
+      {
+        "line": 1089,
+        "fields": [
+          "role"
+        ],
+        "sentence": "Helga Novak, 71, continues to teach linguistics at the University of Graz, where she has been a professor since 1994.",
+        "record": {
+          "name": "Helga Novak",
+          "age": 71,
+          "org": "University of Graz",
+          "role": "professor of linguistics",
+          "year": 1994
+        }
+      },
+      {
+        "line": 1157,
+        "fields": [
+          "role"
+        ],
+        "sentence": "Yusuf Abdel-Rahman, at 61, chaired the environmental NGO Green Horizons Trust from its founding until 2012.",
+        "record": {
+          "name": "Yusuf Abdel-Rahman",
+          "age": 61,
+          "org": "Green Horizons Trust",
+          "role": "chairman",
+          "year": 2012
+        }
+      },
+      {
+        "line": 1180,
+        "fields": [
+          "org"
+        ],
+        "sentence": "The robotics laboratory at Zurich Polytechnic promoted 36-year-old Amara Diallo to lead research engineer in 2021.",
+        "record": {
+          "name": "Amara Diallo",
+          "age": 36,
+          "org": "Zurich Polytechnic robotics laboratory",
+          "role": "lead research engineer",
+          "year": 2021
+        }
+      },
+      {
+        "line": 1293,
+        "fields": [
+          "role"
+        ],
+        "sentence": "Having just celebrated his 71st birthday, Antonio Ferreira da Silva agreed in 2024 to chair the board of the Amazon Reforestation Trust.",
+        "record": {
+          "name": "Antonio Ferreira da Silva",
+          "age": 71,
+          "org": "Amazon Reforestation Trust",
+          "role": "board chair",
+          "year": 2024
+        }
+      },
+      {
+        "line": 1373,
+        "fields": [
+          "role"
+        ],
+        "sentence": "A postdoctoral fellowship in quantum chemistry was awarded to 27-year-old Sanjay Venkataraman by the Bengaluru Advanced Physics Institute in 2016.",
+        "record": {
+          "name": "Sanjay Venkataraman",
+          "age": 27,
+          "org": "Bengaluru Advanced Physics Institute",
+          "role": "postdoctoral fellow in quantum chemistry",
+          "year": 2016
+        }
+      },
+      {
+        "line": 1473,
+        "fields": [
+          "role"
+        ],
+        "sentence": "Back in 1987, 58-year-old Nikolai Ostrovsky taught astrophysics at the Novosibirsk Institute.",
+        "record": {
+          "name": "Nikolai Ostrovsky",
+          "age": 58,
+          "org": "Novosibirsk Institute",
+          "role": "astrophysics teacher",
+          "year": 1987
+        }
+      }
+    ]
+  },
+  "heldout": {
+    "rows": 800,
+    "duplicate_sentences": 0,
+    "fields_not_verbatim": {},
+    "rows_to_review": 0,
+    "review_examples": []
+  },
+  "overlap": {
+    "sentences": 0,
+    "records": 0,
+    "names": 0
+  },
+  "note": "Non-verbatim labels require review, not automatic rejection: paraphrases can be valid. Shared names alone are not leakage."
+}

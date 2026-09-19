@@ -1,0 +1,45 @@
+{
+  "status": "measured",
+  "verified": false,
+  "gpu": "NVIDIA GeForce RTX 4090",
+  "scope": "native AXPY preprocessing only; no whole-training speedup claim",
+  "cases": [
+    {
+      "elements": 1,
+      "rounds": 21,
+      "baseline_median_seconds": 0.000133538618683815,
+      "candidate_median_seconds": 0.0001310352236032486,
+      "paired_median_improvement_fraction": 0.016206184122982137,
+      "candidate_win_fraction": 0.7142857142857143,
+      "performance_verified": false
+    },
+    {
+      "elements": 257,
+      "rounds": 21,
+      "baseline_median_seconds": 0.00013155583292245865,
+      "candidate_median_seconds": 0.00012993160635232925,
+      "paired_median_improvement_fraction": 0.009102536772543135,
+      "candidate_win_fraction": 0.7142857142857143,
+      "performance_verified": false
+    },
+    {
+      "elements": 65537,
+      "rounds": 21,
+      "baseline_median_seconds": 0.00022956915199756622,
+      "candidate_median_seconds": 0.00022614188492298126,
+      "paired_median_improvement_fraction": 0.01380851916792536,
+      "candidate_win_fraction": 0.8571428571428571,
+      "performance_verified": false
+    },
+    {
+      "elements": 1048576,
+      "rounds": 21,
+      "baseline_median_seconds": 0.001898183487355709,
+      "candidate_median_seconds": 0.0017637526616454124,
+      "paired_median_improvement_fraction": 0.10458529343813439,
+      "candidate_win_fraction": 1.0,
+      "performance_verified": true
+    }
+  ],
+  "error": null
+}

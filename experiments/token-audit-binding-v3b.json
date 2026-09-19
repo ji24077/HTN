@@ -1,0 +1,60 @@
+{
+  "model": "Qwen/Qwen2.5-0.5B",
+  "seq_len": 160,
+  "max_new_tokens": 128,
+  "files": [
+    {
+      "file": "data\\experiments\\binding-v3b\\train_replay.jsonl",
+      "sha256": "b3a7903d5e8ba97b9079ebeba28d2a6192fd426f6410ca35b39f2bc57340a78a",
+      "rows": 5168,
+      "max_sequence_tokens": 138,
+      "p95_sequence_tokens": 115,
+      "max_answer_tokens": 50,
+      "categories": {
+        "compositional_roles": 480,
+        "original": 1768,
+        "chronology": 720,
+        "number_distractor": 52,
+        "verbatim_copy": 480,
+        "subject_binding": 480,
+        "appositive": 67,
+        "subject_marker": 76,
+        "role_delimiters": 51,
+        "previous_employer": 57,
+        "org_first": 46,
+        "plain": 81,
+        "combined": 240,
+        "two_sentences": 62,
+        "irrelevant_identifier": 66,
+        "quoted_employer": 63,
+        "line_break": 62,
+        "role_first": 77,
+        "date_distractor": 54,
+        "unrelated_date": 60,
+        "year_first": 68,
+        "explicit_fields": 58
+      },
+      "overlong_rows": 0,
+      "overlong_examples": [],
+      "fixed_padding_fraction": 0.4453645027089783
+    },
+    {
+      "file": "data\\experiments\\independent-review\\heldout.jsonl",
+      "sha256": "f80445ab9b3d6f0f93bd1281654c29846ed53b7072bc347112a064321a9b67be",
+      "rows": 50,
+      "max_sequence_tokens": 101,
+      "p95_sequence_tokens": 93,
+      "max_answer_tokens": 47,
+      "categories": {
+        "chronology": 10,
+        "subject_selection": 10,
+        "diacritics": 10,
+        "punctuation": 10,
+        "record_formats": 10
+      },
+      "overlong_rows": 0,
+      "overlong_examples": [],
+      "fixed_padding_fraction": 0.477125
+    }
+  ]
+}

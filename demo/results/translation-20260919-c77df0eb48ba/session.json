@@ -1,0 +1,394 @@
+{
+  "status": "verified_correctness",
+  "session_id": "translation-20260919-c77df0eb48ba",
+  "prior_gpu_estimate_usd": 0.7993,
+  "prior_and_model_reserve_usd": 1.1,
+  "budget_usd": 15,
+  "gpu_verified": true,
+  "performance_verified": false,
+  "stage": {
+    "phase": "translate",
+    "attempt": 2,
+    "status": "validating"
+  },
+  "pods": {
+    "target": {
+      "id": "y8if3nctt7jt5e",
+      "name": "gpushare-translation-20260919-c77df0eb48ba-target",
+      "vendor": "amd",
+      "gpu": "AMD Instinct MI300X OAM",
+      "status": "running",
+      "datacenter": "EU-RO-1",
+      "cost_per_hour": 2.39
+    },
+    "source": {
+      "id": "d2pwgt3oufa1ad",
+      "name": "gpushare-translation-20260919-c77df0eb48ba-source",
+      "vendor": "nvidia",
+      "gpu": "NVIDIA GeForce RTX 4090",
+      "status": "running",
+      "datacenter": "EU-RO-1",
+      "cost_per_hour": 0.74
+    }
+  },
+  "engineering_result": "demo/results/translation-20260919-c77df0eb48ba/forward/result.json",
+  "error": null,
+  "model_usage": {
+    "provider": "baseten",
+    "model": "zai-org/GLM-5.3-Flash",
+    "calls": 0,
+    "estimated_cost_usd": 0.0,
+    "reserved_cost_upper_usd": 0.0,
+    "budget_usd": 0.2,
+    "requests": [
+      {
+        "provider": "baseten",
+        "model": "zai-org/GLM-5.3-Flash",
+        "input_tokens": 2070,
+        "output_tokens": 1505,
+        "estimated_cost_usd": 0.001063,
+        "finish_reason": "stop"
+      },
+      {
+        "provider": "baseten",
+        "model": "zai-org/GLM-5.3-Flash",
+        "input_tokens": 2164,
+        "output_tokens": 1193,
+        "estimated_cost_usd": 0.0009210999999999999,
+        "finish_reason": "stop"
+      }
+    ],
+    "prepared_phases_replayed": [
+      "optimize",
+      "translate"
+    ]
+  },
+  "native_benchmark": {
+    "status": "measured",
+    "performance_verified": false,
+    "scope": "native AXPY preprocessing only",
+    "report": "demo/results/translation-20260919-c77df0eb48ba/benchmark/report.json"
+  },
+  "checkpoint_resume": {
+    "passed": true,
+    "gpu_verified": true,
+    "report_path": "demo/results/translation-20260919-c77df0eb48ba/checkpoint-resume/target-report.json",
+    "comparison": {
+      "status": "passed",
+      "atol": 1e-05,
+      "rtol": 0.0001,
+      "identity_mismatches": [],
+      "verification_scope": "Comparison of supplied reports, not a new GPU execution",
+      "warnings": [
+        "Timing is diagnostic, not a benchmark.",
+        "Cross-GPU comparison makes no optimization or speedup claim."
+      ],
+      "predictions": {
+        "passed": true,
+        "count": 128,
+        "mismatch_count": 0,
+        "max_abs_error": 3.5762786865234375e-07,
+        "difference_overflow": false
+      },
+      "loss_history": {
+        "passed": true,
+        "count": 4,
+        "mismatch_count": 0,
+        "max_abs_error": 0.0,
+        "difference_overflow": false
+      },
+      "comparison_scope": "final predictions and loss history over the same step range",
+      "timing": {
+        "comparable": false,
+        "reasons": [
+          "different GPU or vendor"
+        ],
+        "speedup": null
+      }
+    },
+    "error": null,
+    "reports": {
+      "target": "demo/results/translation-20260919-c77df0eb48ba/checkpoint-resume/target-report.json",
+      "source": "demo/results/translation-20260919-c77df0eb48ba/checkpoint-resume/source-report.json"
+    },
+    "checkpoint_input_sha256": "6161e9ded76a3598286e744ed839fa949a7d81fc463b5aafe7569b8ed8c019ca",
+    "start_step": 8,
+    "global_step": 12,
+    "steps_executed": 4
+  },
+  "reverse": {
+    "status": "verified_correctness",
+    "target": "nvidia",
+    "source_sha256": "b4ad96537381f8beff7c2d238419d73e321a805e3122eba5ae76c10a29dfcc74",
+    "skills_sha256": "d7f5b5abf813cd3b299d46d3e3a8f5e7298e48502b9e26c6a95c2c4d2f5197bf",
+    "gpu_verified": true,
+    "performance_verified": false,
+    "attempts": [
+      {
+        "phase": "optimize",
+        "attempt": 1,
+        "gpu_verified": false,
+        "reason": "Same-backend optimization: replaced the per-call hipMalloc/hipFree with a cached reusable device scratch buffer (grown on demand), avoiding repeated allocation overhead in the training loop; also raised block size to 256 and grid cap to 1024 for better occupancy. The exported C ABI, single-allocation layout, zero-length fast path, error handling, and float32 math are unchanged; correctness against the fixed suite must be verified by the host.",
+        "findings": [
+          {
+            "severity": "blocker",
+            "code": "persistent_native_storage",
+            "path": "script.py",
+            "line": 67,
+            "message": "optimize: added static/thread-local/global storage requires a separate lifetime contract. This stateless C ABI has no destroy hook: release owned GPU buffers within every invocation; do not cache device allocations in persistent pointers or objects. Declaration: static DeviceScratch s"
+          },
+          {
+            "severity": "warning",
+            "code": "runtime_validation_required",
+            "path": "script.py",
+            "line": 1,
+            "message": "Static guards cannot prove native equivalence or actual device execution; fixed compiler, GPU-use, numerical, and timing checks remain mandatory."
+          }
+        ],
+        "source_sha256": "1049bcfe23f1568dd575a542131014d33b7a2b87e09cd50c255ef5d9f158f1a0",
+        "candidate": ".gpushare/translation/translation-20260919-c77df0eb48ba/reverse/optimize-1.py",
+        "status": "rejected_static_checks"
+      },
+      {
+        "phase": "optimize",
+        "attempt": 2,
+        "gpu_verified": true,
+        "reason": "Kept the stateless single-allocation design with full per-call cleanup on all paths. Optimizations: enqueue the two H2D transfers as hipMemcpyAsync on the default stream so issue order guarantees correctness without extra synchronization, removed the redundant hipDeviceSynchronize because the blocking D2H hipMemcpy synchronizes the kernel, and capped the grid slightly higher (128 blocks) for better occupancy on large inputs. Added an explicit size_t overflow guard for n*3*sizeof(float). Calculation, ABI, and error semantics are unchanged; correctness versus the unchanged reference (including zero-length and block-boundary cases) must be confirmed by the host's fixed numerical suite.",
+        "findings": [
+          {
+            "severity": "warning",
+            "code": "runtime_validation_required",
+            "path": "script.py",
+            "line": 1,
+            "message": "Static guards cannot prove native equivalence or actual device execution; fixed compiler, GPU-use, numerical, and timing checks remain mandatory."
+          }
+        ],
+        "source_sha256": "8e4d2d832efb5de03e627eefa5cba62898c6b5831455dbf64a9a3acd2fa0c2a1",
+        "candidate": "demo/results/translation-20260919-c77df0eb48ba/reverse/optimize-2.py",
+        "validation": {
+          "passed": true,
+          "gpu_verified": true,
+          "report_path": "demo/results/translation-20260919-c77df0eb48ba/reverse/optimize-2/report.json",
+          "comparison": {
+            "status": "passed",
+            "atol": 1e-05,
+            "rtol": 0.0001,
+            "identity_mismatches": [],
+            "verification_scope": "Comparison of supplied reports, not a new GPU execution",
+            "warnings": [
+              "Timing is diagnostic, not a benchmark."
+            ],
+            "predictions": {
+              "passed": true,
+              "count": 128,
+              "mismatch_count": 0,
+              "max_abs_error": 0.0,
+              "difference_overflow": false
+            },
+            "loss_history": {
+              "passed": true,
+              "count": 8,
+              "mismatch_count": 0,
+              "max_abs_error": 0.0,
+              "difference_overflow": false
+            },
+            "comparison_scope": "final predictions and loss history over the same step range",
+            "timing": {
+              "comparable": true,
+              "reasons": [],
+              "speedup": 1.022065161572822
+            }
+          },
+          "error": null
+        },
+        "status": "verified_correctness",
+        "lesson": "On HIP (tested backend hip/hip, exact GPU and ROCm versions to be recorded by the runner): a blocking hipMemcpy(hipMemcpyDeviceToHost) on the default stream synchronizes previously enqueued same-stream kernels, so an explicit hipDeviceSynchronize before the result copy is redundant; replacing the H2D hipMemcpy calls with hipMemcpyAsync on the default stream preserves issue-order dependencies and removes a runtime call. Applicability: single-stream, memcpy-synchronized ABI kernels only; verify with the fixed numerical suite before promotion."
+      },
+      {
+        "phase": "translate",
+        "attempt": 1,
+        "gpu_verified": false,
+        "reason": "The HIP-first source already uses only CUDA-mapped API (cuda_runtime.h, cudaMalloc/cudaMemcpy/kernel launch), so the applied mappings are complete and correct: headers, runtime calls, error strings, and <<<>>> launch syntax are all native CUDA. The C ABI, float32 math, zero-length early return, block-boundary grid-stride coverage, cached scratch allocation, error checks, and allocation release are preserved unchanged. No architecture-specific intrinsics, fast-math, or reduced precision introduced.",
+        "findings": [
+          {
+            "severity": "blocker",
+            "code": "persistent_native_storage",
+            "path": "script.py",
+            "line": 68,
+            "message": "translate: added static/thread-local/global storage requires a separate lifetime contract. This stateless C ABI has no destroy hook: release owned GPU buffers within every invocation; do not cache device allocations in persistent pointers or objects. Declaration: static DeviceScratch s"
+          },
+          {
+            "severity": "warning",
+            "code": "runtime_validation_required",
+            "path": "script.py",
+            "line": 1,
+            "message": "Static guards cannot prove native equivalence or actual device execution; fixed compiler, GPU-use, numerical, and timing checks remain mandatory."
+          }
+        ],
+        "source_sha256": "25efc12649aa4a8f81ac97a5b8f2b34adc506991be17a695e63fc0d9578db8c7",
+        "candidate": ".gpushare/translation/translation-20260919-c77df0eb48ba/reverse/translate-1.py",
+        "status": "rejected_static_checks"
+      },
+      {
+        "phase": "translate",
+        "attempt": 2,
+        "gpu_verified": true,
+        "reason": "The source already targets the CUDA runtime and preserves the C ABI. The reported blocker flags the only static object, which is the host-side char failure_message[512] diagnostic buffer required by portable_last_error(), not GPU storage. No device allocation outlives a call: cudaMalloc's single buffer is released via cudaFree on every exit path, including errors, and no device pointer is cached statically. Zero-length returns before any allocation, and the grid-stride kernel handles block-boundary sizes correctly. No changes needed; the CUDA-to-CUDA identity translation must still be validated by the fixed numerical, GPU-execution, and timing checks.",
+        "findings": [
+          {
+            "severity": "warning",
+            "code": "runtime_validation_required",
+            "path": "script.py",
+            "line": 1,
+            "message": "Static guards cannot prove native equivalence or actual device execution; fixed compiler, GPU-use, numerical, and timing checks remain mandatory."
+          }
+        ],
+        "source_sha256": "9c62c7f59ab45f3f0d534110fabee1af056117b6a5da9f720e6fa22417d3fc41",
+        "candidate": "demo/results/translation-20260919-c77df0eb48ba/reverse/translate-2.py",
+        "validation": {
+          "passed": true,
+          "gpu_verified": true,
+          "report_path": "demo/results/translation-20260919-c77df0eb48ba/reverse/translate-2/report.json",
+          "comparison": {
+            "status": "passed",
+            "atol": 1e-05,
+            "rtol": 0.0001,
+            "identity_mismatches": [],
+            "verification_scope": "Comparison of supplied reports, not a new GPU execution",
+            "warnings": [
+              "Timing is diagnostic, not a benchmark.",
+              "Cross-GPU comparison makes no optimization or speedup claim."
+            ],
+            "predictions": {
+              "passed": true,
+              "count": 128,
+              "mismatch_count": 0,
+              "max_abs_error": 2.980232238769531e-07,
+              "difference_overflow": false
+            },
+            "loss_history": {
+              "passed": true,
+              "count": 8,
+              "mismatch_count": 0,
+              "max_abs_error": 2.9802322387695312e-08,
+              "difference_overflow": false
+            },
+            "comparison_scope": "final predictions and loss history over the same step range",
+            "timing": {
+              "comparable": false,
+              "reasons": [
+                "different GPU or vendor"
+              ],
+              "speedup": null
+            }
+          },
+          "error": null
+        },
+        "status": "verified_correctness",
+        "lesson": "Static-analysis flags on 'static' declarations can conflate the ABI-mandated host diagnostic string with persistent device storage; a stateless C ABI may keep a host-side error buffer, but all cudaMalloc'd buffers must be freed on every return path. Verified: CUDA runtime AXPY with single fused 3n allocation, n==0 early return, grid-stride coverage of block-boundary lengths (evidence pending host GPU regression run)."
+      }
+    ],
+    "lessons": [
+      {
+        "phase": "optimize",
+        "text": "On HIP (tested backend hip/hip, exact GPU and ROCm versions to be recorded by the runner): a blocking hipMemcpy(hipMemcpyDeviceToHost) on the default stream synchronizes previously enqueued same-stream kernels, so an explicit hipDeviceSynchronize before the result copy is redundant; replacing the H2D hipMemcpy calls with hipMemcpyAsync on the default stream preserves issue-order dependencies and removes a runtime call. Applicability: single-stream, memcpy-synchronized ABI kernels only; verify with the fixed numerical suite before promotion.",
+        "status": "candidate_pending_regression",
+        "evidence_source_sha256": "8e4d2d832efb5de03e627eefa5cba62898c6b5831455dbf64a9a3acd2fa0c2a1"
+      },
+      {
+        "phase": "translate",
+        "text": "Static-analysis flags on 'static' declarations can conflate the ABI-mandated host diagnostic string with persistent device storage; a stateless C ABI may keep a host-side error buffer, but all cudaMalloc'd buffers must be freed on every return path. Verified: CUDA runtime AXPY with single fused 3n allocation, n==0 early return, grid-stride coverage of block-boundary lengths (evidence pending host GPU regression run).",
+        "status": "candidate_pending_regression",
+        "evidence_source_sha256": "9c62c7f59ab45f3f0d534110fabee1af056117b6a5da9f720e6fa22417d3fc41"
+      }
+    ],
+    "scope": "demo-compatible scripts; only the embedded native GPU source may change",
+    "directory": ".gpushare/translation/translation-20260919-c77df0eb48ba/reverse",
+    "model_usage": {
+      "provider": "baseten",
+      "model": "zai-org/GLM-5.3-Flash",
+      "calls": 2,
+      "estimated_cost_usd": 0.001984,
+      "reserved_cost_upper_usd": 0.009193,
+      "budget_usd": 0.2,
+      "requests": [
+        {
+          "provider": "baseten",
+          "model": "zai-org/GLM-5.3-Flash",
+          "input_tokens": 2070,
+          "output_tokens": 1505,
+          "estimated_cost_usd": 0.001063,
+          "finish_reason": "stop"
+        },
+        {
+          "provider": "baseten",
+          "model": "zai-org/GLM-5.3-Flash",
+          "input_tokens": 2164,
+          "output_tokens": 1193,
+          "estimated_cost_usd": 0.0009210999999999999,
+          "finish_reason": "stop"
+        }
+      ],
+      "prepared_phases_replayed": [
+        "optimize",
+        "translate"
+      ]
+    },
+    "baseline": {
+      "passed": true,
+      "gpu_verified": true,
+      "report_path": "demo/results/translation-20260919-c77df0eb48ba/reverse/baseline/report.json",
+      "comparison": {
+        "status": "passed",
+        "atol": 1e-05,
+        "rtol": 0.0001,
+        "identity_mismatches": [],
+        "verification_scope": "Comparison of supplied reports, not a new GPU execution",
+        "warnings": [
+          "Timing is diagnostic, not a benchmark."
+        ],
+        "predictions": {
+          "passed": true,
+          "count": 128,
+          "mismatch_count": 0,
+          "max_abs_error": 0.0,
+          "difference_overflow": false
+        },
+        "loss_history": {
+          "passed": true,
+          "count": 8,
+          "mismatch_count": 0,
+          "max_abs_error": 0.0,
+          "difference_overflow": false
+        },
+        "comparison_scope": "final predictions and loss history over the same step range",
+        "timing": {
+          "comparable": true,
+          "reasons": [],
+          "speedup": 1.0
+        }
+      },
+      "error": null
+    },
+    "output": "demo/results/translation-20260919-c77df0eb48ba/reverse/output.py",
+    "output_sha256": "9c62c7f59ab45f3f0d534110fabee1af056117b6a5da9f720e6fa22417d3fc41",
+    "performance_note": "No speedup is claimed from a short correctness run; matched repeated benchmarks are required."
+  },
+  "cleanup_verified": true,
+  "cleanup": [
+    {
+      "role": "target",
+      "id": "y8if3nctt7jt5e",
+      "state": "terminated",
+      "terminated_at": 1789816153.4755456
+    },
+    {
+      "role": "source",
+      "id": "d2pwgt3oufa1ad",
+      "state": "terminated",
+      "terminated_at": 1789816154.747656
+    }
+  ],
+  "estimated_gpu_cost_upper_usd": 0.3402,
+  "result_file": "demo/results/translation-20260919-c77df0eb48ba/session.json"
+}

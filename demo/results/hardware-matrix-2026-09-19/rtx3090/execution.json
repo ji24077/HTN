@@ -1,0 +1,12 @@
+{
+  "status": "rejected",
+  "setup_seconds": 24.086100000000442,
+  "validation_exit_code": 2,
+  "latency_exit_code": 0,
+  "terminated": true,
+  "finished_at": 1789835194.4946527,
+  "session_id": "hardware-rtx3090-16d9ab4d",
+  "profile": "inference-latency-3090",
+  "cleanup_verified": true,
+  "estimate_usd": 0.09426104908718003
+}

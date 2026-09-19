@@ -1,0 +1,288 @@
+{
+  "scope": "Local, uncommitted work on ji-phin-agentinfra; no push, merge, paid API or rented GPU.",
+  "limitations": "One training seed, 200 steps per adapter. Synthetic examples use finite templates. Results do not establish broad real-world extraction accuracy. Original benchmark has label ambiguities.",
+  "training": {
+    "memory-reference": {
+      "source": "ckpt/memory-reference/meta.json",
+      "model_id": "Qwen/Qwen2.5-0.5B",
+      "steps": 8,
+      "config_name": "optimized",
+      "dtype": "bf16",
+      "attention": "sdpa",
+      "micro_batch": 2,
+      "grad_accum": 1,
+      "seq_len": 256,
+      "tokens_per_step": 512,
+      "final_loss": 0.11381139606237411,
+      "t_step_median_s": 0.17423169999892707,
+      "peak_vram_gb": 4.7163136,
+      "gpu": "NVIDIA GeForce RTX 4060 Laptop GPU",
+      "method": "full",
+      "loss": "standard",
+      "loss_chunk": 64,
+      "gradient_checkpointing": false,
+      "trim_padding": false,
+      "seed": 1337,
+      "lr": 1e-05,
+      "lora_rank": null,
+      "trainable_parameters": 494032768,
+      "total_parameters": 494032768,
+      "data_sha256": "207c761c1540826bce5016e1fd3bf25aeff7d2ea239e139d65f111ef5569e274",
+      "data_rows": 9768,
+      "warmup_measure": 2,
+      "answer_tokens_per_second": 445.8037525934748,
+      "peak_reserved_gb": 5.863636992,
+      "checkpoint_saved": false,
+      "torch_version": "2.11.0+cu128"
+    },
+    "memory-optimized": {
+      "source": "ckpt/memory-optimized/meta.json",
+      "model_id": "Qwen/Qwen2.5-0.5B",
+      "steps": 8,
+      "config_name": "optimized",
+      "dtype": "bf16",
+      "attention": "sdpa",
+      "micro_batch": 2,
+      "grad_accum": 1,
+      "seq_len": 256,
+      "tokens_per_step": 512,
+      "final_loss": 0.11033068597316742,
+      "t_step_median_s": 0.1481822000023385,
+      "peak_vram_gb": 4.555710464,
+      "gpu": "NVIDIA GeForce RTX 4060 Laptop GPU",
+      "method": "full",
+      "loss": "target-only",
+      "loss_chunk": 64,
+      "gradient_checkpointing": false,
+      "trim_padding": true,
+      "seed": 1337,
+      "lr": 1e-05,
+      "lora_rank": null,
+      "trainable_parameters": 494032768,
+      "total_parameters": 494032768,
+      "data_sha256": "207c761c1540826bce5016e1fd3bf25aeff7d2ea239e139d65f111ef5569e274",
+      "data_rows": 9768,
+      "warmup_measure": 2,
+      "answer_tokens_per_second": 519.9671862714011,
+      "peak_reserved_gb": 4.79199232,
+      "checkpoint_saved": false,
+      "torch_version": "2.11.0+cu128"
+    },
+    "laptop-lora-v2": {
+      "source": "ckpt/laptop-lora-v2/meta.json",
+      "model_id": "Qwen/Qwen2.5-0.5B",
+      "steps": 200,
+      "config_name": "optimized",
+      "dtype": "bf16",
+      "attention": "sdpa",
+      "micro_batch": 4,
+      "grad_accum": 2,
+      "seq_len": 128,
+      "tokens_per_step": 1024,
+      "final_loss": 0.0001923608360812068,
+      "t_step_median_s": 0.5232079999987036,
+      "peak_vram_gb": 1.22504192,
+      "gpu": "NVIDIA GeForce RTX 4060 Laptop GPU",
+      "method": "lora",
+      "loss": "target-only",
+      "loss_chunk": 64,
+      "gradient_checkpointing": true,
+      "trim_padding": true,
+      "seed": 1337,
+      "lr": 0.0002,
+      "lora_rank": 8,
+      "trainable_parameters": 4399104,
+      "total_parameters": 498431872,
+      "data_sha256": "207c761c1540826bce5016e1fd3bf25aeff7d2ea239e139d65f111ef5569e274",
+      "data_rows": 9768,
+      "warmup_measure": 10,
+      "answer_tokens_per_second": 482.85426314911194,
+      "peak_reserved_gb": 1.319108608,
+      "checkpoint_saved": true,
+      "torch_version": "2.11.0+cu128"
+    },
+    "laptop-lora-control": {
+      "source": "ckpt/laptop-lora-control/meta.json",
+      "model_id": "Qwen/Qwen2.5-0.5B",
+      "steps": 200,
+      "config_name": "optimized",
+      "dtype": "bf16",
+      "attention": "sdpa",
+      "micro_batch": 4,
+      "grad_accum": 2,
+      "seq_len": 128,
+      "tokens_per_step": 1024,
+      "final_loss": 0.04662669450044632,
+      "t_step_median_s": 0.7716093999988516,
+      "peak_vram_gb": 1.223227904,
+      "gpu": "NVIDIA GeForce RTX 4060 Laptop GPU",
+      "method": "lora",
+      "loss": "target-only",
+      "loss_chunk": 64,
+      "gradient_checkpointing": true,
+      "trim_padding": true,
+      "seed": 1337,
+      "lr": 0.0002,
+      "lora_rank": 8,
+      "trainable_parameters": 4399104,
+      "total_parameters": 498431872,
+      "data_sha256": "42f582b3e8f3a70f25a8ac50136881cedfc5d23e0b9f9998ca5232add88d4782",
+      "data_rows": 1768,
+      "warmup_measure": 10,
+      "answer_tokens_per_second": 373.5097180118002,
+      "peak_reserved_gb": 1.308622848,
+      "checkpoint_saved": true,
+      "torch_version": "2.11.0+cu128"
+    }
+  },
+  "comparisons": {
+    "original": {
+      "control_report": "eval/laptop-control-original.json",
+      "mixed_report": "eval/laptop-mixed-original.json",
+      "n": 200,
+      "control_exact_match": 0.885,
+      "mixed_exact_match": 0.875,
+      "delta_percentage_points": -1.0000000000000009,
+      "control_json_parse": 1.0,
+      "mixed_json_parse": 1.0,
+      "control_95pct_interval": [
+        0.8333528310151243,
+        0.9221362676743804
+      ],
+      "mixed_95pct_interval": [
+        0.8219857499741765,
+        0.9138802552428735
+      ],
+      "paired": {
+        "mixed_correct_control_wrong": 9,
+        "control_correct_mixed_wrong": 11,
+        "both_correct": 166,
+        "both_wrong": 14
+      },
+      "categories": {
+        "original": {
+          "n": 200,
+          "control": 0.885,
+          "mixed": 0.875
+        }
+      }
+    },
+    "challenge": {
+      "control_report": "eval/laptop-control-challenge-full.json",
+      "mixed_report": "eval/laptop-mixed-challenge-full.json",
+      "n": 800,
+      "control_exact_match": 0.46,
+      "mixed_exact_match": 0.81,
+      "delta_percentage_points": 35.0,
+      "control_json_parse": 0.84625,
+      "mixed_json_parse": 1.0,
+      "control_95pct_interval": [
+        0.42573670120344254,
+        0.4946456088930117
+      ],
+      "mixed_95pct_interval": [
+        0.7813585824895336,
+        0.8356785142629474
+      ],
+      "paired": {
+        "mixed_correct_control_wrong": 300,
+        "control_correct_mixed_wrong": 20,
+        "both_correct": 348,
+        "both_wrong": 132
+      },
+      "categories": {
+        "tabular_note": {
+          "n": 80,
+          "control": 0.825,
+          "mixed": 1.0
+        },
+        "nested_punctuation": {
+          "n": 80,
+          "control": 0.5125,
+          "mixed": 0.7875
+        },
+        "unrelated_age": {
+          "n": 80,
+          "control": 0.45,
+          "mixed": 0.9375
+        },
+        "correction": {
+          "n": 80,
+          "control": 0.5375,
+          "mixed": 0.8625
+        },
+        "reverse_note": {
+          "n": 80,
+          "control": 0.65,
+          "mixed": 0.975
+        },
+        "distractor_person": {
+          "n": 80,
+          "control": 0.45,
+          "mixed": 0.8125
+        },
+        "quoted_title": {
+          "n": 80,
+          "control": 0.5375,
+          "mixed": 0.85
+        },
+        "labelled_note": {
+          "n": 80,
+          "control": 0.575,
+          "mixed": 0.9
+        },
+        "parenthetical_dates": {
+          "n": 80,
+          "control": 0.0625,
+          "mixed": 0.7875
+        },
+        "irrelevant_numbers": {
+          "n": 80,
+          "control": 0.0,
+          "mixed": 0.1875
+        }
+      }
+    }
+  },
+  "validation": {
+    "source": "eval/laptop-mixed-validation-full.json",
+    "n": 800,
+    "json_parse_rate": 0.99625,
+    "field_accuracy": {
+      "name": 0.9175,
+      "age": 0.99625,
+      "org": 0.99625,
+      "role": 0.99625,
+      "year": 0.99625
+    },
+    "exact_match_rate": 0.9175,
+    "held_out_loss": 0.009056796052704274,
+    "runtime": {
+      "gpu": "NVIDIA GeForce RTX 4060 Laptop GPU",
+      "batch": 32,
+      "dtype": "bf16",
+      "seconds": 64.19233949999762,
+      "peak_allocated_gb": 1.240712704
+    },
+    "evaluation": {
+      "dataset_sha256": "da9ea3805d90d87541b1925c7a23677177465ba2ee224c7a4abebded82ffe187",
+      "n": 800,
+      "prompt": "Extract:\n{sentence}\nJSON:\n",
+      "max_new_tokens": 128,
+      "seq_len": 128,
+      "decoding": "greedy",
+      "scoring_version": 2
+    },
+    "model": "ckpt/laptop-lora-v2",
+    "exact_match_95pct_interval": [
+      0.8963812262350686,
+      0.934628412133192
+    ]
+  },
+  "validation_checks": {
+    "tests_passed": 84,
+    "math": "CPU FP32 loss and every trainable gradient compared to standard Qwen2; full and LoRA, with and without decoder checkpointing",
+    "gpu": "Real adapter train/save/reload/evaluation on RTX 4060 Laptop",
+    "no_claim": "FP16 training and AMD/ROCm have not been hardware-tested."
+  }
+}

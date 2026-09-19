@@ -39,7 +39,6 @@ is now a counted failure rather than an invisible one.
 from __future__ import annotations
 
 import json
-import re
 from dataclasses import dataclass, field
 
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -98,7 +97,6 @@ def build_example(sentence: str, record: Record) -> tuple[str, str]:
 # ─────────────────────────────────────────────────────────────────────────────
 # Scoring
 # ─────────────────────────────────────────────────────────────────────────────
-_FIRST_OBJECT = re.compile(r"\{.*?\}", re.DOTALL)
 
 
 def parse_output(text: str) -> Record | None:
@@ -109,11 +107,13 @@ def parse_output(text: str) -> Record | None:
     trailing newline or a stray token has learned the format; failing it on
     that would measure our decoding, not its training.
     """
-    m = _FIRST_OBJECT.search(text)
-    if not m:
+    start = text.find("{")
+    if start < 0:
         return None
     try:
-        return Record.model_validate_json(m.group(0))
+        # A regex ending at the first closing brace breaks valid quoted fields.
+        value, _ = json.JSONDecoder().raw_decode(text[start:])
+        return Record.model_validate(value)
     except (ValidationError, ValueError):
         return None
 
@@ -126,6 +126,8 @@ class Sample:
     expected: Record
     raw_output: str
     parsed: Record | None
+    category: str = "original"
+    source_index: int | None = None
 
     @property
     def parsed_ok(self) -> bool:

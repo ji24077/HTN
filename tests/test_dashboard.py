@@ -1,8 +1,10 @@
 import json
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
+from gpushare.dashboard import app as dashboard_app
 from gpushare.dashboard import runner
 from gpushare.dashboard.app import build_app
 
@@ -20,6 +22,24 @@ def test_research_console_and_state_are_served():
     assert 'data-testid="optimize-inference"' in page.text
     assert state.status_code == 200
     assert state.json()["experiment"]["model_id"] == "Qwen/Qwen2.5-0.5B"
+
+
+def test_dashboard_reads_utf8_artifacts_under_a_windows_locale(tmp_path, monkeypatch):
+    payload = {"name": "Đức", "org": "École des Arts"}
+    encoded = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    report = tmp_path / "report.json"
+    dataset = tmp_path / "dataset.jsonl"
+    report.write_bytes(encoded)
+    dataset.write_bytes(encoded + b"\n\n" + encoded + b"\n")
+    original_read_text = Path.read_text
+
+    def windows_read_text(path, encoding=None, errors=None):
+        return original_read_text(path, encoding=encoding or "cp1252", errors=errors)
+
+    # Exercise the same default-encoding hazard on Linux CI as on Windows.
+    monkeypatch.setattr(Path, "read_text", windows_read_text)
+    assert dashboard_app._read(report) == payload
+    assert dashboard_app._count(dataset) == 2
 
 
 def test_quality_gate_checks_parse_and_exact_match():
@@ -66,6 +86,7 @@ def test_pod_api_returns_only_safe_fields(monkeypatch):
         return json.dumps(detail if "get" in args else pods)
 
     monkeypatch.setattr(runner, "_capture", fake_capture)
+    monkeypatch.setattr(runner, "_runpodctl", lambda: "fake-runpodctl")
     monkeypatch.setattr(runner, "_pod_cache", (0.0, []))
 
     result = runner.list_pods(refresh=True)
