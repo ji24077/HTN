@@ -779,6 +779,20 @@ def _setup_pod(job: Job, info: dict[str, Any], vendor: str) -> None:
     _run(job, _ssh_args(info, bootstrap))
 
 
+def _serve_python(vendor: str) -> str:
+    """How to invoke python for serving on this vendor.
+
+    AMD cannot use the uv path: the image has no uv, `pip install --user uv`
+    is refused by Ubuntu 24.04's PEP 668 guard, and this project's lock pins
+    the rocm7.0 wheel index against a 7.1.1 host. The migration venv already
+    solves exactly this — matched torch from rocm7.1 — so serving borrows it.
+
+    NVIDIA keeps `uv run`, which is what the working demo uses; there is no
+    reason to move it and a live path to break if it moves.
+    """
+    return ".migration-venv/bin/python" if vendor == "amd" else "uv run python"
+
+
 def _setup_migration_pod(job: Job, info: dict[str, Any], vendor: str) -> None:
     """Isolated matched versions; never resolve the regular CUDA/ROCm lock."""
     wheel = "rocm7.1" if vendor == "amd" else "cu128"
@@ -1756,7 +1770,10 @@ def start_inference_server(*, pod_id: str, model_id: str, dtype: str = "bf16") -
         JOBS.update(job, "syncing serve script", 10)
         _sync_project(job, info)
         JOBS.update(job, "preparing GPU environment", 25)
-        _setup_pod(job, info, pod["vendor"])
+        if pod["vendor"] == "amd":
+            _setup_migration_pod(job, info, "amd")
+        else:
+            _setup_pod(job, info, pod["vendor"])
 
         remote_ref = ref if ref.startswith("/") else ref
         # The kill runs in its OWN ssh call, and that separation is the whole
@@ -1781,7 +1798,8 @@ def start_inference_server(*, pod_id: str, model_id: str, dtype: str = "bf16") -
         # as stdout and stderr, or ssh waits on the inherited descriptor forever.
         cmd = (
             f'export PATH="$HOME/.local/bin:$PATH"; cd {shlex.quote(REMOTE_ROOT)}; '
-            f"setsid nohup uv run python scripts/serve.py --model {shlex.quote(remote_ref)} "
+            f"setsid nohup {_serve_python(pod['vendor'])} scripts/serve.py "
+            f"--model {shlex.quote(remote_ref)} "
             f"--dtype {shlex.quote(dtype)} --port {SERVE_PORT} "
             f"< /dev/null > /tmp/serve.log 2>&1 & echo started"
         )

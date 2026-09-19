@@ -495,3 +495,15 @@ def test_a_restart_re_adopts_a_model_that_is_still_resident(monkeypatch, tmp_pat
     monkeypatch.setattr(runner, "_server_health", lambda timeout=3.0: None)
     runner.restore_serving()
     assert not runner._serve, "a dead server was adopted"
+
+
+def test_amd_serving_does_not_go_through_uv():
+    """The AMD image has no uv, and this project's lock is wrong for it.
+
+    `pip install --user uv` is refused by Ubuntu 24.04's PEP 668 guard, and the
+    pinned rocm7.0 wheel index does not match the 7.1.1 host that actually
+    passed check_env. The migration venv already installs matched torch from
+    rocm7.1, so serving borrows it rather than resolving the project lock.
+    """
+    assert runner._serve_python("amd") == ".migration-venv/bin/python"
+    assert "uv" in runner._serve_python("nvidia"), "the working NVIDIA path must not move"
