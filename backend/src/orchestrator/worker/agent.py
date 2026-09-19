@@ -76,6 +76,9 @@ async def execute(executor: Executor, task: Task, report: Callable[[float], None
     ):
         scope.set_tag("execution_id", f"{task.spec.id}:{task.generation}")
         scope.set_tag("task_id", task.spec.id)
+        scope.set_tag("job_id", task.spec.job_id)
+        scope.set_tag("worker_id", task.worker_id)
+        scope.set_tag("reservation_id", f"{task.spec.id}:{task.generation}")
         scope.set_tag("attempt", task.generation)
         span.set_tag("task_id", task.spec.id)
         span.set_tag("job_id", task.spec.job_id)

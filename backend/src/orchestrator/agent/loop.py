@@ -87,10 +87,18 @@ def finish_interrupted(state: Conversation, message: str) -> None:
 
 
 class AgentLoop:
-    def __init__(self, model: ModelClient, *, max_steps: int = 8, timeout_seconds: float = 90):
+    def __init__(
+        self,
+        model: ModelClient,
+        *,
+        max_steps: int = 8,
+        timeout_seconds: float = 90,
+        instructions: str = INSTRUCTIONS,
+    ):
         self.model = model
         self.max_steps = max_steps
         self.timeout_seconds = timeout_seconds
+        self.instructions = instructions
 
     async def run(self, state: Conversation, tools: Tools, checkpoint: Checkpoint) -> Turn:
         """Run the already-created last turn. Persist before every tool side effect."""
@@ -107,7 +115,7 @@ class AgentLoop:
                         )
                         break
                     response = await self.model.respond(
-                        state.history, tools=definitions, instructions=INSTRUCTIONS
+                        state.history, tools=definitions, instructions=self.instructions
                     )
                     prior_ids = {
                         item["call_id"]

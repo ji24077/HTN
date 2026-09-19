@@ -16,9 +16,10 @@ export function TaskComposer({
   busy: boolean;
   onSubmit: (tasks: TaskSpec[]) => Promise<void>;
 }) {
-  const [name, setName] = useState("Render preview");
+  const [name, setName] = useState("Connection test");
   const [duration, setDuration] = useState(30);
   const [failover, setFailover] = useState(true);
+  const [fail, setFail] = useState(false);
   const [kind, setKind] = useState<WorkloadKind>("stub");
   const [preparing, setPreparing] = useState(false);
   const [error, setError] = useState("");
@@ -39,9 +40,20 @@ export function TaskComposer({
       const worker = workers.find((worker) => worker.id === selected);
       if (worker && !worker.capabilities.kinds.includes(kind))
         throw new Error("Choose a worker that supports this workload.");
-      await onSubmit([
-        await workloadTask(kind, name.trim(), selected, duration, failover),
-      ]);
+      const task = await workloadTask(
+        kind,
+        name.trim(),
+        selected,
+        duration,
+        failover,
+      );
+      if (kind === "stub" && fail)
+        task.payload = {
+          duration_seconds: 1,
+          fail: true,
+          value: { label: name.trim() },
+        };
+      await onSubmit([task]);
     } catch (cause) {
       setError(
         cause instanceof Error ? cause.message : "Could not prepare the task.",
@@ -52,11 +64,10 @@ export function TaskComposer({
   }
   return (
     <section className="composer">
-      <div className="composer-header">
-        <h2>Dispatch a task</h2>
-        <span className="composer-arrow">↗</span>
-      </div>
-      <p>A small piece of work. Your destination.</p>
+      <p>
+        Choose a workload and where it should run. Track its progress from the
+        jobs page.
+      </p>
       <form id="task-form" onSubmit={submit}>
         <label className="field-label" htmlFor="workload">
           Workload
@@ -115,6 +126,15 @@ export function TaskComposer({
         </select>
         {kind === "stub" && (
           <>
+            <label className="toggle-row" htmlFor="failure-test">
+              <span>Intentional failure (supervisor test)</span>
+              <input
+                id="failure-test"
+                type="checkbox"
+                checked={fail}
+                onChange={(event) => setFail(event.target.checked)}
+              />
+            </label>
             <div className="field-label" id="duration-label">
               Simulated duration
             </div>

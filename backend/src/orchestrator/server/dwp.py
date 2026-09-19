@@ -222,6 +222,7 @@ class Assignment:
     ref: Ref
     lease: str
     accepted: bool = False
+    job_id: str = ""
 
     def matches(self, payload: LeaseRef) -> bool:
         return payload.taskId == self.ref.task_id and secrets.compare_digest(
@@ -271,7 +272,9 @@ class Connection:
         if self.active is None and not self.paused:
             task = await self.store.claim(self.worker_id, self.session)
             if task:
-                self.active = Assignment(task_ref(task), secrets.token_hex(24))
+                self.active = Assignment(
+                    task_ref(task), secrets.token_hex(24), job_id=task.spec.job_id
+                )
                 await send(
                     self.socket,
                     "task.offer",
@@ -393,6 +396,11 @@ class Connection:
                             scope.set_tag("task.generation", active.ref.generation)
                             scope.set_tag("worker_id", self.worker_id)
                             scope.set_tag("task_id", active.ref.task_id)
+                            scope.set_tag("job_id", active.job_id)
+                            scope.set_tag("attempt", active.ref.generation)
+                            scope.set_tag(
+                                "reservation_id", f"{active.ref.task_id}:{active.ref.generation}"
+                            )
                             scope.set_tag(
                                 "execution_id", f"{active.ref.task_id}:{active.ref.generation}"
                             )

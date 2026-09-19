@@ -497,6 +497,7 @@ export function connect(
             if (!controller.signal.aborted) {
               captureWorkloadFailure(err, {
                 workerId: cfg.hostId, taskId: offer.taskId, adapter: offer.adapter, attempt: offer.attempt,
+                jobId: offer.jobId,
               })
             }
             send('task.error', {
