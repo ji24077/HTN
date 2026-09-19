@@ -100,8 +100,11 @@ class FakeStore:
         self.execution_batches.append(batch)
         return [item.sequence for item in batch.events]
 
-    async def create_pair_code(self, owner_id):
+    async def create_pair_code(self, owner_id, *, max_per_hour=10, max_devices=100):
         self.owner = owner_id
+        # Recorded so a test can assert the route passes the operator's ceilings through
+        # rather than letting the store's defaults quietly stand in for them.
+        self.pair_code_limits = (max_per_hour, max_devices)
         code = uuid4().hex.upper()
         self.codes.add(code)
         return code
@@ -200,6 +203,9 @@ class GatewayTests(unittest.TestCase):
             public_origin=ORIGIN,
             supabase_admin_ids={USER},
             supabase_admin_emails=frozenset(),
+            self_serve_join=False,
+            self_serve_max_per_hour=10,
+            self_serve_max_devices=100,
         )
         self.app.state.store = self.store
 
@@ -295,6 +301,51 @@ class GatewayTests(unittest.TestCase):
         self.assertEqual(paired.json()["wsUrl"], "wss://fleet.example.com/agent/connect")
         self.assertEqual(paired.json()["hostId"], self.store.worker_id)
         self.assertEqual(self.client.post("/hosts/pair", json=body).status_code, 400)
+
+    def test_self_serve_invites_are_absent_until_enabled_then_mint_unowned_codes(self):
+        """Off, the endpoint does not exist; on, it mints a code nobody had to approve.
+
+        The two assertions that matter are about what does *not* change. A self-serve
+        code is owned by nobody, so it draws on the unowned quota rather than a person's,
+        and it is redeemed by the same `/hosts/pair` with the same single-use rule as a
+        code an admin minted. If either stopped holding, this endpoint would be a way to
+        get a *better* invite than the admin path hands out.
+        """
+        self.assertEqual(self.client.post("/v1/join-requests").status_code, 404)
+        self.app.state.config.self_serve_join = True
+        issued = self.client.post("/v1/join-requests")
+        self.assertEqual(issued.status_code, 201)
+        self.assertEqual(issued.headers["cache-control"], "no-store")
+        self.assertEqual(issued.json()["server"], ORIGIN)
+        self.assertIsNone(self.store.owner)
+        # The ceilings are the operator's, not the store's defaults. Ten an hour is right
+        # for a link left on the internet and wrong for a room at an event, where the
+        # eleventh person to ask is told to come back in an hour; the route is the only
+        # place that knows which of the two this deployment is.
+        self.app.state.config.self_serve_max_per_hour = 250
+        self.app.state.config.self_serve_max_devices = 400
+        self.assertEqual(self.client.post("/v1/join-requests").status_code, 201)
+        self.assertEqual(self.store.pair_code_limits, (250, 400))
+        body = {
+            "code": issued.json()["code"].lower(),
+            "publicKey": self.public,
+            "label": "Windows laptop",
+        }
+        paired = self.client.post("/hosts/pair", json=body)
+        self.assertEqual(paired.status_code, 200)
+        self.assertEqual(paired.json()["label"], "Windows laptop")
+        self.assertEqual(self.client.post("/hosts/pair", json=body).status_code, 400)
+
+    def test_self_serve_invite_limit_tells_the_reader_what_to_do(self):
+        """A volunteer reads this, not an operator: it has to say what to do next."""
+        from orchestrator.server.db.store import EnrollmentLimit
+
+        self.app.state.config.self_serve_join = True
+        with patch.object(self.store, "create_pair_code", AsyncMock(side_effect=EnrollmentLimit)):
+            response = self.client.post("/v1/join-requests")
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(response.headers["retry-after"], "3600")
+        self.assertIn("Try again", response.json()["detail"])
 
     def test_pairing_and_reconnect_deliver_current_public_worker_telemetry(self):
         with patch.dict(

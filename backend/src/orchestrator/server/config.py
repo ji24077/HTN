@@ -30,6 +30,8 @@ class ServerConfig:
     tailscale_enrollment_tag: str = "tag:htn-worker"
     worker_gateway_url: str = ""
     self_serve_join: bool = False
+    self_serve_max_per_hour: int = 10
+    self_serve_max_devices: int = 100
 
     @classmethod
     def from_env(cls) -> "ServerConfig":
@@ -135,6 +137,25 @@ class ServerConfig:
         if self_serve and self_serve not in {"0", "1", "false", "true", "no", "yes", "off", "on"}:
             raise ValueError("DWP_SELF_SERVE_JOIN must be a boolean, e.g. 1 or 0")
         open_join = self_serve in {"1", "true", "yes", "on"} if self_serve else not origin
+
+        def ceiling(name: str, default: int) -> int:
+            """A positive whole number, or say which variable is wrong.
+
+            An unparseable ceiling must not silently become zero: that would turn the
+            join page off in a way nothing reports, and the only symptom would be every
+            volunteer being told the network is full.
+            """
+            raw = os.getenv(name, "").strip()
+            if not raw:
+                return default
+            try:
+                value = int(raw)
+            except ValueError:
+                raise ValueError(f"{name} must be a whole number") from None
+            if value < 1:
+                raise ValueError(f"{name} must be at least 1")
+            return value
+
         return cls(
             database_url,
             os.getenv("REDIS_URL") or None,
@@ -151,4 +172,6 @@ class ServerConfig:
             tag,
             gateway,
             open_join,
+            ceiling("DWP_SELF_SERVE_MAX_PER_HOUR", 10),
+            ceiling("DWP_SELF_SERVE_MAX_DEVICES", 100),
         )

@@ -376,7 +376,18 @@ class Store:
             worker_id,
         )
 
-    async def create_pair_code(self, owner_id: str | None) -> str:
+    async def create_pair_code(
+        self, owner_id: str | None, *, max_per_hour: int = 10, max_devices: int = 100
+    ) -> str:
+        """Mint one single-use pairing code.
+
+        The two ceilings are arguments rather than constants because the self-serve page
+        and an operator minting by hand want different numbers. Ten an hour is right for
+        a link on the internet and wrong for a room at an event, where the eleventh
+        person to scan the QR code is told to come back in an hour -- which reads as the
+        network being broken. The defaults are the historical values, so every caller
+        that does not care is unaffected.
+        """
         owner = UUID(owner_id) if owner_id and owner_id != "local-admin" else None
         code = secrets.token_hex(16)
         async with self.change() as (conn, now):
@@ -393,7 +404,7 @@ class Store:
                    WHERE owner_id IS NOT DISTINCT FROM $1::uuid AND revoked_at IS NULL""",
                 owner,
             )
-            if recent >= 10 or active >= 100:
+            if recent >= max_per_hour or active >= max_devices:
                 raise EnrollmentLimit
             await conn.execute(
                 """INSERT INTO dwp_pair_codes(code_hash,owner_id,created_at,expires_at)

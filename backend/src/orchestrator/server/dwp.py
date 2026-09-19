@@ -174,11 +174,15 @@ async def join_request(request: Request):
 
     Three limits stand between this and an open tap, and the third is the one that binds:
     `limit_pairing` caps a single peer at 20 attempts per five minutes, the global cap is
-    1000, and `create_pair_code` allows 10 *unowned* codes per hour across the whole
-    network -- self-serve invites have no owner, so they all share that one quota. Ten
-    machines an hour is a deliberate ceiling, not an oversight: it is the difference
-    between a page that recruits a room and a page that enrolls a botnet. Raise it in
-    `create_pair_code` if a room is genuinely bigger than that.
+    1000, and `create_pair_code` allows a bounded number of *unowned* codes per hour
+    across the whole network -- self-serve invites have no owner, so they all share that
+    one quota. It is the difference between a page that recruits a room and a page that
+    enrolls a botnet.
+
+    The default of ten an hour is right for a link left on the internet and wrong for a
+    room at an event: measured, the eleventh person to ask is told to come back in an
+    hour, which reads as the network being broken rather than as a quota. Set
+    DWP_SELF_SERVE_MAX_PER_HOUR for the room, and leave it alone for the internet.
     """
     if not request.app.state.config.self_serve_join:
         # 404 rather than 403: an endpoint that is switched off should not confirm it
@@ -187,7 +191,12 @@ async def join_request(request: Request):
         raise HTTPException(404, "Not found")
     limit_pairing(request)
     try:
-        code = await request.app.state.store.create_pair_code(None)
+        config = request.app.state.config
+        code = await request.app.state.store.create_pair_code(
+            None,
+            max_per_hour=config.self_serve_max_per_hour,
+            max_devices=config.self_serve_max_devices,
+        )
     except EnrollmentLimit:
         # The reader is a volunteer with a laptop, not an operator reading a log. Say
         # what they should do rather than which internal quota they met.
