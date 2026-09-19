@@ -232,145 +232,196 @@ function sanitiseLimits(raw: unknown): Limits {
 // ----------------------------------------------------------------- the page
 
 /**
- * One self-contained page: no CDN, no build step, no external font.
+ * One self-contained page: no CDN, no build step, nothing it needs from the network.
  *
  * It has to work on a machine that has just met this project and may have no internet
- * beyond the control service, so every byte it needs is here.
+ * beyond the control service, so every byte it needs is here. The one optional fetch is
+ * the dispatch web fonts, loaded without blocking: offline, the system font stands in.
  */
 function page(token: string): string {
   return `<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>DWP Agent</title>
+<title>dispatch agent</title>
+<!-- The dispatch web fonts, when the network allows. Loaded without blocking the first
+     paint: on a machine with no internet the page renders at once in the system font
+     and nothing else changes. -->
+<link rel="stylesheet" media="print" onload="this.media='all'"
+  href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600&display=swap">
 <style>
+  /* The dispatch design system (DESIGN.md), in one column. Light only, by decision. */
   :root {
-    color-scheme: light dark;
-    --bg: #f6f7f9; --card: #ffffff; --ink: #14181f; --dim: #667085; --line: #e3e6eb;
-    --ok: #12855f; --warn: #b26a00; --bad: #c0392b; --busy: #0b6e8c; --accent: #0b6e8c;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #14181f; --card: #1c222b; --ink: #eef1f5; --dim: #97a0ad; --line: #2b323d;
-      --ok: #3ecf8e; --warn: #e0a33a; --bad: #f06a5d; --busy: #52b6d8; --accent: #52b6d8;
-    }
+    color-scheme: light;
+    --bg: #f7f8fa; --card: #ffffff; --ink: #202b33; --dim: #66737c; --dim-strong: #56636b;
+    --line: #e3e8ec; --control: #d8e0e5; --soft: #eef6f2; --well: #f2f5f7;
+    --accent: #197253; --ok: #197253; --busy: #197253; --fill: #438d6e;
+    --warn: #865711; --warn-bg: #fff8e8; --bad: #a43c32; --bad-bg: #fdf3f1;
+    --sans: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --display: "Space Grotesk", "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --mono: ui-monospace, SFMono-Regular, Consolas, Menlo, monospace;
   }
   * { box-sizing: border-box; }
   body {
-    margin: 0; background: var(--bg); color: var(--ink); padding: 22px 18px 28px;
-    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    -webkit-font-smoothing: antialiased;
+    margin: 0; background: var(--bg); color: var(--ink); padding: 20px 18px 26px;
+    font: 14px/1.5 var(--sans); -webkit-font-smoothing: antialiased;
   }
-  .wrap { max-width: 460px; margin: 0 auto; }
-  h1 { font-size: 15px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
-  .sub { color: var(--dim); font-size: 12px; margin-top: 2px; }
+  .wrap { max-width: 480px; margin: 0 auto; }
+
+  /* The same lockup as the web sidebar, with the agent's state opposite it. */
+  .top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  h1 {
+    display: flex; align-items: center; gap: 10px; margin: 0;
+    font: 600 20px/1 var(--display); letter-spacing: -0.7px;
+  }
+  h1 i { color: var(--accent); font-style: normal; }
+  h1 small { font: 500 12px/1 var(--sans); letter-spacing: 0; color: var(--dim); align-self: flex-end; padding-bottom: 2px; }
+  .brandmark {
+    width: 30px; height: 30px; display: grid; place-items: center; flex: none;
+    background: #217956; color: #fff; border-radius: 9px;
+  }
+  .sub {
+    font-size: 12px; padding: 4px 8px; border-radius: 5px; white-space: nowrap;
+    background: #edf0f2; color: var(--dim-strong);
+  }
+
   .card {
-    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
-    padding: 16px; margin-top: 14px;
+    background: var(--card); border: 1px solid var(--line); border-radius: 9px;
+    padding: 18px 20px; margin-top: 14px;
   }
-  .state { display: flex; align-items: center; gap: 10px; }
+  .eyebrow { font-size: 12px; font-weight: 650; letter-spacing: 1px; color: var(--dim); margin-bottom: 10px; }
+  .headline { font-size: 17px; font-weight: 600; }
+  .note { color: var(--dim); font-size: 14px; line-height: 1.55; margin-top: 6px; }
+
+  .state { display: flex; align-items: center; gap: 11px; }
+  .state .headline { font: 600 20px/1.25 var(--display); letter-spacing: -0.7px; }
   .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; background: var(--dim); }
-  .dot.ok { background: var(--ok); }
+  .dot.ok { background: var(--accent); }
   .dot.warn { background: var(--warn); }
   .dot.bad { background: var(--bad); }
-  .dot.busy { background: var(--busy); animation: pulse 1.4s ease-in-out infinite; }
+  .dot.busy { background: var(--accent); animation: pulse 1.4s ease-in-out infinite; }
   .dot.wait { background: var(--dim); animation: pulse 1.4s ease-in-out infinite; }
   @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.35 } }
-  @media (prefers-reduced-motion: reduce) { .dot { animation: none !important } }
-  .headline { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
-  .note { color: var(--dim); font-size: 12.5px; margin-top: 8px; }
+  @media (prefers-reduced-motion: reduce) { .dot { animation: none !important } * { transition: none !important } }
+
+  .task { font-size: 14px; color: var(--dim); margin-top: 8px; white-space: pre-wrap; }
+  .task code, .run code { font-family: var(--mono); font-size: 12px; color: var(--ink); }
   .advice {
-    margin-top: 12px; padding: 10px 12px; border-radius: 8px; font-size: 12.5px;
-    background: color-mix(in srgb, var(--warn) 12%, transparent);
-    border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent);
-    white-space: pre-wrap;
+    margin-top: 14px; padding: 11px 13px; border-radius: 6px; font-size: 14px; line-height: 1.55;
+    background: var(--warn-bg); color: var(--warn); white-space: pre-wrap;
   }
-  dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 0; font-size: 12.5px; }
-  dt { color: var(--dim); }
-  dd { margin: 0; overflow-wrap: anywhere; }
-  .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 0; border-top: 1px solid var(--line); }
-  .row:first-child { border-top: 0; padding-top: 2px; }
-  .row .label { font-size: 13px; }
-  .row .hint { color: var(--dim); font-size: 11.5px; margin-top: 1px; }
-  button {
-    font: inherit; font-size: 13px; padding: 7px 13px; border-radius: 8px; cursor: pointer;
-    border: 1px solid var(--line); background: var(--card); color: var(--ink); flex: none;
-  }
-  button:hover:not(:disabled) { border-color: var(--accent); }
-  button:disabled { opacity: 0.5; cursor: default; }
-  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; width: 100%; padding: 10px; }
-  button.danger:hover { border-color: var(--bad); color: var(--bad); }
-
-  /* The tab strip. Four words on one line at 520px, which is the window's width. */
-  .tabs { display: flex; gap: 2px; margin: 14px 0 10px; border-bottom: 1px solid var(--line); }
-  .tabs button {
-    flex: 1; border: 0; background: none; border-radius: 0; padding: 8px 4px;
-    color: var(--dim); font-size: 12.5px; border-bottom: 2px solid transparent;
-  }
-  .tabs button:hover:not(.on) { color: var(--ink); }
-  .tabs button.on { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
-
-  .field { padding: 11px 0; border-top: 1px solid var(--line); }
-  .field:first-child { border-top: 0; padding-top: 2px; }
-  .field > .label { font-size: 13px; }
-  .field > .hint { color: var(--dim); font-size: 11.5px; margin-top: 1px; }
-  .controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
-  input[type=number], input[type=time], select {
-    font: inherit; font-size: 12.5px; padding: 5px 7px; border-radius: 7px;
-    border: 1px solid var(--line); background: var(--bg); color: var(--ink);
-  }
-  input[type=number] { width: 5.5rem; }
-  .choices { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-  .choices label {
-    display: inline-flex; align-items: center; gap: 5px; font-size: 12px;
-    border: 1px solid var(--line); border-radius: 999px; padding: 4px 10px; cursor: pointer;
-  }
-  .choices label.on { border-color: var(--accent); color: var(--accent); }
-  .meter { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; margin-top: 8px; }
-  .meter > div { height: 100%; background: var(--accent); }
-  .why { font-size: 12px; color: var(--warn); margin-top: 6px; }
+  .why { font-size: 14px; color: var(--warn); margin-top: 8px; }
   .saved { font-size: 12px; color: var(--ok); }
-  input, textarea {
-    font: inherit; font-size: 13px; width: 100%; padding: 9px 11px; border-radius: 8px;
-    border: 1px solid var(--line); background: var(--bg); color: var(--ink); resize: vertical;
+  .err {
+    color: var(--bad); background: var(--bad-bg); font-size: 14px; margin-top: 12px;
+    padding: 10px 12px; border-radius: 6px; white-space: pre-wrap;
   }
-  label.field { display: block; font-size: 12px; color: var(--dim); margin: 12px 0 5px; }
-  .check { display: flex; align-items: flex-start; gap: 9px; margin-top: 14px; cursor: pointer; }
-  .check input { width: auto; flex: none; margin: 2px 0 0; }
-  .check .label { display: block; font-size: 13px; }
-  .check .hint { display: block; color: var(--dim); font-size: 11.5px; margin-top: 2px; }
-  .err { color: var(--bad); font-size: 12.5px; margin-top: 10px; white-space: pre-wrap; }
-  .task { font-size: 12.5px; color: var(--dim); margin-top: 6px; white-space: pre-wrap; }
-  .task code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink); }
+
+  /* A ledger: label left, value right, hairlines between. */
+  dl { margin: 0; font-size: 14px; }
+  dl.ledger { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 14px; }
+  dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 9px 18px; }
+  dt { color: var(--dim); }
+  dd { margin: 0; text-align: right; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 13px 0; border-top: 1px solid var(--line); }
+  .row:first-child { border-top: 0; padding-top: 0; }
+  .row:last-child { padding-bottom: 0; }
+  .row .label, .field > .label, .check .label { font-size: 14px; font-weight: 500; }
+  .row .hint, .field > .hint, .check .hint, .hint { color: var(--dim); font-size: 12px; line-height: 1.55; margin-top: 2px; }
+
+  button {
+    font: inherit; font-size: 12px; font-weight: 550; padding: 9px 14px; border-radius: 6px;
+    cursor: pointer; border: 1px solid var(--control); background: var(--card); color: var(--ink);
+    flex: none; white-space: nowrap; transition: background 0.15s, border-color 0.15s;
+  }
+  button:hover:not(:disabled) { filter: brightness(0.97); }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  button.primary {
+    background: var(--accent); border-color: var(--accent); color: #fff; width: 100%;
+    padding: 11px 14px; box-shadow: 0 2px 3px #16392a10;
+  }
+  button.danger { color: var(--bad); }
+  button.danger:hover:not(:disabled) { background: var(--bad-bg); border-color: #e2b4ae; }
+  button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible,
+  .choices label:focus-within { outline: 3px solid #58a78c; outline-offset: 3px; }
+
+  /* Four words on one line at 520px, which is the window's width. */
+  .tabs { display: flex; gap: 4px; margin: 18px 0 0; }
+  .tabs button {
+    flex: 1; border: 0; background: none; padding: 9px 6px; color: var(--dim-strong); font-size: 14px; font-weight: 500;
+  }
+  .tabs button:hover:not(.on) { background: var(--well); color: var(--ink); }
+  .tabs button.on { background: #edf2f0; color: #234d3a; font-weight: 600; }
+
+  .field { padding: 14px 0; border-top: 1px solid var(--line); }
+  .field:first-child { border-top: 0; padding-top: 0; }
+  .field:last-child { padding-bottom: 0; }
+  /* An eyebrow is a card's first child, so the row after it is the visual first. */
+  .eyebrow + .field, .eyebrow + .row, .eyebrow + [hidden] + .row { border-top: 0; padding-top: 0; }
+  .controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 9px; }
+  .controls .hint { margin-top: 0; }
+  input, textarea, select {
+    font: inherit; font-size: 14px; padding: 10px 12px; border-radius: 6px;
+    border: 1px solid #dce3e7; background: var(--card); color: var(--ink);
+  }
+  input, textarea { width: 100%; resize: vertical; }
+  input[type=number], input[type=time], select { width: auto; padding: 6px 9px; }
+  input[type=number] { width: 5.5rem; }
+  input[type=checkbox] { accent-color: var(--accent); }
+  label.field { display: block; font-size: 12px; font-weight: 550; color: var(--ink); margin: 16px 0 6px; padding: 0; border: 0; }
+
+  .choices { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .choices label {
+    display: inline-flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer;
+    border: 1px solid var(--control); border-radius: 6px; padding: 6px 11px; background: var(--card);
+  }
+  .choices label.on { background: var(--soft); border-color: #9ac4ae; color: #234d3a; font-weight: 550; }
+  .meter { height: 4px; border-radius: 5px; background: #e9eef0; overflow: hidden; margin-top: 10px; }
+  .meter > div { height: 100%; background: var(--fill); }
+
+  .check { display: flex; align-items: flex-start; gap: 10px; margin-top: 16px; cursor: pointer; }
+  .check input { width: auto; flex: none; margin: 3px 0 0; }
+  .check .label, .check .hint { display: block; }
+
   /* Recent work. The strip lets flex shrink the bars, with a 4px floor, so thirty runs
      always fit the card however long the longest one was. */
-  .strip { display: flex; align-items: stretch; gap: 2px; height: 24px; margin-top: 13px; overflow: hidden; }
-  .strip > div { flex: 0 1 auto; min-width: 4px; border-radius: 2px; background: var(--dim); }
-  .strip > div.ok { background: var(--ok); }
+  .strip { display: flex; align-items: stretch; gap: 2px; height: 26px; margin-top: 14px; overflow: hidden; }
+  .strip > div { flex: 0 1 auto; min-width: 4px; border-radius: 2px; background: #7f8e99; }
+  .strip > div.ok { background: var(--fill); }
   .strip > div.warn { background: var(--warn); }
   .strip > div.bad { background: var(--bad); }
-  .runs { margin-top: 12px; font-size: 12.5px; }
-  .run { display: flex; align-items: baseline; gap: 8px; padding: 6px 0; border-top: 1px solid var(--line); }
+  .runs { margin-top: 12px; font-size: 14px; }
+  .run { display: flex; align-items: baseline; gap: 9px; padding: 8px 0; border-top: 1px solid var(--line); }
   .run:first-child { border-top: 0; }
-  .run code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink); }
-  .run .cost { color: var(--dim); overflow-wrap: anywhere; }
-  .run .when { color: var(--dim); margin-left: auto; flex: none; }
-  .run .mark { font-weight: 600; flex: none; }
+  .run .cost { color: var(--dim); font-size: 12px; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+  .run .when { color: var(--dim); font-size: 12px; margin-left: auto; flex: none; }
+  .run .mark { font-size: 12px; font-weight: 600; flex: none; }
   .run .mark.ok { color: var(--ok); }
   .run .mark.warn { color: var(--warn); }
   .run .mark.bad { color: var(--bad); }
-  .adapters { margin-top: 11px; }
-  footer { color: var(--dim); font-size: 11.5px; margin-top: 16px; text-align: center; }
+  .adapters { margin-top: 12px; font-size: 12px; }
+  .savebar {
+    position: sticky; bottom: 0; margin: 14px -18px 0; padding: 12px 18px;
+    background: var(--bg); border-top: 1px solid var(--line);
+  }
+  footer { color: var(--dim); font-size: 12px; margin-top: 18px; text-align: center; }
   [hidden] { display: none !important; }
 </style>
 </head><body>
 <div class="wrap">
-  <h1>DWP Agent</h1>
-  <div class="sub" id="sub">starting…</div>
+  <div class="top">
+    <h1>
+      <span class="brandmark"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span>
+      <span>dispatch<i>.</i></span><small>agent</small>
+    </h1>
+    <div class="sub" id="sub">starting…</div>
+  </div>
 
   <!-- Not yet paired -->
   <section id="join" hidden>
     <div class="card">
+      <div class="eyebrow">THIS COMPUTER</div>
       <div class="headline">Join a network</div>
       <div class="note">Paste the invite link you were sent. It works once and expires ten minutes after it was made.</div>
       <label class="field" for="invite">Invite link</label>
@@ -382,27 +433,28 @@ function page(token: string): string {
         <span>
           <span class="label">Rejoin automatically after a restart</span>
           <span class="hint">Otherwise this computer is only on the network while this app
-          is open — close it, log out or restart, and it stops contributing.</span>
+          is open. Close it, log out or restart, and it stops contributing.</span>
         </span>
       </label>
-      <div style="margin-top:14px"><button class="primary" id="joinBtn">Join</button></div>
+      <div style="margin-top:18px"><button class="primary" id="joinBtn">Join</button></div>
       <div class="err" id="joinErr" hidden></div>
     </div>
   </section>
 
   <!-- Paired -->
   <section id="main" hidden>
-    <nav class="tabs">
-      <button data-tab="status" class="on">Status</button>
-      <button data-tab="work">Work</button>
-      <button data-tab="limits">Limits</button>
-      <button data-tab="settings">Settings</button>
-    </nav>
+    <div class="tabs" role="tablist" aria-label="Sections">
+      <button role="tab" id="tab-status" aria-controls="panel-status" aria-selected="true" data-tab="status" class="on">Status</button>
+      <button role="tab" id="tab-work" aria-controls="panel-work" aria-selected="false" data-tab="work">Work</button>
+      <button role="tab" id="tab-limits" aria-controls="panel-limits" aria-selected="false" data-tab="limits">Limits</button>
+      <button role="tab" id="tab-settings" aria-controls="panel-settings" aria-selected="false" data-tab="settings">Settings</button>
+    </div>
 
-    <div data-panel="status">
+    <div data-panel="status" id="panel-status" role="tabpanel" aria-labelledby="tab-status">
     <div class="card">
-      <div class="state">
-        <span class="dot" id="dot"></span>
+      <div class="eyebrow">RIGHT NOW</div>
+      <div class="state" role="status" aria-live="polite">
+        <span class="dot" id="dot" aria-hidden="true"></span>
         <span class="headline" id="headline">…</span>
       </div>
       <div class="task" id="tasks" hidden></div>
@@ -410,10 +462,7 @@ function page(token: string): string {
       <!-- Why nothing is running, when the reason is a rule the owner set rather than
            an empty queue. Without it the two are indistinguishable. -->
       <div class="why" id="whyIdle" hidden></div>
-    </div>
-
-    <div class="card">
-      <dl>
+      <dl class="ledger">
         <dt>This computer</dt><dd id="label">—</dd>
         <dt>Network</dt><dd id="server">—</dd>
         <dt>Can run</dt><dd id="adapters">—</dd>
@@ -423,25 +472,28 @@ function page(token: string): string {
     </div>
     </div>
 
-    <div data-panel="work" hidden>
+    <div data-panel="work" id="panel-work" role="tabpanel" aria-labelledby="tab-work" hidden>
     <div class="card">
+      <div class="eyebrow">HISTORY</div>
       <div class="headline">Recent work</div>
       <div class="note" id="histSummary">Nothing has run on this computer yet.</div>
-      <div class="strip" id="histStrip" hidden></div>
+      <div class="strip" id="histStrip" role="list" aria-label="Recent runs, oldest first" hidden></div>
       <div class="runs" id="histRuns" hidden></div>
       <div class="note adapters" id="histAdapters" hidden></div>
     </div>
     </div>
 
-    <div data-panel="limits" hidden>
+    <div data-panel="limits" id="panel-limits" role="tabpanel" aria-labelledby="tab-limits" hidden>
     <div class="card">
+      <div class="eyebrow">WORKLOADS</div>
       <div class="headline">What this machine will run</div>
       <div class="note">Turned-off work is never offered to this machine, so it is not
-      declined over and over — the network is told what you chose.</div>
+      declined over and over: the network is told what you chose.</div>
       <div class="choices" id="workloadChoices"></div>
     </div>
 
     <div class="card">
+      <div class="eyebrow">TIME</div>
       <div class="field">
         <div class="label">Daily limit on compute time</div>
         <div class="hint">Once spent, this machine turns work down until the window rolls
@@ -471,8 +523,9 @@ function page(token: string): string {
     </div>
 
     <div class="card">
+      <div class="eyebrow">HEADROOM</div>
       <div class="headline">Leave the machine usable</div>
-      <div class="note">Checked before every task. A reading this machine cannot take is
+      <div class="note" style="margin-bottom:14px">Checked before every task. A reading this machine cannot take is
       ignored rather than guessed at.</div>
       <div class="field">
         <div class="label">Skip work when already busy</div>
@@ -501,16 +554,15 @@ function page(token: string): string {
       </div>
     </div>
 
-    <div class="card">
-      <button class="primary" id="saveLimits">Save limits</button>
-      <div class="note" id="limitsNote">Saved on this machine. They work even when the
-      network cannot be reached.</div>
-      <div class="err" id="limitsErr" hidden></div>
-    </div>
+    <div class="savebar"><button class="primary" id="saveLimits">Save limits</button></div>
+    <div class="note" id="limitsNote" style="text-align:center">Saved on this machine. They work even when the
+    network cannot be reached.</div>
+    <div class="err" id="limitsErr" hidden></div>
     </div>
 
-    <div data-panel="settings" hidden>
+    <div data-panel="settings" id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" hidden>
     <div class="card">
+      <div class="eyebrow">THIS AGENT</div>
       <div class="row" id="retryRow" hidden>
         <div>
           <div class="label">Take over the connection</div>
@@ -540,6 +592,9 @@ function page(token: string): string {
         </div>
         <button id="updateBtn">Check now</button>
       </div>
+    </div>
+    <div class="card">
+      <div class="eyebrow">LEAVING</div>
       <div class="row">
         <div>
           <div class="label">Leave this network</div>
@@ -610,9 +665,9 @@ function stoodDownHelp(platform) {
 }
 
 function describe(s) {
-  if (s.stoodDown) return ['warn', 'Stopped — another copy is running',
+  if (s.stoodDown) return ['warn', 'Stopped: another copy is running',
     'Another agent on this computer already has this identity, so this one stood down ' +
-    'rather than fight it for the connection. Your computer is still doing the work — ' +
+    'rather than fight it for the connection. Your computer is still doing the work: ' +
     'the other copy is doing it, so nothing is broken.\\n\\n' + stoodDownHelp(s.platform)]
   if (s.paused) return ['warn', 'Paused', 'No work will be accepted until you resume.']
   if (s.connection === 'online' && s.running.length > 0) return ['busy', 'Working', null]
@@ -698,6 +753,8 @@ function renderHistory(s) {
     const share = longest > 0 ? Math.max(1, (r.durationMs / longest) * 25) : 1
     bar.style.width = share.toFixed(2) + '%'
     bar.title = r.adapter + ' · ' + dur(r.durationMs) + ' · ' + outcomeWord(r.outcome)
+    bar.setAttribute('role', 'listitem')
+    bar.setAttribute('aria-label', bar.title)
     strip.appendChild(bar)
   }
   show(strip, true)
@@ -736,7 +793,10 @@ var DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
 function showTab(name) {
   var tabs = document.querySelectorAll('.tabs button')
-  for (var i = 0; i < tabs.length; i++) tabs[i].classList.toggle('on', tabs[i].dataset.tab === name)
+  for (var i = 0; i < tabs.length; i++) {
+    tabs[i].classList.toggle('on', tabs[i].dataset.tab === name)
+    tabs[i].setAttribute('aria-selected', String(tabs[i].dataset.tab === name))
+  }
   var panels = document.querySelectorAll('[data-panel]')
   for (var j = 0; j < panels.length; j++) panels[j].hidden = panels[j].dataset.panel !== name
 }
@@ -784,8 +844,15 @@ function workloadChip(adapter, on) {
   return label
 }
 
+var limitsShown = ''
+
 function fillLimits(s) {
   var limits = s.limits || {}
+  // This runs on every poll while nothing is being edited. Rebuilding the chips each
+  // second destroyed whichever one had keyboard focus, so only rebuild on a real change.
+  var signature = JSON.stringify([s.adapters, limits])
+  if (signature === limitsShown) return
+  limitsShown = signature
   var chosen = limits.workloads || s.adapters
   var host = $('workloadChoices')
   host.textContent = ''
@@ -872,7 +939,7 @@ function render(s) {
 
   const [kind, headline, note] = describe(s)
   $('dot').className = 'dot ' + kind
-  $('headline').textContent = headline
+  if ($('headline').textContent !== headline) $('headline').textContent = headline
 
   if (s.running.length > 0) {
     $('tasks').innerHTML = s.running.map(t =>
@@ -897,8 +964,8 @@ function render(s) {
    */
   var rtEarly = s.runtime || { container: false }
   $('version').textContent = 'v' + s.version + (rtEarly.container
-    ? ' — from the image'
-    : (s.pinnedKey ? ' — updates verified' : ' — updates unsigned, manual only'))
+    ? ', from the image'
+    : (s.pinnedKey ? ', updates verified' : ', updates unsigned, manual only'))
 
   renderHistory(s)
   renderLimits(s)
@@ -911,7 +978,7 @@ function render(s) {
   var recent = declined && (Date.now() - declined.at) < 10 * 60 * 1000
   show($('whyIdle'), Boolean(recent) && s.running.length === 0)
   if (recent && s.running.length === 0) {
-    $('whyIdle').textContent = 'Turned work down ' + ago(declined.at) + ' — ' + declined.detail + '.'
+    $('whyIdle').textContent = 'Turned work down ' + ago(declined.at) + ': ' + declined.detail + '.'
   }
 
   show($('retryRow'), s.stoodDown)
@@ -929,7 +996,7 @@ function render(s) {
   var rt = rtEarly
   show($('runsInLabel'), Boolean(rt.container))
   show($('runsIn'), Boolean(rt.container))
-  if (rt.container) $('runsIn').textContent = (rt.image ? rt.image + ' — ' : '') + 'container ' + (rt.id || '?')
+  if (rt.container) $('runsIn').textContent = (rt.image ? rt.image + ', ' : '') + 'container ' + (rt.id || '?')
 
   show($('loginBtn'), !rt.container)
   $('loginLabel').textContent = rt.container ? 'Restarting' : 'Start automatically when I log in'
@@ -1052,7 +1119,8 @@ $('quitBtn').onclick = () => act($('quitBtn'), async () => {
   quitting = true
   await api('quit', {}).catch(() => {})
   document.querySelector('.wrap').innerHTML =
-    '<h1>DWP Agent</h1><div class="sub">stopped</div>' +
+    '<div class="top"><h1><span>dispatch<i>.</i></span><small>agent</small></h1>' +
+    '<div class="sub">stopped</div></div>' +
     '<div class="card"><div class="headline">Stopped</div>' +
     '<div class="note">This computer has left the network. Open the app again to rejoin' +
     ', or it will start by itself at your next login if you left that turned on.</div></div>'
@@ -1207,7 +1275,7 @@ export async function runGui(opts: GuiOptions): Promise<void> {
           + 'code{background:#2b323d}}</style>'
           + '<h2>Wrong address for this agent</h2>'
           + '<p>A DWP agent is listening here, but not on this path. Every agent has its own '
-          + 'single-use address, and more than one can run on a machine — a desktop install '
+          + 'single-use address, and more than one can run on a machine: a desktop install '
           + 'and a container, for instance, on different ports.</p>'
           + '<p>Ask the one you want for its address:</p>'
           + '<p><code>docker logs dwp-agent | grep Window</code><br>'
@@ -1227,7 +1295,7 @@ export async function runGui(opts: GuiOptions): Promise<void> {
       res.writeHead(200, {
         'content-type': 'text/html; charset=utf-8',
         'cache-control': 'no-store',
-        'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; form-action 'none'",
+        'content-security-policy': "default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'unsafe-inline'; connect-src 'self'; form-action 'none'",
         'referrer-policy': 'no-referrer',
       })
       res.end(body)
@@ -1283,7 +1351,7 @@ export async function runGui(opts: GuiOptions): Promise<void> {
          */
         updateNote: isContainer()
           ? 'This agent is the image it was started from. Update it by pulling a newer '
-            + 'image and recreating the container — nothing here rewrites itself, so what '
+            + 'image and recreating the container. Nothing here rewrites itself, so what '
             + 'the registry holds and what is running can never drift apart.'
           : config?.releaseKey
             ? 'Installed automatically, verified against the key this computer pinned when it joined.'
