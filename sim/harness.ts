@@ -1,5 +1,5 @@
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { createWriteStream, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { startNetSim, type NetSim } from './netsim.ts'
@@ -14,12 +14,25 @@ import { startNetSim, type NetSim } from './netsim.ts'
  */
 
 const DB_NAME = 'dwp_sim'
+/** Built by `cd ios/DWPAgentKit && swift build`; absent on a machine without Xcode. */
+const SWIFT_AGENT = 'ios/DWPAgentKit/.build/debug/dwpagent'
 const OPERATOR = { email: 'sim@local', password: 'simulator-password-1' }
+
+/**
+ * Which implementation this host runs.
+ *
+ * The iOS agent is a second, independent implementation of the same protocol, so the
+ * only way to know it behaves like a host is to put it through the same scenarios as the
+ * first one. `swift` runs the shared agent core as a macOS process — the same code the
+ * phone runs, with a terminal instead of a screen.
+ */
+export type AgentKind = 'node' | 'swift'
 
 export type Agent = {
   label: string
   hostId: string
   home: string
+  kind: AgentKind
   proc: ChildProcess | null
 }
 
@@ -31,7 +44,7 @@ export type Harness = {
   directOrigin: string
   logDir: string
   cookie: string
-  enroll(label: string): Promise<Agent>
+  enroll(label: string, kind?: AgentKind): Promise<Agent>
   start(agent: Agent): void
   stop(agent: Agent): void
   api(path: string, body?: unknown): Promise<Response>
@@ -76,6 +89,38 @@ async function waitForHttp(url: string, timeoutMs: number): Promise<boolean> {
 }
 
 export async function startHarness(options: { logDir: string; controlPort?: number }): Promise<Harness> {
+  /**
+   * Refuse to run against a server this harness did not start.
+   *
+   * A control process left behind by an aborted run keeps the port, so the new one fails
+   * to bind and dies — and the scenario then talks to the old server, holding a session
+   * for a database that has just been dropped and recreated. The symptom is a 401 far
+   * from the cause, which cost a long time to track down once already.
+   */
+  const { createServer } = await import('node:net')
+  const port = options.controlPort ?? 8890
+
+  const probePort = (): Promise<boolean> => new Promise(resolve => {
+    const probe = createServer()
+    probe.once('error', () => resolve(true))
+    probe.once('listening', () => probe.close(() => resolve(false)))
+    probe.listen(port, '127.0.0.1')
+  })
+
+  // Wait rather than fail on sight: the previous scenario's server was killed a moment
+  // ago and the port takes a beat to come back. Failing immediately turned one stale
+  // process into nine scenarios reporting a problem none of them had.
+  let taken = await probePort()
+  for (let i = 0; taken && i < 20; i++) {
+    await sleep(500)
+    taken = await probePort()
+  }
+  if (taken) {
+    throw new Error(
+      `port ${port} is still in use after 10s — most likely a control service left by an aborted run.\n` +
+      `  Stop it first:  pkill -f 'packages/control/src/index.ts'`)
+  }
+
   resetDatabase()
 
   const controlPort = options.controlPort ?? 8890
@@ -97,7 +142,8 @@ export async function startHarness(options: { logDir: string; controlPort?: numb
     BOOTSTRAP_EMAIL: OPERATOR.email,
     BOOTSTRAP_PASSWORD: OPERATOR.password,
     DWP_LOG_DIR: options.logDir,
-    DWP_LOG_LEVEL: 'info',
+    // Overridable, so a failing scenario can be re-run with the rejection paths visible.
+    DWP_LOG_LEVEL: process.env.DWP_LOG_LEVEL ?? 'info',
   }
 
   let control: ChildProcess
@@ -139,7 +185,7 @@ export async function startHarness(options: { logDir: string; controlPort?: numb
     logDir: options.logDir,
     get cookie() { return cookie },
 
-    async enroll(label: string): Promise<Agent> {
+    async enroll(label: string, kind: AgentKind = 'node'): Promise<Agent> {
       const codeRes = await api('/hosts/pair-code', { label })
       const { code } = await codeRes.json() as { code: string }
       const home = mkdtempSync(join(tmpdir(), `dwp-sim-${label}-`))
@@ -153,9 +199,12 @@ export async function startHarness(options: { logDir: string; controlPort?: numb
       // deliver. Any future helper that shells out while agents are talking has the same
       // constraint.
       await new Promise<void>((resolve, reject) => {
-        const child = spawn(process.execPath, [
-          'packages/agent/src/index.ts', 'pair', '--server', origin, '--code', code, '--label', label,
-        ], { env: { ...process.env, DWP_HOME: home, DWP_LOG_DIR: options.logDir }, stdio: ['ignore', 'pipe', 'pipe'] })
+        const [bin, argv] = kind === 'swift'
+          ? [SWIFT_AGENT, ['pair', '--server', origin, '--code', code, '--label', label]]
+          : [process.execPath, ['packages/agent/src/index.ts', 'pair',
+                                '--server', origin, '--code', code, '--label', label]]
+        const child = spawn(bin, argv,
+          { env: { ...process.env, DWP_HOME: home, DWP_LOG_DIR: options.logDir }, stdio: ['ignore', 'pipe', 'pipe'] })
 
         let stderr = ''
         child.stdout?.resume()
@@ -167,18 +216,34 @@ export async function startHarness(options: { logDir: string; controlPort?: numb
       })
 
       const cfg = JSON.parse(readFileSync(join(home, 'config.json'), 'utf8')) as { hostId: string }
-      return { label, hostId: cfg.hostId, home, proc: null }
+      return { label, hostId: cfg.hostId, home, kind, proc: null }
     },
 
     start(agent: Agent): void {
       if (agent.proc) return
       if (!spawned.includes(agent)) spawned.push(agent)
-      agent.proc = spawn(process.execPath, ['packages/agent/src/index.ts', 'run'], {
-        env: { ...process.env, DWP_HOME: agent.home, DWP_LOG_DIR: options.logDir, DWP_LOG_LEVEL: 'info' },
-        stdio: ['ignore', 'pipe', 'pipe'],
-      })
-      agent.proc.stdout?.resume()
-      agent.proc.stderr?.resume()
+      agent.proc = agent.kind === 'swift'
+        ? spawn(SWIFT_AGENT, ['run'], {
+            env: { ...process.env, DWP_HOME: agent.home, DWP_LOG_DIR: options.logDir, DWP_LOG_LEVEL: 'info' },
+            stdio: ['ignore', 'pipe', 'pipe'],
+          })
+        : spawn(process.execPath, ['packages/agent/src/index.ts', 'run'], {
+            env: { ...process.env, DWP_HOME: agent.home, DWP_LOG_DIR: options.logDir, DWP_LOG_LEVEL: 'info' },
+            stdio: ['ignore', 'pipe', 'pipe'],
+          })
+
+      // The Swift agent logs to stdout rather than to the structured log directory, so
+      // capture it — without this a failing scenario says only "timed out", which is the
+      // least useful thing a test can say.
+      if (agent.kind === 'swift') {
+        mkdirSync(options.logDir, { recursive: true })
+        const sink = createWriteStream(join(options.logDir, `${agent.label}.log`), { flags: 'a' })
+        agent.proc.stdout?.pipe(sink)
+        agent.proc.stderr?.pipe(sink)
+      } else {
+        agent.proc.stdout?.resume()
+        agent.proc.stderr?.resume()
+      }
     },
 
     stop(agent: Agent): void {
@@ -198,6 +263,12 @@ export async function startHarness(options: { logDir: string; controlPort?: numb
 
     async job(jobId): Promise<JobView> {
       const res = await api(`/jobs/${jobId}`)
+      if (!res.ok) {
+        // Surface the failure instead of handing back a shape the caller will destructure
+        // into undefined. A polling helper that crashes on `.status` reports a timeout,
+        // which hides whatever the server actually said.
+        throw new Error(`GET /jobs/${jobId} -> ${res.status} ${(await res.text()).slice(0, 200)}`)
+      }
       return await res.json() as JobView
     },
 

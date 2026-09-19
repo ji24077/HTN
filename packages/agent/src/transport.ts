@@ -169,6 +169,15 @@ export function connect(cfg: AgentConfig, privateKey: KeyObject): void {
 
     const startHeartbeat = (): void => {
       if (heartbeat) clearInterval(heartbeat)
+      /**
+       * Restart the suspension clock with the interval that reads it.
+       *
+       * Without this, the gap while reconnecting counts as drift: after an eight-second
+       * backoff the first tick of the new interval looks exactly like eight seconds of
+       * suspended time, and the agent reports a sleep that never happened. The flaky-wifi
+       * scenario produced three such false reports in one run.
+       */
+      lastTick = Date.now()
       heartbeat = setInterval(() => {
         /**
          * Detect suspension.

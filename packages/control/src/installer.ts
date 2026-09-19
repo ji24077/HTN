@@ -147,6 +147,15 @@ export function installPowerShell(origin: string): string {
 param([Parameter(Position = 0)] [string] $Code)
 
 $ErrorActionPreference = 'Stop'
+
+# Windows PowerShell 5.1 — still the default shell on Windows 10 and 11 — often defaults
+# to a protocol set that excludes TLS 1.2, and then every download fails with "Could not
+# create SSL/TLS secure channel", which says nothing useful about the cause. This cannot
+# rescue the irm that fetched this script, but it fixes every request made inside it.
+try {
+  [Net.ServicePointManager]::SecurityProtocol =
+    [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+} catch { }
 $Origin  = "${origin}"
 $File    = "${win.file}"
 $Sum     = "${win.sha256}"
@@ -171,8 +180,34 @@ try {
   }
   Write-Host "  Verified."
 
-  Move-Item -Force "$Tmp\\dwp-agent.exe" (Join-Path $BinDir "dwp-agent.exe")
-  Write-Host "  Installed to $BinDir\\dwp-agent.exe"
+  # Windows holds an exclusive handle on a running executable, so re-running this
+  # installer while the agent is up fails on the move — and fails *after* the download
+  # and hash check, which is the slow part. On POSIX the same operation quietly succeeds
+  # through the inode, so this can only be caught on Windows.
+  $Running = Get-Process dwp-agent -ErrorAction SilentlyContinue
+  if ($Running) {
+    Write-Host "  Stopping the running agent first..."
+    $Running | Stop-Process -Force
+    # Give Windows a moment to release the handle before moving over it.
+    for ($i = 0; $i -lt 20; $i++) {
+      if (-not (Get-Process dwp-agent -ErrorAction SilentlyContinue)) { break }
+      Start-Sleep -Milliseconds 250
+    }
+  }
+
+  $Dest = Join-Path $BinDir "dwp-agent.exe"
+  try {
+    Move-Item -Force "$Tmp\\dwp-agent.exe" $Dest
+  } catch {
+    # Still locked. Park the old one and put the new one in place; the stale file is
+    # removed on the next run rather than leaving the install half-done.
+    $Parked = "$Dest.old"
+    Remove-Item -Force $Parked -ErrorAction SilentlyContinue
+    Move-Item -Force $Dest $Parked
+    Move-Item -Force "$Tmp\\dwp-agent.exe" $Dest
+  }
+  Remove-Item -Force "$Dest.old" -ErrorAction SilentlyContinue
+  Write-Host "  Installed to $Dest"
 
   $Exe = Join-Path $BinDir "dwp-agent.exe"
   if ($Code) {
