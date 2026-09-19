@@ -452,6 +452,42 @@ def _sync_project(job: Job, info: dict[str, Any]) -> None:
     _run(job, args)
 
 
+# A training run on a 24 GB card needs the card. Anything above this is another
+# tenant — usually our own resident inference server, which holds the weights
+# plus a multi-GB prefix KV cache and leaves nothing behind.
+GPU_BUSY_GB = 2.0
+
+
+def _require_idle_gpu(job: Job, info: dict[str, Any]) -> None:
+    """Refuse a GPU-hungry job on an occupied card, before doing any work.
+
+    Checking our own `_serve` dict is not enough and was tried: it lives in
+    process memory, so after a dashboard restart the pod is still serving while
+    the dashboard believes nothing is loaded. Asking the GPU is the only answer
+    that survives a restart — and it also catches occupants we did not start.
+
+    Placed ahead of the rsync and the uv sync on purpose. The failure it
+    replaces was an OOM traceback roughly two minutes in, which reads as "the
+    training code is broken" rather than "this card is busy".
+    """
+    out = _capture(_ssh_args(info, "nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits"))
+    used_mb = max((int(x) for x in re.findall(r"\d+", out)), default=0)
+    if used_mb / 1024 < GPU_BUSY_GB:
+        return
+    who = ""
+    try:
+        who = _capture(
+            _ssh_args(info, "nvidia-smi --query-compute-apps=pid,used_memory --format=csv,noheader")
+        ).strip().replace("\n", "; ")
+    except Exception:  # noqa: BLE001 — the reason to stop is the memory, not the listing
+        pass
+    raise JobError(
+        f"the GPU already has {used_mb / 1024:.1f} GB in use"
+        + (f" ({who})" if who else "")
+        + " — stop the inference server on this pod, or pick a different pod"
+    )
+
+
 def _setup_pod(job: Job, info: dict[str, Any], vendor: str) -> None:
     extra = "rocm" if vendor == "amd" else "cuda"
     bootstrap = (
@@ -589,6 +625,8 @@ def start_training(
         JOBS.update(job, "resolving RunPod", 3)
         pod = _pod(pod_id)
         info = _ssh_info(pod_id)
+        JOBS.update(job, "checking the GPU is free", 5)
+        _require_idle_gpu(job, info)
         JOBS.update(job, "syncing code and data", 8)
         _sync_project(job, info)
         JOBS.update(job, "preparing GPU environment", 15)
@@ -711,6 +749,8 @@ def _checkpoint_for(pod_id: str) -> dict[str, Any]:
 def start_training_optimization(*, pod_id: str) -> Job:
     def work(job: Job) -> dict[str, Any]:
         pod, info = _pod(pod_id), _ssh_info(pod_id)
+        JOBS.update(job, "checking the GPU is free", 5)
+        _require_idle_gpu(job, info)
         JOBS.update(job, "syncing benchmark", 8)
         _sync_project(job, info)
         JOBS.update(job, "preparing GPU environment", 15)
@@ -905,6 +945,8 @@ def start_inference_optimization(*, pod_id: str) -> Job:
     def work(job: Job) -> dict[str, Any]:
         pod, info = _pod(pod_id), _ssh_info(pod_id)
         checkpoint = _checkpoint_for(pod_id)
+        JOBS.update(job, "checking the GPU is free", 5)
+        _require_idle_gpu(job, info)
         JOBS.update(job, "syncing inference benchmark", 10)
         _sync_project(job, info)
         JOBS.update(job, "preparing GPU environment", 20)

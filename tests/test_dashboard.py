@@ -185,3 +185,31 @@ def test_streaming_route_reports_errors_as_a_frame_not_a_500():
     assert frames, "the stream carried no frames at all"
     assert frames[-1]["done"] is True
     assert "no model is loaded" in frames[-1]["error"]
+
+
+def test_busy_gpu_is_refused_before_any_work(monkeypatch):
+    """A card with a resident model must stop the job at the door.
+
+    The real failure this replaces took about two minutes — rsync, uv sync,
+    model download — and ended in a CUDA OOM traceback, which reads as broken
+    training code rather than an occupied GPU.
+    """
+    calls = []
+    monkeypatch.setattr(runner, "_ssh_args", lambda info, cmd: ["ssh", cmd])
+    monkeypatch.setattr(
+        runner,
+        "_capture",
+        lambda args, **kw: (calls.append(args[1]), "22631" if "memory.used" in args[1] else "3910603, 22631 MiB")[1],
+    )
+
+    try:
+        runner._require_idle_gpu(object(), {"ip": "x", "port": 1, "key": "k"})
+    except runner.JobError as e:
+        assert "22.1 GB in use" in str(e)
+        assert "different pod" in str(e)
+    else:
+        raise AssertionError("an occupied GPU was allowed through")
+
+    # An idle card must not be refused.
+    monkeypatch.setattr(runner, "_capture", lambda args, **kw: "412")
+    runner._require_idle_gpu(object(), {"ip": "x", "port": 1, "key": "k"})
