@@ -22,7 +22,7 @@ import { join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { createLogger } from '@dwp/protocol'
 import { AGENT_HOME, AGENT_VERSION, isCompiledBinary } from './paths.ts'
-import { isPaused, loadConfig, setPaused, type AgentConfig } from './config.ts'
+import { clearConfig, isPaused, loadConfig, setPaused, type AgentConfig } from './config.ts'
 import { ensureKeypair } from './keys.ts'
 import { pairHost } from './pair.ts'
 import { connect, type AgentHandle, type AgentState } from './transport.ts'
@@ -313,6 +313,14 @@ function page(token: string): string {
       </div>
       <div class="row">
         <div>
+          <div class="label">Leave this network</div>
+          <div class="hint" id="leaveHint">Disconnects and forgets this network, so you can
+          join a different one. Your computer keeps its identity; nothing else is removed.</div>
+        </div>
+        <button class="danger" id="leaveBtn">Leave</button>
+      </div>
+      <div class="row">
+        <div>
           <div class="label">Stop the agent</div>
           <div class="hint">Closing this window leaves it running. This stops it until next login.</div>
         </div>
@@ -402,6 +410,10 @@ function render(s) {
   $('version').textContent = 'v' + s.version + (s.pinnedKey ? ' — updates verified' : ' — updates unsigned, manual only')
 
   show($('retryRow'), s.stoodDown)
+  // Concatenation, not a template literal: this whole script sits inside one, so a
+  // substitution written here would be resolved by the compiler, not the browser.
+  $('leaveHint').textContent = 'Disconnects and forgets ' + s.server +
+    ', so you can join a different network. Your computer keeps its identity; nothing else is removed.'
   $('pauseLabel').textContent = s.paused ? 'Paused' : 'Accepting work'
   $('pauseBtn').textContent = s.paused ? 'Resume' : 'Pause'
   $('loginBtn').textContent = s.runsAtLogin ? 'Turn off' : 'Turn on'
@@ -444,6 +456,18 @@ $('joinBtn').onclick = () => act($('joinBtn'), async () => {
     show($('joinErr'), true)
   }
 })
+let leaveArmed = false
+$('leaveBtn').onclick = () => {
+  if (!leaveArmed) {
+    leaveArmed = true
+    $('leaveBtn').textContent = 'Really leave?'
+    setTimeout(() => { leaveArmed = false; $('leaveBtn').textContent = 'Leave' }, 4000)
+    return
+  }
+  leaveArmed = false
+  $('leaveBtn').textContent = 'Leave'
+  act($('leaveBtn'), () => api('leave', {}))
+}
 $('retryBtn').onclick = () => act($('retryBtn'), () => api('retry', {}))
 $('pauseBtn').onclick = () => act($('pauseBtn'), () => api('pause', { paused: $('pauseBtn').textContent === 'Pause' }))
 $('loginBtn').onclick = () => act($('loginBtn'), () => api('login-at-start', { enabled: $('loginBtn').textContent === 'Turn on' }))
@@ -601,7 +625,17 @@ export async function runGui(opts: GuiOptions): Promise<void> {
     if (req.method === 'GET' && route === 'api/state') {
       send(res, 200, {
         dwp: true,
-        version: AGENT_VERSION,
+        /**
+         * The installed *release*, falling back to the compile-time stamp.
+         *
+         * These differ, and showing only the stamp made "Check now" look broken: a
+         * binary is built with package.json's version (0.4.0) while the release that
+         * carries it is 0.4.0+<hash>, so a successful update left the screen unchanged
+         * and the button appeared to do nothing. update.ts already compares the full
+         * release string, so the agent knew -- only the display was behind.
+         */
+        version: config?.installedRelease ?? AGENT_VERSION,
+        buildVersion: AGENT_VERSION,
         paired: config !== null,
         label: config?.label ?? null,
         hostId: config?.hostId ?? null,
@@ -654,6 +688,33 @@ export async function runGui(opts: GuiOptions): Promise<void> {
       if (!agent) { send(res, 400, { error: 'Join a network first.' }); return }
       agent.retryNow()
       log.info('gui.retry_requested')
+      send(res, 200, { ok: true })
+      return
+    }
+
+    /**
+     * Leave the network this computer joined, so it can join a different one.
+     *
+     * Without this the only way out was deleting ~/.dwp/config.json by hand, because
+     * pairing refuses once a config exists — so a machine pointed at the wrong network
+     * could not be moved by the person sitting in front of it. Changing networks is a
+     * different operation from `set-server`, which only follows an address a network
+     * already known to this machine has moved to: a different network has never seen
+     * this host's key, so it must be joined from scratch.
+     */
+    if (route === 'api/leave') {
+      if (!config) { send(res, 400, { error: 'This computer has not joined a network.' }); return }
+      const was = config.server
+      agent?.stop()
+      agent = null
+      connected = false
+      clearConfig()
+      config = null
+      state = {
+        connection: 'offline', attempt: 0, connectedSince: null, running: [],
+        lastLostReason: null, advice: null, stoodDown: false, updating: false,
+      }
+      log.info('gui.left_network', { was })
       send(res, 200, { ok: true })
       return
     }
