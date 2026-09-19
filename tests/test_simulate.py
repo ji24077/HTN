@@ -204,3 +204,46 @@ def test_unknown_model_fails_loudly():
     typo has to surface."""
     with pytest.raises(KeyError, match="unknown model"):
         SimProber(NETS["runpod-global"]).probe(cfg(model="gpt-9"), CHIPS["RTX 4090"])
+
+
+def test_impossible_mfu_is_flagged_not_swallowed(caplog):
+    """A fitted MFU above 1.0 means the chip beat its own peak, which it did
+    not. It is the signature of a structural error in the cost model, and
+    calibration would otherwise bury it in a constant that still looks like a
+    plausible number. Measured for real on Qwen2.5-0.5B / RTX 4090: 2.77."""
+    import logging
+
+    from gpushare.agent.calibrate import observe
+    from gpushare.contracts import ProbeResult
+
+    chip, model = (
+        CHIPS["RTX 4090"],
+        MODELS["qwen2.5-0.5m-test"] if False else MODELS["qwen2.5-0.5b"],
+    )
+    c = JobConfig(
+        job_id="j",
+        model="qwen2.5-0.5b",
+        total_steps=10,
+        seq_len=192,
+        dtype="bf16",
+        attention="sdpa",
+        micro_batch=16,
+        grad_accum=1,
+        global_batch_tokens=16 * 1 * 1 * 192,
+        H=190,
+        workers=["w1"],
+    )
+    fast = ProbeResult(
+        worker_id="w1",
+        chip_class="ada_24gb",
+        config_name="optimized",
+        t_step_median_s=0.1374,
+        tokens_per_s=3072 / 0.1374,
+        peak_vram_gb=13.8,
+        gpu_util=0.0,
+        t_sync_s=0.0,
+    )
+    with caplog.at_level(logging.WARNING):
+        obs = observe(fast, cfg=c, model=model, chip=chip)
+    assert obs.mfu > 1.0
+    assert "structurally" in caplog.text

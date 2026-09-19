@@ -15,11 +15,14 @@ backs must be reportable alongside its error. See error_report().
 
 from __future__ import annotations
 
+import logging
 import statistics
 from dataclasses import dataclass, replace
 
 from gpushare.agent.specs import ChipSpec, ModelSpec
 from gpushare.contracts import ChipClass, JobConfig, ProbeResult
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -98,6 +101,25 @@ def observe(
     )
     act_measured_gb = max(probe.peak_vram_gb - static_gb, 0.0)
     act_overhead = act_measured_gb / act_pred_gb if act_pred_gb > 0 else COLD_START.act_overhead
+
+    # An MFU above 1.0 is not a large constant, it is a contradiction: the chip
+    # cannot exceed its own peak. When the inversion returns one, the cost model
+    # has a STRUCTURAL error and calibration is now hiding it inside a number
+    # whose name no longer describes what it holds. Say so — a silently absurd
+    # constant would go on to produce confident, wrong projections.
+    #
+    # Seen for real: Qwen2.5-0.5B on a 4090 inverted to mfu 2.77, because the
+    # occupancy curve (tuned on GPT-2 shapes) charged a 3,072-token step a 3.4x
+    # penalty it does not actually pay. The LM head is a 896 x 151,936 GEMM and
+    # is efficient at that size; token count was the wrong proxy for GEMM size.
+    if mfu > 1.0:
+        log.warning(
+            "fitted mfu %.2f exceeds 1.0 on %s — the cost model is structurally "
+            "wrong for this workload, not merely uncalibrated. Do not project "
+            "from it until the structure is fixed.",
+            mfu,
+            chip.chip_class,
+        )
 
     # Sync efficiency needs a link speed we don't carry on ProbeResult, so it
     # stays at the default until a measured T_sync is paired with a NetSpec.
