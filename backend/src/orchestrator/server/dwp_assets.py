@@ -212,6 +212,26 @@ async def join(request: Request):
         + '<p><button id="copy" style="font:inherit;padding:8px 14px;border-radius:8px;border:1px solid #242621;background:#fff;cursor:pointer">Copy</button> <span id="copied" hidden></span></p>'
         + "</div>"
         + "<p>The window is then at <code>http://127.0.0.1:43117/</code> on that machine. Keep the <code>-v</code> volume: it holds the machine\u2019s identity and its record of what it has run.</p>"
+        + "<p>If that port is already taken on the machine \u2014 another agent is the usual "
+        + "reason \u2014 change the <em>first</em> number only, and make "
+        + "<code>DWP_GUI_PUBLIC_ORIGIN</code> match: "
+        + "<code>-p 127.0.0.1:43118:43117 -e DWP_GUI_PUBLIC_ORIGIN=\"http://127.0.0.1:43118\"</code></p>"
+        # Updating is not joining, and the difference is the part people get wrong: no
+        # invite, and above all the same volume. A reader who improvises this reaches for
+        # the join command they already have, which mints nothing and works fine -- until
+        # they leave the volume out, at which point the machine silently becomes a new
+        # one with no history and no saved limits, and the old identity is orphaned.
+        + "<h2>Already connected? Update it</h2>"
+        + "<p>A new version is a new image. Nothing is rebuilt on the machine: it pulls the "
+        + "same bytes every other machine runs. Keep the <code>-v</code> volume and it stays "
+        + "the same machine \u2014 same identity, same history, same limits \u2014 so no new "
+        + "invite is needed.</p>"
+        + f'<pre id="updatecmd" style="background:#ecece4;padding:16px;border-radius:8px;overflow-x:auto;white-space:pre-wrap">docker pull {safe_image}\ndocker rm -f dwp-agent\ndocker run -d --name dwp-agent --restart unless-stopped -v dwp-agent-data:/data -p 127.0.0.1:43117:43117 -e DWP_GUI_PUBLIC_ORIGIN="http://127.0.0.1:43117" {safe_image}</pre>'
+        + '<p><button id="copyupdate" style="font:inherit;padding:8px 14px;border-radius:8px;border:1px solid #242621;background:#fff;cursor:pointer">Copy</button> <span id="copiedupdate" hidden></span></p>'
+        + "<p>Three separate commands, so they paste into any shell. If you named the "
+        + "container something other than <code>dwp-agent</code>, change it in the last two "
+        + "lines. Work in flight is handed back to the network rather than lost, so this is "
+        + "safe to run on a machine that is busy.</p>"
         + "<h2>Desktop or iOS app</h2><p>Open the desktop worker or iOS app and paste the invite link from your fleet dashboard. Invitations expire after ten minutes and work once.</p>"
         + downloads
         + "<h2>From the repository</h2><p>Install dependencies with <code>pnpm install --frozen-lockfile</code>, then open <code>pnpm agent gui</code> and paste your invite link.</p>"
@@ -241,8 +261,12 @@ async def join(request: Request):
         + "function build(c,label){"
         + "var safe=(label||'').replace(/[^A-Za-z0-9 ._-]/g,'').trim().slice(0,40);"
         + "var name=safe?' -e DWP_LABEL=\"'+safe+'\"':'';"
-        + "cmd='docker run -d --restart unless-stopped"
+        + "cmd='docker run -d --name dwp-agent --restart unless-stopped"
         + " -v dwp-agent-data:/data -p 127.0.0.1:43117:43117'+name+'"
+        # A container cannot discover the host port it was published on, so it is told.
+        # Without this it prints its own 43117 and anyone who remapped the port is sent
+        # to an address that answers with somebody else's agent, or nothing at all.
+        + " -e DWP_GUI_PUBLIC_ORIGIN=\"http://127.0.0.1:43117\""
         + f" -e DWP_INVITE=\"{safe_origin}/join?code='+c+'\" {safe_image}';"
         + "pre.textContent=cmd;cmdbox.hidden=false;}"
         + "var c=new URLSearchParams(location.search).get('code')||'';"
@@ -276,9 +300,18 @@ async def join(request: Request):
         # refused even where it does. Both were silent: the button did nothing at all,
         # which is worse than not having one. Select the command instead so Ctrl-C still
         # works, and say which of the two happened.
-        + "function done(t){var n=document.getElementById('copied');"
-        + "n.textContent=t;n.hidden=false;setTimeout(function(){n.hidden=true},3000)}"
-        + "function select(){try{var r=document.createRange();r.selectNodeContents(pre);"
+        #
+        # Written once and bound to each block, because there are two commands on this
+        # page now and a second copy of this logic is a second place for the clipboard
+        # quirks below to be got wrong.
+        + "function wireCopy(preId,btnId,noteId){"
+        + "var block=document.getElementById(preId);"
+        + "var btn=document.getElementById(btnId);"
+        + "var note=document.getElementById(noteId);"
+        + "if(!block||!btn)return;"
+        + "function done(t){note.textContent=t;note.hidden=false;"
+        + "setTimeout(function(){note.hidden=true},3000)}"
+        + "function select(){try{var r=document.createRange();r.selectNodeContents(block);"
         + "var s=getSelection();s.removeAllRanges();s.addRange(r);"
         + "done('Selected \u2014 press Ctrl-C (Cmd-C on a Mac) to copy.')}"
         + "catch(e){done('Select the command above and copy it.')}}"
@@ -286,13 +319,17 @@ async def join(request: Request):
         # is not the visible tab -- it never settles at all, so neither callback runs and
         # the button sits there having done nothing, with nothing in the console either.
         # Measured: pending after 1.5s with visibilityState 'hidden'.
-        + "document.getElementById('copy').onclick=function(){"
+        + "btn.onclick=function(){"
+        + "var text=block.textContent;"
         + "if(!navigator.clipboard||!navigator.clipboard.writeText){select();return}"
         + "var settled=false;"
         + "var giveUp=setTimeout(function(){if(!settled){settled=true;select()}},600);"
-        + "navigator.clipboard.writeText(cmd).then(function(){"
+        + "navigator.clipboard.writeText(text).then(function(){"
         + "if(settled)return;settled=true;clearTimeout(giveUp);done('Copied.')},"
         + "function(){if(settled)return;settled=true;clearTimeout(giveUp);select()})};"
+        + "}"
+        + "wireCopy('dockercmd','copy','copied');"
+        + "wireCopy('updatecmd','copyupdate','copiedupdate');"
         + "})();</script></html>",
         headers={
             "Referrer-Policy": "no-referrer",
