@@ -10,6 +10,11 @@ import { loadConfig, saveConfig } from './config.ts'
 const exec = promisify(execFile)
 const require_ = createRequire(import.meta.url)
 
+// pnpm is a .cmd shim on Windows. Node refuses to spawn one without a shell, and
+// CreateProcess only ever appends .exe — so without this, `pnpm agent enable ml` fails
+// there with an opaque EINVAL on the one command that makes a machine useful for ML.
+const IS_WINDOWS = process.platform === 'win32'
+
 /**
  * Heavy workloads are opt-in.
  *
@@ -150,12 +155,12 @@ export async function installWorkload(id: WorkloadId, opts: { quiet?: boolean } 
   // ERR_PNPM_INCLUDED_DEPS_CONFLICT: the add would pull in development tooling the
   // install deliberately left out.
   await exec('pnpm', ['add', '--prod', `${workload.package}@${workload.version}`], {
-    cwd: agentDir, timeout: 900_000,
+    cwd: agentDir, timeout: 900_000, shell: IS_WINDOWS,
   })
 
   if (workload.postInstall) {
     say(`  Fetching what it needs to run…\n`)
-    await exec('pnpm', workload.postInstall, { cwd: agentDir, timeout: 900_000 })
+    await exec('pnpm', workload.postInstall, { cwd: agentDir, timeout: 900_000, shell: IS_WINDOWS })
   }
 
   if (id === 'ml') {

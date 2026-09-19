@@ -189,7 +189,7 @@ async function onMessage(conn: Conn, raw: Buffer): Promise<void> {
     case 'hello': {
       const p = Hello.safeParse(msg.payload)
       if (!p.success) return
-      const { capability: c, consent } = p.data
+      const { capability: c, consent, afterSuspensionMs } = p.data
       conn.maxConcurrency = consent.maxConcurrency
       conn.allowCompute = consent.allowCompute
       conn.paused = consent.paused
@@ -203,6 +203,15 @@ async function onMessage(conn: Conn, raw: Buffer): Promise<void> {
       )
       await record({ hostId: conn.hostId, actor: 'agent', category: 'presence', type: 'host.hello',
         payload: { os: c.os, arch: c.arch, cores: c.logicalCores, adapters: c.adapters } })
+
+      // Say why it came back, when it knows. "Asleep for 12 minutes" is an answer;
+      // a gap between two timestamps is only a question.
+      if (afterSuspensionMs && afterSuspensionMs > 0) {
+        const seconds = Math.round(afterSuspensionMs / 1000)
+        log.info('agent.woke_from_sleep', { hostId: conn.hostId, label: conn.label, suspendedForSeconds: seconds })
+        await record({ hostId: conn.hostId, actor: 'agent', category: 'presence',
+          type: 'host.woke_from_sleep', payload: { suspendedForSeconds: seconds } })
+      }
       // Now it is genuinely usable: we know what it is and what it can run.
       await setPresence(conn.hostId, true)
       send(conn, 'hello.ack', {

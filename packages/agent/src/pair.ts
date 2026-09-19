@@ -1,6 +1,7 @@
 import { hostname } from 'node:os'
 import { diagnoseOrigin } from '@dwp/protocol'
 import { installDnsFallback, dnsFallbackEnabled } from './resolver.ts'
+import { invocation } from './paths.ts'
 import { ensureKeypair } from './keys.ts'
 import { saveConfig } from './config.ts'
 
@@ -65,5 +66,5 @@ export async function pair(server: string, code: string, label?: string): Promis
   } else {
     console.log(`  updates : this server offers no signed releases, so updates stay manual`)
   }
-  console.log(`\nStart it with:  pnpm agent run`)
+  console.log(`\nStart it with:  ${invocation()} run`)
 }

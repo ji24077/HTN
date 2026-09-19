@@ -55,6 +55,15 @@ export function connect(cfg: AgentConfig, privateKey: KeyObject): void {
   let connectedSince = 0
   let everConnected = false
   let explained = false
+  /**
+   * Wall-clock reading from the previous heartbeat tick, and how long a suspension
+   * lasted. Both belong to the agent rather than to one connection: the whole point is
+   * that they are read by the *next* connection, to explain why it exists. Declaring
+   * them inside the per-connection scope meant the reconnect always saw zero and the
+   * server never learned the machine had been asleep.
+   */
+  let lastTick = Date.now()
+  let sleptForMs = 0
   const hostLog = log.child({ hostId: cfg.hostId, label: cfg.label })
   const running = new Map<string, Running>()
 
@@ -107,8 +116,18 @@ export function connect(cfg: AgentConfig, privateKey: KeyObject): void {
       lastInbound = Date.now()
       everConnected = true
       explained = false
-      hostLog.info('connect.established', { attempt, dialMs: Date.now() - dialStartedAt, url: cfg.wsUrl })
-      send('hello', { capability: probe(availableAdapters()), consent: consent() })
+      hostLog.info('connect.established', {
+        attempt,
+        dialMs: Date.now() - dialStartedAt,
+        url: cfg.wsUrl,
+        // Carried into the first log line after waking, so the reconnect explains itself.
+        ...(sleptForMs > 0 ? { afterSuspensionMs: Math.round(sleptForMs) } : {}),
+      })
+      send('hello', {
+        capability: probe(availableAdapters()),
+        consent: consent(),
+        ...(sleptForMs > 0 ? { afterSuspensionMs: Math.round(sleptForMs) } : {}),
+      })
 
       startHeartbeat()
     })
@@ -151,6 +170,29 @@ export function connect(cfg: AgentConfig, privateKey: KeyObject): void {
     const startHeartbeat = (): void => {
       if (heartbeat) clearInterval(heartbeat)
       heartbeat = setInterval(() => {
+        /**
+         * Detect suspension.
+         *
+         * A timer set for 15 seconds that fires 900 seconds later did not run late — the
+         * machine was suspended in between, and every socket it held is stale even though
+         * nothing reported an error. Without this, a sleeping laptop is indistinguishable
+         * from a network outage in the logs, and the two need different explanations.
+         */
+        const drift = Date.now() - lastTick - heartbeatMs
+        if (drift > heartbeatMs * 2) {
+          sleptForMs = drift
+          hostLog.warn('machine.woke', {
+            suspendedForMs: Math.round(drift),
+            note: 'timers did not fire — this machine was asleep or suspended',
+          })
+          lastTick = Date.now()
+          // Every socket held across a suspension is stale. Do not wait to discover that.
+          ws.terminate()
+          teardown('woke from sleep')
+          return
+        }
+        lastTick = Date.now()
+
         // If the server has said nothing for three intervals, stop believing in this
         // socket and dial again. Without this an agent whose network died silently
         // waits forever, looking healthy to itself and absent to everyone else.

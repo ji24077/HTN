@@ -32,6 +32,26 @@ pnpm logs --level warn    # only problems
 pnpm logs --since 30m --no-follow
 ```
 
+## Joining with one command
+
+No Node, no package manager, nothing to install first:
+
+```bash
+# macOS and Linux
+curl -sSf https://your-address/install | sh -s -- YOUR-CODE
+
+# Windows
+& ([scriptblock]::Create((irm https://your-address/install.ps1))) YOUR-CODE
+```
+
+Downloads a single executable, checks it against a hash delivered with the script, pairs,
+and starts. Build the binaries with `pnpm build:binaries` — one machine cross-compiles
+macOS, Linux and Windows.
+
+Binaries cover `echo` and `walker_evolution`. Machines doing machine-learning or browser
+work use the Node install below, because those runtimes cannot live inside a single file
+(see `docs/06-distribution-plan.md`).
+
 ## Optional workloads
 
 Joining costs about 11 MB. Two workloads run with no extra install at all:
@@ -71,6 +91,11 @@ node --env-file-if-exists=.env scripts/gate-security.ts
 - [ ] **Pass 3** — Trusted-host remote browser session
 - [ ] **Pass 4** — Dashboard
 - [ ] **Pass 5** — Hardening and demo rehearsal
+
+An iPhone can be a host too — pairs from a link, runs the same ONNX workload, signs its
+own results. It is a foreground host by construction, not a daemon: see
+[`ios/README.md`](ios/README.md) for what iOS does and does not allow, and `pnpm ios:all`
+for its test suite.
 
 ## Run it
 

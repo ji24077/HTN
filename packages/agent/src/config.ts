@@ -19,6 +19,24 @@ export type AgentConfig = {
   installedRelease?: string | null
   autoUpdate?: boolean
   /**
+   * A dependency reconcile that still has to happen, named by the release that needs it.
+   *
+   * Windows holds an exclusive handle on every native addon a running process has loaded,
+   * so an update that changes dependencies cannot replace them from inside the agent that
+   * is using them. The install is deferred to the next start instead, when the process
+   * holding those files no longer exists.
+   */
+  pendingInstall?: string | null
+  /**
+   * Fingerprint of the dependency files *as shipped* in the last release installed.
+   *
+   * Compared against the same files in the next bundle, which is the only comparison
+   * that answers "did this release change dependencies". Comparing against the copies on
+   * disk does not: `pnpm install` rewrites the lockfile locally, so every update would
+   * look like a dependency change and reinstall for nothing.
+   */
+  depFingerprint?: string | null
+  /**
    * Optional workloads this machine has chosen to run.
    *
    * Kept here rather than in package.json because an update replaces package.json, which

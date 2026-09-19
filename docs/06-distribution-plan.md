@@ -39,8 +39,10 @@ loads the same web dashboard in a native webview, so there is one UI, not two.
 ## Phase 1 — Signed auto-update
 
 *Status: built and verified end to end on macOS — an agent installed a published release
-over its own connection and restarted into it without anyone touching the machine.
-Windows paths are written but unproven on real hardware; see the caveat below.*
+over its own connection and restarted into it without anyone touching the machine, across
+source-only updates, dependency-changing updates, and a deferred install that both failed
+and recovered. The Windows-specific branch is written and its recovery path is tested by
+forcing it on macOS; what remains unproven is real Windows hardware.*
 
 Agents fetch updates over the connection they already hold. The bundle is signed by a
 key **the operator holds**, and each agent pins that key when it pairs.
@@ -57,16 +59,39 @@ trust model, and it is what makes shipping code to a friend's laptop defensible 
 
 **Done when** a new task type reaches every connected machine without anyone touching them.
 
-**Windows caveat, and the one real divergence in this whole plan.** Windows locks files
-that are in use. Updating unpacks over the running install and then runs `pnpm install`,
-and a loaded native addon — `onnxruntime-node`, Playwright's binaries — cannot be replaced
-while the agent holds it open. Source-only updates are therefore fine on Windows; an
-update that *changes a dependency* will fail there with EBUSY while the agent is running,
-where POSIX would simply succeed.
+**The dependency step, and the one place the platforms genuinely differ.** Windows keeps
+an exclusive handle on every native addon a running process has loaded, so an update that
+changes dependencies cannot replace them from inside the agent that is using them — and it
+would fail *after* the new source is already on disk, which is the worst possible moment.
 
-The fix is sequencing rather than a second mechanism: stop the agent, install, restart.
-Worth designing before Phase 2 changes what is in the bundle, because Tauri's updater in
-Phase 4 has to solve the same problem the same way.
+Three things now make this safe, all verified end to end:
+
+1. **Most updates never touch dependencies at all.** Each release records a fingerprint of
+   the dependency files *as shipped*, and the next release is compared against that. A
+   source-only update — the common case — skips `pnpm install` entirely, so there is
+   nothing to lock. Note that both halves of that comparison must be bundle-side: the copy
+   on disk is no use, because `pnpm install` rewrites the lockfile locally, which made
+   every update look like a dependency change.
+2. **When dependencies do move, Windows defers.** The install is recorded in the config and
+   run at the next start, by a process that has loaded none of those files yet. The restart
+   was happening anyway, so this costs ordering and nothing else.
+3. **A failed dependency step no longer fails the update.** The source is already
+   installed by then; reporting failure meant the agent kept the old version number and
+   re-downloaded the same release on every reconnect, forever. It now records the version,
+   keeps the retry, and says so at every start until it succeeds.
+
+Two bugs were found by testing this rather than reasoning about it, and both affected macOS
+just as much as Windows:
+
+- **The install mode was wrong for every friend's machine.** `join.sh` and `join.ps1`
+  install with `--prod`; the update ran a plain `pnpm install`, which pnpm rejects outright
+  on such a tree with `ERR_PNPM_INCLUDED_DEPS_CONFLICT`. The dependency step of every
+  update would have failed on exactly the machines this is built for, while passing on the
+  operator's own full checkout. The install now matches how the tree was installed.
+- **Enabling a workload did not survive an update.** `pnpm agent enable ml` records itself
+  in `packages/agent/package.json`, which an update replaces — so the install that followed
+  removed the runtime, and the machine quietly stopped being able to do the work it was
+  enrolled for. The enabled set is remembered in the config and restored afterwards.
 
 **Not a route to mobile.** App Store guideline 2.5.2 and Google Play's Device and Network
 Abuse policy both forbid an app updating itself outside the store, so this mechanism is
@@ -162,6 +187,44 @@ Two distributions, split along the line the spike drew:
 Shipping the native libraries properly belongs to the **installer** in Phase 4, which
 lays files down in a known location rather than extracting them to a temporary path. That
 is the right place to solve it, not a workaround bolted onto a single file.
+
+## Phase 3 — One-line install ✅
+
+*Done.*
+
+```
+macOS / Linux   curl -sSf https://your-address/install | sh -s -- YOUR-CODE
+Windows         irm https://your-address/install.ps1 | iex
+```
+
+`node scripts/build-binaries.ts` cross-compiles all five targets from one machine and
+signs the set:
+
+| Platform | Size |
+| --- | --- |
+| macOS arm64 / x64 | 59 MB / 64 MB |
+| Linux x64 / arm64 | 95 MB each |
+| Windows x64 | 111 MB |
+
+**Piping a script from the internet into a shell deserves care**, so the expected hashes
+are generated into the script itself rather than fetched separately. Both arrive over the
+same TLS connection from the same host, and the script refuses a download that does not
+match — the model rustup and Homebrew use. The server independently re-checks each file's
+hash before serving it, so a corrupted index cannot be distributed either.
+
+Verified by swapping the expected hashes in a fetched script and re-running it: it
+refused, printed both hashes, and installed nothing — the check happens before the file
+is ever made executable.
+
+**Binaries update themselves too.** A single-file install has no package manager to run,
+so it downloads the new executable, verifies it against the signed hash, and renames it
+over itself; the running process keeps its own open file, so this is safe. Windows will
+not overwrite a running executable, so the old one is moved aside first. Confirmed by a
+full cycle: hash changed, and the binary reported its new version afterwards.
+
+One thing worth doing properly along the way: the version is now baked in at build time
+with `--define` rather than kept in a hand-edited constant. That constant had already
+drifted — it said 0.2.0 while the package said 0.3.0.
 
 ## Phase 4 — Desktop app
 

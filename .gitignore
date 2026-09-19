@@ -14,3 +14,11 @@ releases/
 .build/
 *.xcodeproj
 DerivedData/
+
+# iOS build output
+ios/DWPAgentKit/.build/
+ios/.build-ios/
+ios/DWPAgent.xcodeproj/
+ios/Local.xcconfig
+ios/.build-device/
+*.tsbuildinfo

@@ -44,7 +44,17 @@ export type ConsentState = z.infer<typeof ConsentState>
 
 // ------------------------------------------------------------ agent → control
 
-export const Hello = z.object({ capability: CapabilityRecord, consent: ConsentState })
+export const Hello = z.object({
+  capability: CapabilityRecord,
+  consent: ConsentState,
+  /**
+   * Set when this connection follows a suspension rather than a normal start.
+   *
+   * Lets the server record "that machine was asleep for twelve minutes" instead of the
+   * operator having to infer it from a gap between two timestamps.
+   */
+  afterSuspensionMs: z.number().nonnegative().optional(),
+})
 export const Heartbeat = z.object({
   freeRamMb: z.number().nonnegative(),
   running: z.number().int().nonnegative(),

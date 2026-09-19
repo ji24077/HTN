@@ -12,6 +12,7 @@ import { joinPage } from './joinpage.ts'
 import { snapshot } from './diagnostics.ts'
 import { readArtifact, manifest } from './artifacts.ts'
 import { latestRelease, releaseBundle } from './releases.ts'
+import { binaryIndex, binaryFile, installShell, installPowerShell } from './installer.ts'
 import { dashboardHtml } from './dashboard.ts'
 import { loginHtml } from './loginpage.ts'
 import { walkerHtml } from './walkerpage.ts'
@@ -87,6 +88,44 @@ export function buildServer(): FastifyInstance {
    * The current agent release. Public because it is signed and contains no secret — an
    * agent needs to see it before it has any reason to authenticate.
    */
+  /**
+   * The one-line installers.
+   *
+   * Public by necessity — they are what someone runs before they have anything. They
+   * carry no secret: the pairing code is supplied by the person running them, and the
+   * binary hashes they check against arrive over the same TLS connection as the script.
+   */
+  app.get('/install', async (_req, reply) =>
+    reply.type('text/x-shellscript; charset=utf-8').send(installShell(config.publicOrigin)))
+
+  app.get('/install.ps1', async (_req, reply) =>
+    reply.type('text/plain; charset=utf-8').send(installPowerShell(config.publicOrigin)))
+
+  /** What binaries exist, with hashes, signed as a set. */
+  app.get('/release/binaries', async (_req, reply) => {
+    const index = binaryIndex()
+    return index ? index : reply.code(404).send({ error: 'no-binaries' })
+  })
+
+  /**
+   * The executables themselves.
+   *
+   * Unauthenticated on purpose: a machine has no identity until it has the agent, so
+   * requiring one would be circular. The bytes are public, verifiable against a signed
+   * hash, and contain nothing specific to this network.
+   */
+  app.get('/download/:file', async (req, reply) => {
+    const { file } = z.object({ file: z.string().max(80) }).parse(req.params)
+    const bytes = binaryFile(file)
+    if (!bytes) return reply.code(404).send({ error: 'not-found' })
+    return reply
+      .type('application/octet-stream')
+      .header('content-length', String(bytes.length))
+      .header('content-disposition', `attachment; filename="${file}"`)
+      .header('cache-control', 'public, max-age=31536000, immutable')
+      .send(bytes)
+  })
+
   app.get('/release/latest', async (_req, reply) => {
     const release = latestRelease()
     return release ? release : reply.code(404).send({ error: 'no-release' })
@@ -270,7 +309,10 @@ export function buildServer(): FastifyInstance {
 
     const { rows: events } = await pool.query(
       `select e.type, e.server_ts, h.label,
-              coalesce(e.payload->>'reason', e.payload->>'errorClass', e.payload->>'closeCode', '') as detail
+              coalesce(e.payload->>'reason', e.payload->>'errorClass', e.payload->>'closeCode',
+                       case when e.payload ? 'suspendedForSeconds'
+                            then 'asleep for ' || (e.payload->>'suspendedForSeconds') || 's' end,
+                       '') as detail
          from run_events e left join hosts h on h.id = e.host_id
         where e.category in ('presence','security','lifecycle','result')
         order by e.seq desc limit 25`)
@@ -372,7 +414,7 @@ export function buildServer(): FastifyInstance {
     const { rows } = await pool.query(
       `select id, label, trust_tier, allow_compute, allow_browser, paused, os, arch, cpu_model,
               logical_cores, total_ram_mb, free_ram_mb, agent_version, max_concurrency,
-              online, last_heartbeat_at, created_at, revoked_at
+              adapters, online, last_heartbeat_at, created_at, revoked_at
          from hosts where owner_id = $1 order by created_at`, [user.id])
     return { hosts: rows }
   })

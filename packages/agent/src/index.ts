@@ -4,8 +4,9 @@ import { connect } from './transport.ts'
 import { pair } from './pair.ts'
 import { probe } from './capability.ts'
 import { browserProbe } from './adapters/browser.ts'
-import { applyUpdate, currentVersion } from './update.ts'
+import { applyUpdate, completePendingInstall, currentVersion } from './update.ts'
 import { WORKLOADS, enableWorkload, isInstalled, availableAdapters, type WorkloadId } from './workloads.ts'
+import { invocation } from './paths.ts'
 import { AGENT_HOME, AGENT_VERSION } from './paths.ts'
 
 const [command, ...rest] = process.argv.slice(2)
@@ -39,6 +40,9 @@ switch (command) {
   case 'run': {
     const cfg = requireConfig()
     const { privateKey } = ensureKeypair()
+    // Before anything loads a native addon: an update may have left its dependency step
+    // for a process that is not holding those files open. This one is not, yet.
+    await completePendingInstall()
     if (flag('allow-browser') !== undefined) { cfg.allowBrowser = true; saveConfig(cfg) }
     console.log(`[agent] ${cfg.label} (${cfg.hostId}) v${AGENT_VERSION} pid=${process.pid}${isPaused() ? '  [PAUSED]' : ''}`)
     connect(cfg, privateKey)
@@ -130,7 +134,7 @@ switch (command) {
     console.log(`  currently on ${currentVersion() ?? 'an unknown version'}; checking ${cfg.server}…`)
     const result = await applyUpdate(cfg, privateKey, { force: flag('force') !== undefined })
     if (result.status === 'updated') {
-      console.log(`\n  Updated ${result.from ?? 'unknown'} -> ${result.to}\n  Start it again with:  pnpm agent run\n`)
+      console.log(`\n  Updated ${result.from ?? 'unknown'} -> ${result.to}\n  Start it again with:  ${invocation()} run\n`)
     } else if (result.status === 'current') {
       console.log(`\n  Already on ${result.version}. Nothing to do.\n`)
     } else {

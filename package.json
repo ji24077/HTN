@@ -22,7 +22,15 @@
     "invite": "node scripts/invite.ts",
     "doctor": "node scripts/doctor.ts",
     "walker": "node scripts/evolve-walker.ts",
-    "release": "node scripts/publish-release.ts"
+    "release": "node scripts/publish-release.ts",
+    "ios:build": "cd ios/DWPAgentKit && swift build",
+    "ios:test": "cd ios/DWPAgentKit && swift test",
+    "ios:conformance": "node ios/test/conformance.ts",
+    "ios:e2e": "node ios/test/e2e.ts",
+    "ios:app": "cd ios && xcodegen generate && xcodebuild -project DWPAgent.xcodeproj -scheme DWPAgent -destination \"platform=iOS Simulator,name=iPhone 17 Pro\" -derivedDataPath .build-ios build",
+    "ios:simulator": "node ios/test/simulator.ts",
+    "ios:all": "pnpm ios:build && pnpm ios:test && pnpm ios:conformance && pnpm ios:e2e && pnpm ios:app && pnpm ios:simulator",
+    "build:binaries": "node scripts/build-binaries.ts"
   },
   "devDependencies": {
     "typescript": "7.0.2",

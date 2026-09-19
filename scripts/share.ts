@@ -183,7 +183,16 @@ if (manualUrl) {
  * So: keep the tunnel, restart the server underneath it, and the address survives.
  */
 let control: ChildProcess
-let restarts = 0
+/**
+ * Restart times, for spotting a crash loop.
+ *
+ * A lifetime counter is the wrong shape: a server restarted once a day is healthy and
+ * would eventually hit any fixed total, stopping for no reason. What matters is whether
+ * it is failing *repeatedly and quickly*, so only restarts inside a short window count.
+ */
+const recentRestarts: number[] = []
+const LOOP_WINDOW_MS = 60_000
+const LOOP_LIMIT = 5
 
 function startControl(): void {
   control = spawn(process.execPath, ['--env-file-if-exists=.env', 'packages/control/src/index.ts'], {
@@ -194,11 +203,18 @@ function startControl(): void {
 
   control.on('exit', code => {
     if (stopping) return
-    restarts += 1
-    if (restarts > 10) {
-      console.error(`\n  The server has exited ${restarts} times. Stopping rather than looping.\n`)
+
+    const now = Date.now()
+    recentRestarts.push(now)
+    while (recentRestarts.length > 0 && now - recentRestarts[0]! > LOOP_WINDOW_MS) recentRestarts.shift()
+
+    if (recentRestarts.length > LOOP_LIMIT) {
+      console.error(
+        `\n  The server has exited ${recentRestarts.length} times in the last minute.\n` +
+        `  That is a crash loop, not a restart — stopping so the cause is visible.\n`)
       shutdown(code ?? 1)
     }
+
     console.log(`\n  Server exited (code ${code}); restarting — the address stays the same.\n`)
     setTimeout(startControl, 1000)
   })
