@@ -3,20 +3,33 @@
 Ji's working log. Design rationale lives in `simulation.md`; this file is the
 operational picture: what exists, what is verified, what to do next.
 
-Last updated at commit `2515324`.
+Last updated at commit `84b07ec`. Demo operation and the mistakes worth not
+repeating are in `demo.md`; design rationale is in `simulation.md`.
 
 ---
 
 ## TL;DR
 
-The agent's **decision layer is done and tested** — rules propose configs, a
-cost model predicts their behaviour, and an LLM picks between them and explains
-the choice in plain language. 38 tests, all offline, all green.
+**Measured on real GPUs.** Two RunPod machines, 88 tests green.
 
-**Nothing has touched a GPU yet.** Every performance number in the repo comes
-from a cost model whose constants are cold-start guesses. The next meaningful
-step is one probe on real hardware, because that is what turns all of it from a
-model into a measurement.
+Training (RTX 4090, Qwen2.5-0.5B, 500 steps): `json_parse_rate` 0.000 → 1.000,
+`exact_match` 0.000 → 0.835, `held_out_loss` 1.3553 → 0.0188. Per-field, the
+two fields the model used to invent — `age` and `year` — now score 1.00 and
+0.995 after the dataset was regenerated with nullable fields.
+
+Long-context serving (RTX 3090, Qwen3-4B-Instruct, 30,857-token policy):
+request-level prefix caching takes a verdict from **10.80s to 2.88s**, and time
+to first token from **8.70s to 0.64s**. Same prompt, same model, greedy, warm-up
+discarded. The claim is about the repeated prefix's prefill — generation itself
+is unchanged, and the two paths are NOT byte-identical (see `demo.md`).
+
+**The cost model's two halves did not fare the same.** Memory came in 1.4%
+under a measured 13.80 GB peak and is now what job placement trusts. Time was
+out by nearly 7x, which is a structural error rather than a calibration gap —
+inverting it gives an MFU above 1.0. Unfixed; it needs a batch sweep.
+
+**Still unverified: the cross-vendor path.** ROCm has never run. `make
+setup-rocm && make check` on an MI300X (~$1.2, 30 min) is what would settle it.
 
 ---
 
