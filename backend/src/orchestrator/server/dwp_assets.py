@@ -99,13 +99,24 @@ async def binary_download(name: str):
     index = read_index(True)
     if not index:
         raise HTTPException(404, "No binary release published")
-    entries = index.get("binaries", []) + index.get("apps", [])
-    entry = next(
-        (item for item in entries if isinstance(item, dict) and item.get("file") == name), None
-    )
-    root = (directory("DWP_RELEASES_DIR", "releases") / "binaries").resolve()
+    # The two lists live in two directories, and the entry decides which. Serving both
+    # out of "binaries" made every app zip a dead link on the /join page -- rendered from
+    # the index, which lists them, then 404ed by the route, which looked in the one place
+    # they are not. The raw executables worked throughout, so the failure looked like a
+    # broken download rather than a server that could not find its own file.
+    releases = directory("DWP_RELEASES_DIR", "releases")
+    root = None
+    for key, folder in (("binaries", "binaries"), ("apps", "apps")):
+        if any(
+            isinstance(item, dict) and item.get("file") == name for item in index.get(key, [])
+        ):
+            root = (releases / folder).resolve()
+            break
+    if root is None:
+        raise HTTPException(404, "Download not found")
     path = (root / name).resolve()
-    if not entry or path.parent != root or not path.is_file():
+    # Still anchored to one directory per entry, so a crafted name cannot walk out of it.
+    if path.parent != root or not path.is_file():
         raise HTTPException(404, "Download not found")
     return FileResponse(path, filename=name, media_type="application/octet-stream")
 

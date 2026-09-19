@@ -72,7 +72,22 @@ class Consent(BaseModel):
 
 
 class Capability(BaseModel):
+    """What the device reports about itself at hello.
+
+    The field names are the agent's, not ours — this model sits on the wire boundary, so
+    it mirrors `CapabilityRecord` in packages/protocol. Everything but `adapters` is
+    optional: an older device, or the iOS build, may send a subset, and a missing core
+    count must not stop a machine joining.
+    """
+
     adapters: list[str] = Field(min_length=1, max_length=32)
+    agentVersion: str | None = Field(default=None, max_length=64)
+    os: str | None = Field(default=None, max_length=32)
+    arch: str | None = Field(default=None, max_length=32)
+    cpuModel: str | None = Field(default=None, max_length=128)
+    logicalCores: int | None = Field(default=None, ge=1, le=4096)
+    totalRamMb: int | None = Field(default=None, ge=0)
+    freeRamMb: int | None = Field(default=None, ge=0)
 
 
 class Hello(BaseModel):
@@ -287,7 +302,27 @@ class Connection:
         await self.store.register(
             self.worker_id,
             self.session,
-            Capabilities(runtime="cpu", vram_mib=0, kinds=kinds),
+            Capabilities(
+                # Still "cpu" with no VRAM, and deliberately so: these adapters are pure
+                # JavaScript and no device path here dispatches to a GPU. Reporting
+                # otherwise would let the scheduler match work against hardware that is
+                # never used. Measured, it would also be wrong to prefer: the GPU backends
+                # ran slower than the CPU for models this size.
+                runtime="cpu",
+                vram_mib=0,
+                kinds=kinds,
+                machine=Machine(
+                    os=hello.capability.os,
+                    arch=hello.capability.arch,
+                    # Vendor strings arrive padded — "…Radeon Graphics         " — and the
+                    # padding survives into every log line and dashboard that shows it.
+                    cpu_model=(hello.capability.cpuModel or "").strip() or None,
+                    logical_cores=hello.capability.logicalCores,
+                    total_ram_mb=hello.capability.totalRamMb,
+                    agent_version=hello.capability.agentVersion,
+                    max_concurrency=hello.consent.maxConcurrency,
+                ),
+            ),
             expected_device_key=self.public_key,
         )
         self.registered = True

@@ -245,6 +245,10 @@ function page(token: string): string {
     border: 1px solid var(--line); background: var(--bg); color: var(--ink); resize: vertical;
   }
   label.field { display: block; font-size: 12px; color: var(--dim); margin: 12px 0 5px; }
+  .check { display: flex; align-items: flex-start; gap: 9px; margin-top: 14px; cursor: pointer; }
+  .check input { width: auto; flex: none; margin: 2px 0 0; }
+  .check .label { display: block; font-size: 13px; }
+  .check .hint { display: block; color: var(--dim); font-size: 11.5px; margin-top: 2px; }
   .err { color: var(--bad); font-size: 12.5px; margin-top: 10px; white-space: pre-wrap; }
   .task { font-size: 12.5px; color: var(--dim); margin-top: 6px; white-space: pre-wrap; }
   .task code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink); }
@@ -265,6 +269,14 @@ function page(token: string): string {
       <textarea id="invite" rows="2" placeholder="https://example.com/join?code=ABCD-1234" autocomplete="off" spellcheck="false"></textarea>
       <label class="field" for="name">What should this computer be called? (optional)</label>
       <input id="name" placeholder="e.g. Sam's laptop" autocomplete="off">
+      <label class="check" for="runAtLogin">
+        <input type="checkbox" id="runAtLogin" checked>
+        <span>
+          <span class="label">Rejoin automatically after a restart</span>
+          <span class="hint">Otherwise this computer is only on the network while this app
+          is open — close it, log out or restart, and it stops contributing.</span>
+        </span>
+      </label>
       <div style="margin-top:14px"><button class="primary" id="joinBtn">Join</button></div>
       <div class="err" id="joinErr" hidden></div>
     </div>
@@ -483,7 +495,18 @@ async function act(btn, fn) {
 $('joinBtn').onclick = () => act($('joinBtn'), async () => {
   show($('joinErr'), false)
   try {
-    await api('pair', { invite: $('invite').value, label: $('name').value })
+    const r = await api('pair', {
+      invite: $('invite').value,
+      label: $('name').value,
+      runAtLogin: $('runAtLogin').checked,
+    })
+    // Joined, but not durably. Say so once here rather than leave the difference to be
+    // noticed the next time this computer is restarted and does not come back.
+    if (r && r.serviceError) {
+      $('actionErr').textContent = 'Joined, but could not set it to rejoin after a restart:\\n' +
+        r.serviceError + '\\n\\nTurn it on below once that is sorted.'
+      show($('actionErr'), true)
+    }
   } catch (err) {
     $('joinErr').textContent = err.message
     show($('joinErr'), true)
@@ -713,7 +736,31 @@ export async function runGui(opts: GuiOptions): Promise<void> {
       config = loadConfig()
       log.info('gui.paired', { hostId: outcome.hostId, label: outcome.label })
       if (config) void startConnection(config)
-      send(res, 200, { ok: true })
+
+      /**
+       * Register the login task as part of joining, not as a setting to find later.
+       *
+       * The toggle below has always existed and was the only place this surfaced, which
+       * meant the ordinary path through this window produced an agent that lived exactly
+       * as long as the window did. Anyone who does not want that unticks the box; the
+       * default is the one that makes the machine a worker rather than a visitor.
+       *
+       * A failure here does not fail the join. The computer has enrolled either way, and
+       * losing a successful pairing over a Scheduled Task would be a far worse trade —
+       * so it is reported as something that did not happen, and the toggle is left
+       * showing the truth.
+       */
+      let serviceError: string | null = null
+      if (body.runAtLogin !== false && config) {
+        try {
+          await installService('gui')
+        } catch (err) {
+          serviceError = err instanceof Error ? err.message : String(err)
+          log.warn('gui.login_task_failed', { detail: serviceError })
+        }
+        await refreshService()
+      }
+      send(res, 200, { ok: true, runsAtLogin: service.installed, serviceError })
       return
     }
 

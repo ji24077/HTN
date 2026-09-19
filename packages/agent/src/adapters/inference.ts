@@ -5,6 +5,9 @@ import { hostname } from 'node:os'
 import { InferenceInput, type InferenceOutput, mintAssertion } from '@dwp/protocol'
 import type { KeyObject } from 'node:crypto'
 import { AGENT_HOME } from '../paths.ts'
+import { createLogger } from '@dwp/protocol'
+
+const log = createLogger({ component: 'agent' })
 
 /**
  * Batch inference over a pinned model.
@@ -22,6 +25,74 @@ type Session = Awaited<ReturnType<Ort['InferenceSession']['create']>>
 
 /** Sessions are expensive to build and safe to reuse, so keep them keyed by model hash. */
 const sessions = new Map<string, Promise<Session>>()
+
+/**
+ * Which backend to ask for, in order of preference, always ending at the CPU.
+ *
+ * Named honestly, because the obvious name would be wrong: this is **not** GPU
+ * acceleration. Measured on an M5 Pro against this MNIST model, with the ONNX Runtime
+ * profiler and the GPU's own performance counters:
+ *
+ *   plain CPU provider            9,943 img/s
+ *   coreml, default flags        11,720 img/s   1.18x
+ *   coreml, USE_CPU_ONLY         11,753 img/s   1.18x  <- identical to default
+ *   coreml, CPU_AND_GPU           8,597 img/s   0.86x  <- slower than plain CPU
+ *
+ * Forcing CoreML onto the CPU costs nothing, which means the default was never leaving
+ * the CPU; the GPU's utilisation counter stayed at idle levels (3% against 2% idle)
+ * throughout. The gain is entirely CoreML's own CPU kernels — Accelerate and the AMX
+ * matrix unit — beating the ones ONNX Runtime ships. Explicitly allowing the GPU makes
+ * it *slower*, because a 26 KB model spends more on dispatch than it saves on
+ * arithmetic. WebGPU, tested the same way, was 4.4x slower still.
+ *
+ * So: prefer CoreML because it is measurably faster and returns bit-identical logits,
+ * and do not set COREML_FLAG_USE_CPU_AND_GPU. Whether DirectML helps on Windows is
+ * untested and, on this evidence, should be assumed to hurt until someone measures a
+ * model large enough to be worth dispatching.
+ *
+ * `cpu` is always last, and that is the whole safety story: a machine whose preferred
+ * backend is missing or broken still computes the right answer.
+ *
+ * DWP_ORT_PROVIDERS overrides it — set it to `cpu` to force the plain path, which is how
+ * these numbers were produced.
+ */
+function preferredProviders(): string[] {
+  const override = process.env.DWP_ORT_PROVIDERS
+  if (override) return override.split(',').map(x => x.trim()).filter(Boolean)
+  if (process.platform === 'darwin') return ['coreml', 'cpu']
+  if (process.platform === 'win32') return ['dml', 'cpu']
+  return ['cpu']
+}
+
+/**
+ * Build a session on the best backend this machine will actually accept.
+ *
+ * A provider that is not compiled into the installed build makes `create` throw outright
+ * rather than degrade, so each is tried in turn. Whatever succeeds is logged once: the
+ * difference between "the GPU is working" and "it quietly fell back to the CPU months
+ * ago" is otherwise invisible, and it is exactly the sort of thing nobody notices until
+ * they are comparing timings that no longer mean what they think.
+ */
+async function createSession(ort: Ort, modelBytes: Buffer): Promise<Session> {
+  const wanted = preferredProviders()
+  for (let i = 0; i < wanted.length; i += 1) {
+    const providers = wanted.slice(i)
+    try {
+      const session = await ort.InferenceSession.create(modelBytes, {
+        executionProviders: providers as never,
+      })
+      // Not "the GPU": see above. This records which kernel library won, nothing more.
+      log.info('inference.backend', { using: providers[0], requested: wanted })
+      return session
+    } catch (err) {
+      log.warn('inference.backend_unavailable', {
+        provider: providers[0],
+        reason: err instanceof Error ? err.message.split('\n')[0] : String(err),
+      })
+    }
+  }
+  throw new Error(`no usable inference backend from ${wanted.join(', ')}`)
+}
 
 /**
  * Load ONNX Runtime on first use rather than at import.
@@ -83,7 +154,7 @@ export async function runInference(
   ])
 
   if (!sessions.has(input.modelHash)) {
-    sessions.set(input.modelHash, ort.InferenceSession.create(modelBytes))
+    sessions.set(input.modelHash, createSession(ort, modelBytes))
   }
   const session = await sessions.get(input.modelHash)!
   const modelLoadMs = performance.now() - loadStart

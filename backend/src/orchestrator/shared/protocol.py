@@ -68,8 +68,33 @@ class TaskSpec(Model):
         return bounded_json(value)
 
 
+class Machine(Model):
+    """What a worker *is*, as opposed to what it can run.
+
+    Every field here already crossed the wire before this model existed — the agent has
+    always reported them and the server discarded them, so a scheduler could tell an
+    8-core laptop from a 15-core desktop only by watching how fast work came back. None
+    of this is load-bearing for correctness: it exists so allocation can be better than
+    round-robin, and every field is optional because a client that predates it, or a
+    platform that cannot answer, must still be able to register.
+    """
+
+    os: str | None = Field(default=None, max_length=32)
+    arch: str | None = Field(default=None, max_length=32)
+    cpu_model: str | None = Field(default=None, max_length=128)
+    logical_cores: int | None = Field(default=None, ge=1, le=4096)
+    total_ram_mb: int | None = Field(default=None, ge=0)
+    agent_version: str | None = Field(default=None, max_length=64)
+    #: What the owner consented to run at once. Not a hardware fact, and deliberately
+    #: lower than the core count on machines someone is sitting in front of.
+    max_concurrency: int | None = Field(default=None, ge=1, le=1024)
+
+
 class Capabilities(Requirements):
     kinds: list[Identifier] = Field(min_length=1, max_length=32)
+    #: Optional because rows written before this field existed must still load, and
+    #: because `extra="forbid"` would otherwise reject them outright.
+    machine: Machine | None = None
 
 
 class Task(Model):

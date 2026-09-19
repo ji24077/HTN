@@ -108,12 +108,145 @@ WantedBy=default.target
 // ----------------------------------------------------------------- Windows
 
 const TASK_NAME = 'DWP Agent'
+const TASK_XML_PATH = (): string => join(AGENT_HOME, 'task.xml')
+
+const xmlEscape = (s: string): string =>
+  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+
+/**
+ * Who the task runs as, as Task Scheduler spells it.
+ *
+ * Omitted entirely when the environment cannot say, rather than guessed: an XML naming
+ * the wrong user is rejected outright, where an XML naming nobody lets schtasks fill in
+ * the account that is creating the task, which is the one we want anyway.
+ */
+function currentUserId(): string | null {
+  const user = process.env.USERNAME
+  if (!user) return null
+  const domain = process.env.USERDOMAIN
+  return domain ? `${domain}\\${user}` : user
+}
+
+/**
+ * The Scheduled Task, written out in full rather than left to `schtasks` defaults.
+ *
+ * This is the whole reason the Windows path is not two lines. A task created by
+ * `schtasks /Create /SC ONLOGON` inherits the Task Scheduler schema's defaults, and
+ * three of them are actively wrong for a laptop:
+ *
+ *   DisallowStartIfOnBatteries  true  — it will not start unless the machine is plugged in
+ *   StopIfGoingOnBatteries      true  — it is killed the moment the charger comes out
+ *   ExecutionTimeLimit          P3D   — it is killed after three days, plugged in or not
+ *
+ * A worker that quietly stops when someone unplugs their laptop is indistinguishable
+ * from a broken one, and it is the failure this project actually hit: a Windows machine
+ * that joined, ran a task, and was gone minutes later. `schtasks` has no flags for any
+ * of these, so the definition has to arrive as XML.
+ *
+ * The repetition on the trigger is what makes this equivalent to the other two
+ * platforms. macOS gets launchd's KeepAlive and Linux gets systemd's Restart=on-failure;
+ * Task Scheduler has RestartOnFailure, but it only covers a task that *fails* and only a
+ * few times. Re-firing the trigger every ten minutes with MultipleInstancesPolicy set to
+ * IgnoreNew means a live agent is left alone — the extra start is dropped — while a dead
+ * one is back within ten minutes, from any cause, indefinitely.
+ */
+function windowsTaskXml(mode: ServiceMode): string {
+  const [exe = process.execPath, ...args] = launchCommand(mode)
+  const userId = currentUserId()
+  const userElement = userId ? `<UserId>${xmlEscape(userId)}</UserId>` : ''
+  return `<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>Joins this computer to the distributed work network at login.</Description>
+    <URI>\\${TASK_NAME}</URI>
+  </RegistrationInfo>
+  <Triggers>
+    <LogonTrigger>
+      <Repetition>
+        <Interval>PT10M</Interval>
+        <StopAtDurationEnd>false</StopAtDurationEnd>
+      </Repetition>
+      <Enabled>true</Enabled>
+      ${userElement}
+    </LogonTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      ${userElement}
+      <LogonType>InteractiveToken</LogonType>
+      <RunLevel>LeastPrivilege</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <IdleSettings>
+      <StopOnIdleEnd>false</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <Priority>7</Priority>
+    <RestartOnFailure>
+      <Interval>PT1M</Interval>
+      <Count>3</Count>
+    </RestartOnFailure>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>${xmlEscape(exe)}</Command>
+      ${args.length > 0 ? `<Arguments>${xmlEscape(args.map(a => `"${a}"`).join(' '))}</Arguments>` : ''}
+    </Exec>
+  </Actions>
+</Task>
+`
+}
+
+/**
+ * Register the task from XML, falling back to the flag form if that is refused.
+ *
+ * `schtasks /XML` is strict about the document it is handed and the ways it can object
+ * are version-specific, so a rejection must not leave the machine with no task at all —
+ * an agent that starts at login on battery-powered terms is still better than one that
+ * never starts. The fallback says so in what it returns, because the difference decides
+ * whether the machine can be relied on.
+ */
+async function installWindowsTask(mode: ServiceMode): Promise<string> {
+  const xmlPath = TASK_XML_PATH()
+  mkdirSync(AGENT_HOME, { recursive: true })
+  // UTF-16LE with a BOM: what Task Scheduler itself exports, and the encoding schtasks
+  // accepts without argument. UTF-8 is read as mojibake on some builds and rejected as
+  // "incorrectly formatted", which is a confusing way to learn about an encoding.
+  writeFileSync(xmlPath, '﻿' + windowsTaskXml(mode), 'utf16le')
+  try {
+    await exec('schtasks', ['/Create', '/F', '/TN', TASK_NAME, '/XML', xmlPath])
+    return TASK_NAME
+  } catch (err) {
+    const detail = err instanceof Error ? err.message.split('\n')[0] : String(err)
+    const [exe, ...rest] = launchCommand(mode)
+    const command = rest.length > 0 ? `"${exe}" ${rest.map(a => `"${a}"`).join(' ')}` : `"${exe}"`
+    await exec('schtasks', [
+      '/Create', '/F', '/SC', 'ONLOGON', '/TN', TASK_NAME, '/TR', command, '/RL', 'LIMITED',
+    ])
+    return `${TASK_NAME} (basic — Windows refused the full definition: ${detail}. ` +
+      `It will stop when this computer runs on battery.)`
+  } finally {
+    rmSync(xmlPath, { force: true })
+  }
+}
 
 // ------------------------------------------------------------------- public
 
 export async function installService(mode: ServiceMode = 'run'): Promise<string> {
   const os = platform()
-  const [exe, ...rest] = launchCommand(mode)
 
   if (os === 'darwin') {
     mkdirSync(join(homedir(), 'Library', 'LaunchAgents'), { recursive: true })
@@ -134,13 +267,7 @@ export async function installService(mode: ServiceMode = 'run'): Promise<string>
     return unitPath()
   }
 
-  if (os === 'win32') {
-    const command = rest.length > 0 ? `"${exe}" ${rest.map(a => `"${a}"`).join(' ')}` : `"${exe}"`
-    await exec('schtasks', [
-      '/Create', '/F', '/SC', 'ONLOGON', '/TN', TASK_NAME, '/TR', command, '/RL', 'LIMITED',
-    ])
-    return TASK_NAME
-  }
+  if (os === 'win32') return installWindowsTask(mode)
 
   throw new Error(`no service support for ${os}`)
 }
@@ -180,9 +307,23 @@ export async function serviceStatus(): Promise<ServiceStatus> {
     return { installed: true, platform: os, running, path: unitPath() }
   }
   if (os === 'win32') {
-    const found = await exec('schtasks', ['/Query', '/TN', TASK_NAME]).then(() => true).catch(() => false)
-    if (!found) return { installed: false, platform: os }
-    return { installed: true, platform: os, running: true, path: TASK_NAME }
+    /**
+     * Ask the task what it is doing, rather than assuming a task that exists is running.
+     *
+     * The previous version reported `running: true` for any registered task, which meant
+     * `service-status` was incapable of showing the one state worth seeing: installed and
+     * dead. That is exactly the state a battery-stopped task sits in.
+     *
+     * The status word is localised, so a machine in another language falls through to
+     * `true` rather than claiming the agent is down on the strength of not recognising a
+     * word. Wrong in the direction that does not invent a problem.
+     */
+    const query = await exec('schtasks', ['/Query', '/TN', TASK_NAME, '/FO', 'LIST'])
+      .then(r => r.stdout).catch(() => null)
+    if (query === null) return { installed: false, platform: os }
+    const status = /^\s*Status:\s*(.+)$/mi.exec(query)?.[1]?.trim()
+    const known = status !== undefined && /^(running|ready|disabled)$/i.test(status)
+    return { installed: true, platform: os, running: known ? /^running$/i.test(status!) : true, path: TASK_NAME }
   }
   return { installed: false, platform: os }
 }

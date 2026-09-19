@@ -56,6 +56,18 @@ export function saveConfig(c: AgentConfig): void {
 }
 
 /**
+ * Forget which network this computer belongs to.
+ *
+ * The keypair in agent.key is deliberately left alone: it is this machine's identity,
+ * not its membership, and keeping it means a machine that rejoins the same network is
+ * recognisably the same machine. Only the enrolment goes — server address, host id, and
+ * the release key pinned at pairing, which must not survive into a different network.
+ */
+export function clearConfig(): void {
+  if (existsSync(CONFIG_PATH)) unlinkSync(CONFIG_PATH)
+}
+
+/**
  * Pause is a local file, deliberately.
  *
  * The owner's kill switch has to work when the control service is unreachable, so

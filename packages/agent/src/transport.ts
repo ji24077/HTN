@@ -84,10 +84,12 @@ export type AgentState = {
   updating: boolean
 }
 
-/** Enough of a handle for a window to ask for another attempt. */
+/** Enough of a handle for a window to steer the connection. */
 export type AgentHandle = {
   /** Try now rather than waiting out the stand-down delay. */
   retryNow(): void
+  /** Stop for good: no more work, no reconnection. Used when leaving a network. */
+  stop(): void
 }
 
 export function connect(
@@ -127,6 +129,9 @@ export function connect(
     observe?.({ ...state, running: [...state.running] })
   }
 
+  /** The socket currently in hand, so the caller can close it deliberately. */
+  let current: WebSocket | null = null
+
   const open = (): void => {
     if (stopped) return
     attempt += 1
@@ -162,6 +167,7 @@ export function connect(
       // connected rather than failing on the very next dial.
       ...(dnsFallbackEnabled() ? { lookup: fallbackLookup } : {}),
     })
+    current = ws
     let heartbeat: NodeJS.Timeout | undefined
     let heartbeatMs = DEFAULT_HEARTBEAT_MS
     let pauseWas = isPaused()
@@ -602,6 +608,11 @@ export function connect(
   }
 
   return {
+    stop: () => {
+      stopped = true
+      notify({ connection: 'offline', connectedSince: null })
+      try { current?.close(1000, 'left the network') } catch {}
+    },
     retryNow: () => {
       if (!stopped || !state.stoodDown) return
       supersession.reset()

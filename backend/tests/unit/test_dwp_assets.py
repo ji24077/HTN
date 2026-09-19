@@ -59,6 +59,38 @@ class DeviceAssetsTests(unittest.TestCase):
         self.assertEqual(self.client.get("/download/private.key").status_code, 404)
         self.assertEqual(self.client.get("/download/..%5Cprivate.key").status_code, 404)
 
+    def test_app_downloads_are_served_from_the_apps_directory(self):
+        """The index lists apps and binaries together; they are not stored together.
+
+        Serving both out of "binaries" made every zip on the /join page a link that
+        rendered and then 404ed, while the raw executables beside them worked -- so it
+        read as a broken download rather than a server looking in the wrong directory.
+        """
+        binaries = self.root / "binaries"
+        apps = self.root / "apps"
+        binaries.mkdir()
+        apps.mkdir()
+        (binaries / "agent.exe").write_bytes(b"executable")
+        (apps / "Agent-Windows.zip").write_bytes(b"zipped app")
+        # An app name that exists only under binaries must still not be reachable.
+        (binaries / "Decoy.zip").write_bytes(b"not published")
+        (binaries / "index.json").write_text(
+            json.dumps(
+                {
+                    "manifest": {"version": "test"},
+                    "signature": "signature",
+                    "publicKey": "key",
+                    "binaries": [{"target": "win32-x64", "file": "agent.exe"}],
+                    "apps": [{"target": "windows-x64", "file": "Agent-Windows.zip"}],
+                }
+            )
+        )
+        self.assertEqual(
+            self.client.get("/download/Agent-Windows.zip").content, b"zipped app"
+        )
+        self.assertEqual(self.client.get("/download/agent.exe").content, b"executable")
+        self.assertEqual(self.client.get("/download/Decoy.zip").status_code, 404)
+
     def test_artifact_requires_verified_device_assertion(self):
         content = b"model fixture"
         digest = hashlib.sha256(content).hexdigest()
