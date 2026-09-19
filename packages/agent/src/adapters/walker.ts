@@ -1,6 +1,7 @@
 import { hostname } from 'node:os'
 import { WalkerInput, type WalkerOutput } from '@dwp/protocol'
 import { perturb, evaluate } from '@dwp/protocol/walker.js'
+import type { ExecutionReporter } from '../execution.ts'
 
 /**
  * Evaluate a slice of one generation of candidate gaits.
@@ -13,8 +14,10 @@ export async function runWalker(
   rawInput: unknown,
   hostId: string,
   signal: AbortSignal,
+  report?: ExecutionReporter,
 ): Promise<WalkerOutput> {
   const input = WalkerInput.parse(rawInput)
+  report?.step(`Evaluating ${input.seeds.length} walker candidates`)
   const started = performance.now()
   const results: WalkerOutput['results'] = []
 
@@ -23,6 +26,7 @@ export async function runWalker(
     const genome = perturb(input.parent, input.sigma, seed)
     const r = evaluate(genome, input.steps)
     results.push({ seed, fitness: r.fitness, distance: r.distance, ticks: r.ticks, fell: r.fell })
+    report?.progress(results.length, input.seeds.length)
     // Yield occasionally so cancellation and lease renewals are not starved by a long
     // synchronous run of simulations.
     if (results.length % 8 === 0) await new Promise(resolve => setImmediate(resolve))

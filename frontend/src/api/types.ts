@@ -52,3 +52,17 @@ export interface Snapshot {
   events: AuditEvent[];
 }
 export type ConnectionStatus = "connecting" | "live" | "reconnecting";
+
+export interface ExecutionEvent {
+  id: number;
+  execution_id: string;
+  task_id: string;
+  attempt: number;
+  worker_id: string | null;
+  source: "server" | "worker";
+  sequence: number;
+  kind: string;
+  occurred_at: string;
+  received_at: string;
+  data: Record<string, unknown>;
+}

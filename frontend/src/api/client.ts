@@ -1,5 +1,20 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import type { Task, TaskSpec } from "./types";
+import type { Task, TaskSpec, ExecutionEvent } from "./types";
+
+export function executionEvents(
+  taskId: string,
+  after: number,
+  signal: AbortSignal,
+) {
+  return request<{
+    events: ExecutionEvent[];
+    next_cursor: number;
+    has_more: boolean;
+  }>(
+    `/v1/tasks/${encodeURIComponent(taskId)}/execution-events?after=${after}`,
+    { signal },
+  );
+}
 
 export class ApiError extends Error {
   constructor(

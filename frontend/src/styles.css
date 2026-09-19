@@ -1022,3 +1022,8 @@ dialog pre {
     margin-top: 15px;
   }
 }
+/* Each task retains successful output and diagnostics across execution attempts. */
+.execution-history ol { list-style: none; padding: 0; max-height: 28rem; overflow: auto; }
+.execution-history li { border-bottom: 1px solid #d6d9d5; padding: 0.75rem 0; }
+.execution-history pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 0.8rem; }
+.execution-history small { display: block; opacity: 0.75; margin-top: 0.25rem; }

@@ -1,9 +1,13 @@
 """Outbound asyncio worker; execution remains behind the Executor protocol."""
 
 import asyncio
+import hashlib
 import logging
+import platform
 import random
 import signal
+import time
+import traceback
 from collections.abc import Callable
 
 import sentry_sdk
@@ -20,10 +24,12 @@ from ..shared.protocol import (
     Task,
     bounded_json,
     json_loads,
+    json_text,
     task_ref,
 )
 from ..shared.telemetry import init_sentry
 from .config import WorkerConfig
+from .execution import ExecutionJournal, ExecutionReporter
 from .executors import StubExecutor
 from .tunnel import EmbeddedTunnel
 
@@ -50,19 +56,54 @@ async def receive(socket: ClientConnection) -> Message:
 
 async def execute(executor: Executor, task: Task, report: Callable[[float], None]) -> Message:
     ref = task_ref(task)
-    with sentry_sdk.start_transaction(op="task.execute", name=f"task {task.spec.kind}") as span:
+    started = time.monotonic()
+
+    def record(kind, **data):
+        if isinstance(report, ExecutionReporter):
+            report.emit(kind, {"duration_ms": (time.monotonic() - started) * 1000, **data})
+
+    record(
+        "started",
+        adapter=task.spec.kind,
+        runtime=f"python {platform.python_version()}",
+        os=platform.system(),
+        arch=platform.machine(),
+        task_hash=hashlib.sha256(json_text(task.spec.model_dump(mode="json")).encode()).hexdigest(),
+    )
+    with (
+        sentry_sdk.new_scope() as scope,
+        sentry_sdk.start_transaction(op="task.execute", name=f"task {task.spec.kind}") as span,
+    ):
+        scope.set_tag("execution_id", f"{task.spec.id}:{task.generation}")
+        scope.set_tag("task_id", task.spec.id)
+        scope.set_tag("attempt", task.generation)
         span.set_tag("task_id", task.spec.id)
         span.set_tag("job_id", task.spec.job_id)
+        span.set_tag("execution_id", f"{task.spec.id}:{task.generation}")
         span.set_data("generation", task.generation)
         try:
             async with asyncio.timeout(task.spec.timeout_seconds):
                 result = bounded_json(await executor.execute(task.spec, report))
+            report(100)
+            record("succeeded", result_url=f"/v1/tasks/{task.spec.id}")
             return Message(type="complete", ref=ref, result=result)
         except TimeoutError as exc:
+            record("timed_out", message="Execution deadline exceeded")
             sentry_sdk.capture_exception(exc)
             span.set_status("deadline_exceeded")
             return Message(type="failed", ref=ref, error="execution deadline", retryable=True)
+        except asyncio.CancelledError:
+            record("interrupted", message="Execution stopped or assignment revoked")
+            raise
         except Exception as exc:
+            record(
+                "failed",
+                error={
+                    "name": type(exc).__name__,
+                    "message": str(exc),
+                    "stack": traceback.format_exc()[-4096:],
+                },
+            )
             # Cancellation is BaseException and must propagate without a completion.
             sentry_sdk.capture_exception(exc)
             span.set_status("internal_error")
@@ -76,6 +117,7 @@ class Agent:
         self.config = config
         self.executor = executor
         self.tunnel = tunnel
+        self.journal = ExecutionJournal(config.url, config.worker_id)
 
     async def run(self) -> None:
         delay = 1.0
@@ -120,15 +162,20 @@ class Agent:
             proxy=None,
             **transport,
         ) as socket:
-            await send(socket, Message(type="hello", capabilities=config.capabilities))
+            await send(
+                socket,
+                Message(type="hello", capabilities=config.capabilities, execution_events=True),
+            )
             async with asyncio.timeout(10):
                 welcome = await receive(socket)
             if welcome.type != "welcome" or not welcome.session_id:
                 raise ValueError("invalid server handshake")
             log.info("worker connected worker=%s session=%s", config.worker_id, welcome.session_id)
-            await self.work_loop(socket, welcome.session_id)
+            await self.work_loop(socket, welcome.session_id, welcome.execution_events is True)
 
-    async def work_loop(self, socket: ClientConnection, session: str) -> None:
+    async def work_loop(
+        self, socket: ClientConnection, session: str, tracking: bool = False
+    ) -> None:
         current: Task | None = None
         work: asyncio.Task | None = None
         result_sent = False
@@ -172,10 +219,11 @@ class Agent:
 
         reader = asyncio.create_task(receive(socket))
         ticker = asyncio.create_task(asyncio.sleep(HEARTBEAT_INTERVAL))
+        event_tick = asyncio.create_task(asyncio.sleep(0.25))
         try:
             await heartbeat()
             while True:
-                waiting = {reader, ticker}
+                waiting = {reader, ticker, event_tick}
                 if work is not None and not result_sent:
                     waiting.add(work)
                 done, _ = await asyncio.wait(waiting, return_when=asyncio.FIRST_COMPLETED)
@@ -186,6 +234,9 @@ class Agent:
                     message = reader.result()
                     reader = asyncio.create_task(receive(socket))
                     match message.type:
+                        case "execution_events_ack":
+                            if message.execution_batch:
+                                self.journal.acknowledge(message.execution_batch)
                         case "heartbeat_ack":
                             if message.sequence not in pending:
                                 raise ValueError("unknown heartbeat acknowledgment")
@@ -214,7 +265,10 @@ class Agent:
                                     current.spec.id,
                                     current.generation,
                                 )
-                                work = asyncio.create_task(execute(self.executor, current, report))
+                                reporter = ExecutionReporter(self.journal, current, report)
+                                work = asyncio.create_task(
+                                    execute(self.executor, current, reporter)
+                                )
                         case "result_accepted" | "revoke":
                             if matching(message.ref):
                                 log.info("%s task=%s", message.type, current.spec.id)
@@ -233,11 +287,16 @@ class Agent:
                         raise TimeoutError("heartbeat acknowledgment timeout")
                     await heartbeat()
                     ticker = asyncio.create_task(asyncio.sleep(HEARTBEAT_INTERVAL))
+                if event_tick in done:
+                    if tracking and (batch := self.journal.next_batch()):
+                        await send(socket, Message(type="execution_events", execution_batch=batch))
+                    event_tick = asyncio.create_task(asyncio.sleep(0.25))
         finally:
             reader.cancel()
             ticker.cancel()
+            event_tick.cancel()
             await clear()
-            await asyncio.gather(reader, ticker, return_exceptions=True)
+            await asyncio.gather(reader, ticker, event_tick, return_exceptions=True)
 
 
 async def run_worker() -> None:

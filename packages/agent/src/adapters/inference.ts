@@ -5,6 +5,7 @@ import { hostname } from 'node:os'
 import { InferenceInput, type InferenceOutput, mintAssertion } from '@dwp/protocol'
 import type { KeyObject } from 'node:crypto'
 import { AGENT_HOME } from '../paths.ts'
+import type { ExecutionReporter } from '../execution.ts'
 
 /**
  * Batch inference over a pinned model.
@@ -71,12 +72,14 @@ async function fetchArtifact(
 
 export async function runInference(
   rawInput: unknown,
-  ctx: { hostId: string; server: string; privateKey: KeyObject; signal: AbortSignal },
+  ctx: { hostId: string; server: string; privateKey: KeyObject; signal: AbortSignal; report?: ExecutionReporter },
 ): Promise<InferenceOutput> {
   const input = InferenceInput.parse(rawInput)
+  ctx.report?.step('Loading inference runtime')
   const ort = await loadOrt()
 
   const loadStart = performance.now()
+  ctx.report?.step('Fetching and verifying model and input artifacts')
   const [modelBytes, inputBytes] = await Promise.all([
     fetchArtifact(ctx.server, ctx.hostId, ctx.privateKey, input.modelHash),
     fetchArtifact(ctx.server, ctx.hostId, ctx.privateKey, input.inputsHash),
@@ -87,6 +90,7 @@ export async function runInference(
   }
   const session = await sessions.get(input.modelHash)!
   const modelLoadMs = performance.now() - loadStart
+  ctx.report?.step('Model loaded; executing inference batch')
 
   if (inputBytes.subarray(0, 4).toString('ascii') !== 'DWPI') throw new Error('input artifact has an unexpected format')
   const total = inputBytes.readUInt32BE(4)
@@ -119,6 +123,7 @@ export async function runInference(
     predictions.push(best)
     logitChecksum += logits[best]!
     if (inputBytes[labelsStart + input.from + i] === best) correct += 1
+    ctx.report?.progress(i + 1, input.count)
   }
   const inferenceMs = performance.now() - inferStart
 

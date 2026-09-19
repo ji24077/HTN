@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs'
 import { AGENT_HOME, CONFIG_PATH, PAUSE_PATH } from './paths.ts'
+import type { WorkerTelemetry } from '@dwp/protocol'
 
 export type AgentConfig = {
   server: string
@@ -9,6 +10,8 @@ export type AgentConfig = {
   allowCompute: boolean
   allowBrowser: boolean
   maxConcurrency: number
+  /** Delivered by the paired platform; persists across GUI/service/binary restarts. */
+  telemetry?: WorkerTelemetry
   /**
    * The operator's release signing key, pinned at pairing.
    *

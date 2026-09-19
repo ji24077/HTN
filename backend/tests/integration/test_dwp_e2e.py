@@ -129,7 +129,9 @@ class DeviceE2ETests(unittest.TestCase):
                         "DATABASE_URL": database.get_uri(),
                         "DATABASE_SCHEMA": "device_e2e",
                         "ADMIN_TOKEN": ADMIN,
-                        "WORKER_TOKENS": "{}",
+                        "WORKER_TOKENS": json.dumps(
+                            {"python-e2e": "local-python-worker-test-token-0123456789"}
+                        ),
                         "SENTRY_DSN": "",
                         "PUBLIC_ORIGIN": "",
                         "REDIS_URL": "",
@@ -269,6 +271,30 @@ class DeviceE2ETests(unittest.TestCase):
                         )
                         self.assertEqual(verified["outputHash"], proof["outputHash"])
 
+                    def history(identifier, kind, attempt=1):
+                        def recorded():
+                            response = client.get(f"/v1/tasks/{identifier}/execution-events")
+                            response.raise_for_status()
+                            rows = response.json()["events"]
+                            return (
+                                rows
+                                if any(
+                                    e["source"] == "worker"
+                                    and e["kind"] == kind
+                                    and e["attempt"] == attempt
+                                    for e in rows
+                                )
+                                else None
+                            )
+
+                        rows = self.wait_for(
+                            "execution history " + identifier, recorded, processes=(control, device)
+                        )
+                        self.assertTrue(
+                            all(e["worker_id"] == worker_id for e in rows if e["attempt"])
+                        )
+                        return rows
+
                     device = launch()
                     first = self.wait_for(
                         "real agent hello", current_worker, processes=(control, device)
@@ -278,6 +304,22 @@ class DeviceE2ETests(unittest.TestCase):
                     echo = wait_task("echo-e2e", "succeeded")
                     self.assertEqual(echo["result"]["nonce"], "real-node-echo")
                     check_proof(echo)
+                    rows = history("echo-e2e", "succeeded")
+                    self.assertTrue(any(e["kind"] == "step" for e in rows))
+                    self.assertTrue(
+                        any(e["source"] == "server" and e["kind"] == "succeeded" for e in rows)
+                    )
+                    with httpx.Client(base_url=server) as anonymous:
+                        self.assertEqual(
+                            anonymous.get("/v1/tasks/echo-e2e/execution-events").status_code, 401
+                        )
+                    self.assertEqual(
+                        client.get(
+                            "/v1/tasks/echo-e2e/execution-events",
+                            params={"worker_id": "another-worker"},
+                        ).json()["events"],
+                        [],
+                    )
 
                     # Exercise the shipped independent audit command, including its
                     # failure status after changing accepted output but retaining proof.
@@ -323,6 +365,9 @@ class DeviceE2ETests(unittest.TestCase):
                     walker = wait_task("walker-e2e", "succeeded")
                     self.assertEqual(len(walker["result"]["results"]), 3)
                     check_proof(walker)
+                    self.assertTrue(
+                        any(e["kind"] == "progress" for e in history("walker-e2e", "succeeded"))
+                    )
 
                     if run_inference:
                         self.assertIn("cpu_inference_batch", first["capabilities"]["kinds"])
@@ -377,6 +422,7 @@ class DeviceE2ETests(unittest.TestCase):
                     self.assertEqual(
                         client.get("/v1/tasks/cancel-e2e").json()["state"], "cancelled"
                     )
+                    history("cancel-e2e", "cancelled")
 
                     # Kill and restart the real process while a lease is held. Registration
                     # fences the first session, retries with generation+1, and signs anew.
@@ -400,6 +446,83 @@ class DeviceE2ETests(unittest.TestCase):
                     self.assertEqual(completed["generation"], previous_generation + 1)
                     self.assertNotEqual(completed["session_id"], previous_session)
                     check_proof(completed)
+                    rows = history("reconnect-e2e", "succeeded", previous_generation + 1)
+                    history("reconnect-e2e", "interrupted", previous_generation)
+                    identities = [(e["source"], e["attempt"], e["sequence"]) for e in rows]
+                    self.assertEqual(len(identities), len(set(identities)))
+
+                    # Failures also retain diagnostic text on each attempt; no Sentry account needed.
+                    submit("invalid-e2e", "echo", {"sleepMs": 0})
+                    self.wait_for(
+                        "failed task",
+                        lambda: client.get("/v1/tasks/invalid-e2e").json()["state"] == "failed",
+                        processes=(control, device),
+                    )
+                    rows = history("invalid-e2e", "failed", 3)
+                    self.assertEqual(
+                        {e["attempt"] for e in rows if e["kind"] == "failed"}, {1, 2, 3}
+                    )
+
+                    # Python's existing callable report interface emits into the same history.
+                    python_env = {
+                        **env,
+                        "WORKER_ID": "python-e2e",
+                        "WORKER_TOKEN": "local-python-worker-test-token-0123456789",
+                        "SERVER_URL": server.replace("http", "ws") + "/v1/worker",
+                        "WORKER_EXECUTION_DIR": str(temporary / "python-executions"),
+                    }
+                    python_worker = subprocess.Popen(
+                        [sys.executable, "-m", "orchestrator.worker"],
+                        cwd=ROOT,
+                        env=python_env,
+                        stdout=agent_log,
+                        stderr=subprocess.STDOUT,
+                    )
+                    try:
+                        response = client.post(
+                            "/v1/tasks",
+                            json={
+                                "tasks": [
+                                    {
+                                        "id": "python-tracked",
+                                        "job_id": "test",
+                                        "kind": "stub",
+                                        "payload": {"duration_seconds": 1, "value": {"ok": True}},
+                                        "requirements": {"runtime": "cpu", "vram_mib": 0},
+                                        "max_attempts": 1,
+                                        "timeout_seconds": 20,
+                                        "target_worker_id": "python-e2e",
+                                        "allow_failover": False,
+                                    }
+                                ]
+                            },
+                        )
+                        response.raise_for_status()
+
+                        def python_history():
+                            events = client.get("/v1/tasks/python-tracked/execution-events").json()[
+                                "events"
+                            ]
+                            return (
+                                events
+                                if any(
+                                    e["source"] == "worker" and e["kind"] == "succeeded"
+                                    for e in events
+                                )
+                                else None
+                            )
+
+                        recorded = self.wait_for(
+                            "Python execution history",
+                            python_history,
+                            processes=(control, python_worker),
+                        )
+                        self.assertTrue(any(e["kind"] == "progress" for e in recorded))
+                        self.assertEqual(
+                            client.get("/v1/tasks/python-tracked").json()["state"], "succeeded"
+                        )
+                    finally:
+                        stop(python_worker)
             except BaseException:
                 for handle in log_files:
                     handle.flush()
