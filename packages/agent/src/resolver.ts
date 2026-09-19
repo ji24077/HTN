@@ -64,6 +64,33 @@ export const fallbackLookup: LookupFunction = ((hostname, options, callback) => 
  * connect. Resolving here and dialling the address directly closes that gap, with the
  * certificate still checked against the real hostname via SNI.
  */
+export async function systemCanResolve(hostname: string): Promise<boolean> {
+  try {
+    await new Promise<void>((resolve, reject) =>
+      systemLookup(hostname, err => (err ? reject(err) : resolve())))
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Resolve a hostname through public resolvers, for callers that need the address itself.
+ *
+ * Exported so the update path and the connect path ask the same question the same way.
+ * Deciding from the *shape of an error* does not survive changing runtime: Bun reports a
+ * DNS failure as ConnectionRefused with no cause, which is textually indistinguishable
+ * from a server refusing the connection. Asking the resolver directly cannot be broken
+ * by a runtime rewording its errors.
+ */
+export async function resolvePublicly(hostname: string): Promise<string[]> {
+  try {
+    return await resolveViaPublic(hostname)
+  } catch {
+    return []
+  }
+}
+
 export async function directDial(wsUrl: string): Promise<null | {
   url: string
   options: { servername: string; headers: Record<string, string> }
@@ -72,18 +99,9 @@ export async function directDial(wsUrl: string): Promise<null | {
   const url = new URL(wsUrl)
 
   // Only step in when the system resolver genuinely cannot answer.
-  try {
-    await new Promise<void>((resolve, reject) =>
-      systemLookup(url.hostname, err => (err ? reject(err) : resolve())))
-    return null
-  } catch {}
+  if (await systemCanResolve(url.hostname)) return null
 
-  let addresses: string[]
-  try {
-    addresses = await resolveViaPublic(url.hostname)
-  } catch {
-    return null
-  }
+  const addresses = await resolvePublicly(url.hostname)
   if (addresses.length === 0) return null
 
   const port = url.port || (url.protocol === 'wss:' ? '443' : '80')

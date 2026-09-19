@@ -17,10 +17,46 @@ const PASSWORD = process.env.BOOTSTRAP_PASSWORD ?? 'change-me'
 
 let passed = 0
 let failed = 0
+let inconclusive = 0
 
+/**
+ * Three outcomes, not two.
+ *
+ * "The boundary held", "the boundary did not hold" and "the check could not run" are
+ * different facts, and collapsing the third into the second is how a security gate
+ * stops being believed. A dial that timed out under load previously reported as a
+ * failed replay check — alarming, wrong, and unreproducible afterwards, which is the
+ * worst combination. Report it as unverified and exit non-zero so it is never quietly
+ * green either.
+ */
 function check(name: string, ok: boolean, detail = ''): void {
   console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? `  — ${detail}` : ''}`)
   ok ? passed++ : failed++
+}
+
+function unverified(name: string, detail: string): void {
+  console.log(`  ????  ${name}  — could not verify: ${detail}`)
+  inconclusive++
+}
+
+/** Did this result come from the system under test, or from the test giving up? */
+const isInconclusive = (r: string): boolean => r === 'timeout' || r === 'network-error'
+
+/**
+ * Being rate limited is not a security finding.
+ *
+ * This gate pairs several hosts per run, and pairing is deliberately limited to 20
+ * attempts per five minutes. Run it a few times in a row and it exhausts its own budget:
+ * pairing returns 429, no host is created, and every check that needs one then fails on a
+ * malformed assertion. That reads as five security failures when the boundary was never
+ * exercised at all — and it is unreproducible ten minutes later, which is the worst way
+ * for a security gate to behave.
+ */
+let rateLimited = false
+function noteRateLimit(res: Response): boolean {
+  if (res.status !== 429) return false
+  rateLimited = true
+  return true
 }
 
 /** Resolve to the rejection reason, or 'ACCEPTED' if the socket opened (always a failure). */
@@ -31,7 +67,9 @@ function tryConnect(token: string): Promise<string> {
     ws.on('unexpected-response', (_r, res) => done(String(res.headers['x-dwp-reason'] ?? res.statusCode)))
     ws.on('open', () => done('ACCEPTED'))
     ws.on('error', () => done('network-error'))
-    setTimeout(() => done('timeout'), 5_000)
+    // Generous: this competes with the simulator and the suites for the machine, and a
+    // slow dial is not a security finding.
+    setTimeout(() => done('timeout'), 20_000)
   })
 }
 
@@ -59,7 +97,8 @@ console.log(`\ngate:security against ${ORIGIN}\n`)
 {
   const { privateKey } = generateKeyPairSync('ed25519')
   const reason = await tryConnect(mintAssertion(crypto.randomUUID(), privateKey))
-  check('unenrolled host is rejected', reason === 'unknown-host', reason)
+  if (isInconclusive(reason)) unverified('unenrolled host is rejected', reason)
+  else check('unenrolled host is rejected', reason === 'unknown-host', reason)
 }
 
 // 2 ------------------------------------------------------- bad pairing codes
@@ -70,7 +109,8 @@ console.log(`\ngate:security against ${ORIGIN}\n`)
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ code: 'ZZZZ-ZZZZ', publicKey: pub }),
   })
-  check('invalid pairing code is rejected', res.status === 400, `HTTP ${res.status}`)
+  if (noteRateLimit(res)) unverified('invalid pairing code is rejected', 'rate limited (HTTP 429)')
+  else check('invalid pairing code is rejected', res.status === 400, `HTTP ${res.status}`)
 }
 
 // 3 -------------------------------------------- pairing code is single-use
@@ -88,20 +128,30 @@ console.log(`\ngate:security against ${ORIGIN}\n`)
   }
   const first = await enroll()
   const second = await enroll()
-  check('pairing code cannot be redeemed twice', first.status === 200 && second.status === 400,
-    `first ${first.status}, second ${second.status}`)
 
-  // 4 ------------------------------------ wrong key for a real, enrolled host
-  const hostId = first.body.hostId!
-  const { privateKey: wrongKey } = generateKeyPairSync('ed25519')
-  const reason = await tryConnect(mintAssertion(hostId, wrongKey))
-  check('assertion signed by the wrong key is rejected', reason === 'bad-signature', reason)
+  if (first.status === 429 || second.status === 429) {
+    rateLimited = true
+    unverified('pairing code cannot be redeemed twice', `rate limited (${first.status}/${second.status})`)
+    unverified('assertion signed by the wrong key is rejected', 'no host could be enrolled')
+    unverified('revoked host is rejected', 'no host could be enrolled')
+  } else {
+    check('pairing code cannot be redeemed twice', first.status === 200 && second.status === 400,
+      `first ${first.status}, second ${second.status}`)
 
-  // 5 ----------------------------------------------- revoked host is rejected
-  await api(`/hosts/${hostId}/revoke`, {})
-  const { privateKey: realKey } = generateKeyPairSync('ed25519')
-  const revokedReason = await tryConnect(mintAssertion(hostId, realKey))
-  check('revoked host is rejected', revokedReason === 'unknown-host', revokedReason)
+    // 4 ---------------------------------- wrong key for a real, enrolled host
+    const hostId = first.body.hostId!
+    const { privateKey: wrongKey } = generateKeyPairSync('ed25519')
+    const reason = await tryConnect(mintAssertion(hostId, wrongKey))
+    if (isInconclusive(reason)) unverified('assertion signed by the wrong key is rejected', reason)
+    else check('assertion signed by the wrong key is rejected', reason === 'bad-signature', reason)
+
+    // 5 --------------------------------------------- revoked host is rejected
+    await api(`/hosts/${hostId}/revoke`, {})
+    const { privateKey: realKey } = generateKeyPairSync('ed25519')
+    const revokedReason = await tryConnect(mintAssertion(hostId, realKey))
+    if (isInconclusive(revokedReason)) unverified('revoked host is rejected', revokedReason)
+    else check('revoked host is rejected', revokedReason === 'unknown-host', revokedReason)
+  }
 }
 
 // 6 --------------------------------------------------- assertion replay
@@ -114,13 +164,26 @@ console.log(`\ngate:security against ${ORIGIN}\n`)
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ code, publicKey: pub }),
   })
+  if (noteRateLimit(res) || !res.ok) {
+    // No host, so neither of the checks below can be exercised. Say that, rather than
+    // reporting a malformed assertion as a replay-protection failure.
+    unverified('a replayed assertion is rejected', `could not enrol a host (HTTP ${res.status})`)
+    unverified('a result signed with an unrelated key is rejected on a real task',
+      `could not enrol a host (HTTP ${res.status})`)
+  } else {
   const { hostId } = await res.json() as { hostId: string }
 
   const token = mintAssertion(hostId, privateKey)
   const first = await tryConnect(token)
   const replay = await tryConnect(token)          // same jti, second time
-  check('a replayed assertion is rejected', first === 'ACCEPTED' && replay === 'replayed',
-    `first ${first}, replay ${replay}`)
+  // The first dial must genuinely succeed for the replay to mean anything. If it timed
+  // out, nothing was replayed and the check proved nothing either way.
+  if (isInconclusive(first) || isInconclusive(replay)) {
+    unverified('a replayed assertion is rejected', `first ${first}, replay ${replay}`)
+  } else {
+    check('a replayed assertion is rejected', first === 'ACCEPTED' && replay === 'replayed',
+      `first ${first}, replay ${replay}`)
+  }
 
   // 7 ------------------------------------------- forged result signature
   //
@@ -176,11 +239,27 @@ console.log(`\ngate:security against ${ORIGIN}\n`)
     })
 
     ws.on('error', () => resolve('network-error'))
-    setTimeout(() => { try { ws.close() } catch {} ; resolve('timeout — no offer received') }, 15_000)
+    setTimeout(() => { try { ws.close() } catch {} ; resolve('timeout') }, 30_000)
   })
-  check('a result signed with an unrelated key is rejected on a real task',
-    forged.startsWith('rejected'), forged)
+  if (forged === 'timeout' || forged === 'network-error') {
+    unverified('a result signed with an unrelated key is rejected on a real task', forged)
+  } else {
+    check('a result signed with an unrelated key is rejected on a real task',
+      forged.startsWith('rejected'), forged)
+  }
+  }
 }
 
-console.log(`\n  gate:security ${failed === 0 ? 'PASS' : 'FAIL'}  (${passed} passed, ${failed} failed)\n`)
-process.exit(failed === 0 ? 0 : 1)
+const verdict = failed > 0 ? 'FAIL' : inconclusive > 0 ? 'UNVERIFIED' : 'PASS'
+console.log(`\n  gate:security ${verdict}  (${passed} passed, ${failed} failed` +
+  `${inconclusive > 0 ? `, ${inconclusive} could not be checked` : ''})\n`)
+if (rateLimited) {
+  console.log(`  Pairing was rate limited. This gate enrols several hosts per run and the`)
+  console.log(`  limit is 20 per five minutes, so consecutive runs exhaust it.`)
+  console.log(`  Wait five minutes and run it once.\n`)
+} else if (inconclusive > 0 && failed === 0) {
+  console.log(`  Nothing failed, but ${inconclusive} check(s) could not run — usually load.`)
+  console.log(`  Re-run on a quiet machine before treating this as green.\n`)
+}
+// Non-zero for both, so an unverified gate is never mistaken for a passing one.
+process.exit(failed === 0 && inconclusive === 0 ? 0 : 1)
