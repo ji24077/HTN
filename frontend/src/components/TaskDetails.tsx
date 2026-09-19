@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Task, ExecutionEvent } from "../api/types";
-import { ApiError, executionEvents } from "../api/client";
+import { ApiError, executionEvents, getTask } from "../api/client";
 import { record, taskTitle, time, workerName } from "../lib/format";
 import { statusLabels } from "../lib/jobs";
 import { JobSupervisor } from "./JobSupervisor";
@@ -56,6 +56,12 @@ export function TaskDetails({
   const ref = useRef<HTMLDialogElement>(null);
   const taskId = task?.spec.id;
   const [events, setEvents] = useState<ExecutionEvent[]>([]);
+  /**
+   * The same task re-read on its own, because listings no longer carry `result`.
+   * Falls back to the listing copy, so the dialog renders immediately and fills in
+   * the output when it arrives.
+   */
+  const [full, setFull] = useState<Task | null>(null);
   const [error, setError] = useState("");
   const [tab, setTab] = useState("Timeline");
   const [query, setQuery] = useState("");
@@ -75,6 +81,18 @@ export function TaskDetails({
     setSeverity("");
     setWorker("");
     cursorRef.current = { taskId, value: 0 };
+  }, [taskId]);
+  useEffect(() => {
+    setFull(null);
+    if (!taskId) return;
+    const controller = new AbortController();
+    getTask(taskId, controller.signal)
+      .then((one) => {
+        if (!controller.signal.aborted) setFull(one);
+      })
+      // A missing result is not worth an error banner; the panel simply stays empty.
+      .catch(() => {});
+    return () => controller.abort();
   }, [taskId]);
   useEffect(() => {
     if (!taskId) return;
@@ -551,23 +569,23 @@ export function TaskDetails({
                         ? "Execution result"
                         : "No successful result yet"}
                     </h3>
-                    {task.attestation && (
+                    {(full ?? task).attestation && (
                       <p className="verified">
                         <Icon name="check" size={16} />
                         Device signature verified when this result was accepted.
                       </p>
                     )}
-                    {task.result != null && (
+                    {(full ?? task).result != null && (
                       <pre>
-                        {typeof task.result === "string"
-                          ? task.result
-                          : JSON.stringify(task.result, null, 2)}
+                        {typeof (full ?? task).result === "string"
+                          ? ((full ?? task).result as string)
+                          : JSON.stringify((full ?? task).result, null, 2)}
                       </pre>
                     )}
                     <details>
                       <summary>Task configuration & metadata</summary>
                       <pre id="result-json">
-                        {JSON.stringify(task, null, 2)}
+                        {JSON.stringify(full ?? task, null, 2)}
                       </pre>
                     </details>
                   </div>

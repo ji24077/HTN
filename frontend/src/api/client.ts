@@ -307,6 +307,17 @@ export const submitTasks = (tasks: TaskSpec[]) =>
         : {}),
     }),
   });
+/**
+ * Read one task, including its result.
+ *
+ * Listings and the snapshot stream deliberately omit `result` and `attestation`: a
+ * walker result is tens of kilobytes, and the stream re-reads every task on each
+ * change notification, so carrying them there cost the server a pinned core. Anything
+ * that actually wants the output asks for that one task.
+ */
+export const getTask = (id: string, signal?: AbortSignal) =>
+  request<Task>(`/v1/tasks/${encodeURIComponent(id)}`, { signal });
+
 export const cancelTask = (id: string) =>
   request<Task>(`/v1/tasks/${encodeURIComponent(id)}/cancel`, {
     method: "POST",
