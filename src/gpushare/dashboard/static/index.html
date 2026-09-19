@@ -225,6 +225,11 @@
             <div><strong>직접 추론</strong><div class="hint">첫 토큰 시간과 전체 생성 시간을 함께 기록합니다.</div></div>
             <span id="chatModel" class="pill">모델 준비 안 됨</span>
           </div>
+          <div class="btnrow" style="padding:0 20px 10px">
+            <button id="chatBefore" class="btn secondary">추론 최적화 전으로</button>
+            <button id="chatAfter" class="btn blue">추론 최적화 에이전트</button>
+            <span id="chatOptState" class="hint">상태 확인 중…</span>
+          </div>
           <div id="messages" class="messages" aria-live="polite">
             <div class="message system">추론 서버가 준비되면 아래 입력창이 활성화됩니다. “모델이 load되지 않았다”는 오류 대신 준비 단계를 먼저 안내합니다.</div>
           </div>
@@ -785,6 +790,18 @@
     // run in the same press, which made it impossible to type a prompt, run
     // it, change the state, and run THE SAME prompt again — the whole point.
     let optimized = false, policyBuild = null, runNo = 0, ptokEst = null;
+    // Whether the server is holding the policy at all. The chat in Step 2 keys
+    // its prompt off this: with no document installed it must stay a plain
+    // sentence, or it would send an instruction about a policy that is not there.
+    let policyLoaded = false;
+
+    function paintChatState() {
+      const box = el('chatOptState');
+      if (!box) return;
+      box.textContent = !policyLoaded ? '정책 미로드 — 짧은 프롬프트로 동작합니다'
+        : optimized ? '최적화 후 — 정책 KV 재사용'
+                    : '최적화 전 — 매 요청 정책 전체를 다시 읽음';
+    }
 
     function paintState(note) {
       el('optState').innerHTML = optimized
@@ -799,12 +816,14 @@
     // the optimization already happened, and is how this was misread once.
     async function ensurePolicy() {
       const st = (await api('/api/models')).serving || {};
-      if (st.prefix_tokens) { policyBuild = st.prefix_build_s; ptokEst = st.prefix_tokens.toLocaleString(); return true; }
+      if (st.prefix_tokens) { policyBuild = st.prefix_build_s; ptokEst = st.prefix_tokens.toLocaleString();
+                              policyLoaded = true; paintChatState(); return true; }
       paintState('정책 문서를 올리는 중…');
       try {
         const r = await api('/api/prefix', {method:'POST', body: JSON.stringify({prefix: policyText()})});
         policyBuild = r.build_s;
         ptokEst = r.prefix_tokens.toLocaleString();
+        policyLoaded = true;
         el('policyStat').textContent = r.prefix_tokens.toLocaleString() + ' 토큰 · 한 번 계산에 ' + r.build_s.toFixed(2) + 's';
         return true;
       } catch (err) { paintState(esc(String(err.message || err))); return false; }
@@ -814,7 +833,7 @@
       if (!(await ensurePolicy())) return;
       optimized = false;
       el('agentDiag').innerHTML = '';
-      paintState('실행을 눌러 보세요.');
+      paintState('실행을 눌러 보세요.'); paintChatState();
     }
 
     async function setAfter() {
@@ -828,7 +847,7 @@
         + '병목은 반복되는 prefill이지 출력 생성이 아닙니다.'
         + (policyBuild ? ' 이 문서를 한 번 읽는 데 ' + policyBuild.toFixed(2) + '초가 걸렸고, 지금까지 매 요청 그 값을 냈습니다.' : '')
         + '<br>조치: 그 KV를 다시 계산하지 않고 재사용합니다.</div>';
-      paintState('같은 프롬프트를 다시 실행해 보세요.');
+      paintState('같은 프롬프트를 다시 실행해 보세요.'); paintChatState();
     }
 
     function addRow(state, ttft, total, tok, promptTokens, cache) {
@@ -912,7 +931,11 @@
     el('setBefore').addEventListener('click', setBefore);
     el('setAfter').addEventListener('click', setAfter);
     el('runOnce').addEventListener('click', runOnce);
-    paintState('');
+    // Same two actions, reachable from the chat so the comparison can be done
+    // without scrolling away from the box you are typing in.
+    el('chatBefore').addEventListener('click', setBefore);
+    el('chatAfter').addEventListener('click', setAfter);
+    paintState(''); paintChatState();
 
     function renderFlow() {
       const baselineReady = Boolean(appState && appState.experiment && appState.experiment.after);
@@ -1122,7 +1145,15 @@
       appendMessage('user', sentence); el('chatInput').value = '';
       const bubble = appendMessage('assistant typing', ''); el('sendBtn').disabled = true;
       try {
-        const res = await fetch('/api/generate/stream', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sentence:sentence,max_new_tokens:64})});
+        // With a policy installed the prompt is policy + this text. Sent bare it
+        // would be a document continuation, not an answer — which is how this
+        // panel once returned an invented "security_issues" array. The
+        // instruction and the assistant-turn marker are what make it a reply.
+        const wrapped = policyLoaded
+          ? VERDICT_INSTRUCTION + sentence + TURN_END
+          : sentence;
+        const res = await fetch('/api/generate/stream', {method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({sentence:wrapped, max_new_tokens:96, greedy:true, no_cache: policyLoaded && !optimized})});
         if (!res.ok || !res.body) throw new Error('stream HTTP ' + res.status);
         const reader = res.body.getReader(), decoder = new TextDecoder(); let buffer = '', raw = '';
         while (true) {
@@ -1139,7 +1170,9 @@
               else {
                 lastInteractive = data;
                 const timing = document.createElement('div'); timing.className = 'timing';
-                timing.innerHTML = '<span class="pill">첫 토큰 ' + secs(data.ttft_s,2) + '</span><span class="pill">전체 ' + secs(data.latency_s,2) + '</span><span class="pill">' + (data.parsed_ok ? 'JSON ✓' : 'JSON 실패') + '</span>';
+                timing.innerHTML = '<span class="pill">첫 토큰 ' + secs(data.ttft_s,2) + '</span>'
+                  + '<span class="pill">전체 ' + secs(data.latency_s,2) + '</span>'
+                  + '<span class="pill">입력 ' + (data.prompt_tokens || 0).toLocaleString() + ' · ' + (data.cache || 'off') + '</span>';
                 bubble.appendChild(timing);
               }
             }
