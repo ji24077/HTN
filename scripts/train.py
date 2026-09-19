@@ -14,9 +14,9 @@ grad_accum. "Optimize training speed" means the agent picks different values
 for these and the numbers move — if a lever weren't wired through to here, the
 agent would be deciding something that has no effect.
 
-Saves a Hugging Face full-model checkpoint or a PEFT adapter plus meta.json.
-An adapter requires the original base model; it is not a drop-in full-weight
-migration checkpoint. Optimizer state is not saved by this experiment runner.
+Saves an atomic HF/PEFT bundle with optimizer, sampler and RNG state. --resume
+continues the same job; --init-adapter intentionally starts a fresh optimizer.
+--steps is the final global step; --stop-after pauses at an absolute step.
 """
 
 from __future__ import annotations
@@ -29,12 +29,19 @@ import math
 import statistics
 import sys
 import time
+import uuid
 from pathlib import Path
 
 import torch
 
 from gpushare.agent.task import MODEL_ID, PROMPT, Record, build_example
 from gpushare.contracts import TrainStep, emit
+from gpushare.trainer.checkpoint import (
+    restore_training_bundle,
+    save_training_bundle,
+    tensor_fingerprint,
+    verify_training_bundle,
+)
 from gpushare.trainer.sft import (
     prepare_batch,
     standard_loss_sum,
@@ -85,6 +92,55 @@ class TrainingSampler:
     def unique_examples_seen(self) -> int:
         return int(self.seen.sum())
 
+    def state_dict(self) -> dict:
+        return {
+            "rows": self.rows,
+            "sampling": self.sampling,
+            "generator": self.generator.get_state().clone(),
+            "pending": self.pending.clone(),
+            "seen": self.seen.clone(),
+        }
+
+    def load_state_dict(self, state: dict) -> None:
+        if state.get("rows") != self.rows or state.get("sampling") != self.sampling:
+            raise ValueError("sampler rows or sampling mode mismatch")
+        pending, seen = state["pending"], state["seen"]
+        if pending.dtype != torch.long or pending.ndim != 1 or len(pending) > self.rows:
+            raise ValueError("invalid sampler pending indices")
+        if len(pending) and (
+            int(pending.min()) < 0
+            or int(pending.max()) >= self.rows
+            or len(pending.unique()) != len(pending)
+        ):
+            raise ValueError("invalid sampler pending indices")
+        if self.sampling == "replacement" and len(pending):
+            raise ValueError("replacement sampler cannot have pending indices")
+        if seen.dtype != torch.bool or tuple(seen.shape) != (self.rows,):
+            raise ValueError("invalid sampler coverage state")
+        generator = torch.Generator()
+        generator.set_state(state["generator"].cpu())
+        self.generator = generator
+        self.pending = pending.cpu().clone()
+        self.seen = seen.cpu().clone()
+
+
+TRAINING_SETTINGS = (
+    "seq_len",
+    "lr",
+    "method",
+    "lora_rank",
+    "gradient_checkpointing",
+    "loss",
+    "loss_chunk",
+    "trim_padding",
+    "seed",
+    "sampling",
+    "dtype",
+    "attention",
+    "micro_batch",
+    "grad_accum",
+)
+
 
 def validate_init_adapter(path: Path | None, *, method: str) -> dict | None:
     """Reject incompatible warm starts before loading weights or using the GPU."""
@@ -119,7 +175,11 @@ def configure_lora(model, *, rank: int, init_adapter: Path | None = None):
 
     if init_adapter is not None:
         return PeftModel.from_pretrained(
-            model, init_adapter, is_trainable=True, local_files_only=True
+            model,
+            init_adapter,
+            is_trainable=True,
+            local_files_only=True,
+            torch_device=str(next(model.parameters()).device),
         )
     return get_peft_model(
         model,
@@ -242,7 +302,15 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", type=Path, default=Path("data/train.jsonl"))
     ap.add_argument("--out", type=Path, default=Path("ckpt/run"))
-    ap.add_argument("--steps", type=int, default=500)
+    ap.add_argument("--steps", type=int, default=500, help="final global optimizer-step boundary")
+    ap.add_argument("--resume", type=Path, help="restore a complete training bundle")
+    ap.add_argument("--stop-after", type=int, help="pause at this absolute global step and save")
+    ap.add_argument(
+        "--checkpoint-every",
+        type=int,
+        default=0,
+        help="save intermediate bundles every K steps (zero disables)",
+    )
     ap.add_argument("--warmup-measure", type=int, default=10, help="steps dropped from timing")
     ap.add_argument("--seq-len", type=int, default=192)
     ap.add_argument("--lr", type=float, help="default: 1e-5 full, 2e-4 LoRA")
@@ -273,22 +341,54 @@ def main() -> None:
     ap.add_argument("--micro-batch", type=int, default=2)
     ap.add_argument("--grad-accum", type=int, default=8)
     ap.add_argument("--worker-id", default="w1")
-    ap.add_argument("--job-id", default="j1")
+    ap.add_argument("--job-id", help="stable training job ID, inherited on resume")
     ap.add_argument("--config-name", default="optimized")
     a = ap.parse_args()
+    supplied = {flag.split("=", 1)[0] for flag in sys.argv[1:] if flag.startswith("--")}
+    resume_manifest = None
+    if a.resume:
+        if a.init_adapter:
+            ap.error("--resume and --init-adapter are mutually exclusive")
+        try:
+            resume_manifest = verify_training_bundle(a.resume)
+        except ValueError as exc:
+            ap.error(str(exc))
+        for setting in TRAINING_SETTINGS:
+            flags = {"--" + setting.replace("_", "-"), "--no-" + setting.replace("_", "-")}
+            saved = resume_manifest["training_config"][setting]
+            if supplied & flags and getattr(a, setting) != saved:
+                ap.error(f"--resume requires the saved {setting} setting ({saved!r})")
+            setattr(a, setting, saved)
+        if a.job_id and a.job_id != resume_manifest["job_id"]:
+            ap.error("--resume must retain the saved job ID")
+        a.job_id = resume_manifest["job_id"]
+    else:
+        a.job_id = a.job_id or uuid.uuid4().hex
+    start_step = resume_manifest["global_step"] if resume_manifest else 0
+    stop_step = a.stop_after if a.stop_after is not None else a.steps
+    if not start_step < stop_step <= a.steps:
+        ap.error("require resumed step < stop-after <= steps")
+    if a.checkpoint_every < 0:
+        ap.error("checkpoint-every must be nonnegative")
+    if not a.save_model and (a.resume or a.stop_after is not None or a.checkpoint_every):
+        ap.error("resume, stop-after and checkpoint-every require model saving")
     if min(a.steps, a.micro_batch, a.grad_accum, a.seq_len, a.loss_chunk, a.lora_rank) < 1:
         ap.error("steps, batch sizes, sequence length, chunk size and rank must be positive")
-    if not 0 <= a.warmup_measure < a.steps:
-        ap.error("warmup-measure must be nonnegative and smaller than steps")
+    if not 0 <= a.warmup_measure < stop_step - start_step:
+        ap.error("warmup-measure must be nonnegative and smaller than steps in this segment")
     if a.lr is not None and a.lr <= 0:
         ap.error("learning rate must be positive")
     try:
         init_adapter_config = validate_init_adapter(a.init_adapter, method=a.method)
     except ValueError as exc:
         ap.error(str(exc))
-    if a.out.exists() and any(a.out.iterdir()):
+    if a.out.exists() and (not a.out.is_dir() or any(a.out.iterdir())):
         ap.error("output directory is not empty; choose a new run directory")
     a.lr = a.lr if a.lr is not None else (2e-4 if a.method == "lora" else 1e-5)
+    training_config = {setting: getattr(a, setting) for setting in TRAINING_SETTINGS}
+    data_sha256 = hashlib.sha256(a.data.read_bytes()).hexdigest()
+    if resume_manifest and data_sha256 != resume_manifest["fingerprints"]["data_sha256"]:
+        ap.error("checkpoint dataset fingerprint mismatch")
 
     if not torch.cuda.is_available():
         raise SystemExit("no GPU visible — run `make check` first")
@@ -299,22 +399,38 @@ def main() -> None:
     if a.dtype == "bf16" and not torch.cuda.is_bf16_supported():
         ap.error("this GPU does not support bf16; use fp16 or fp32")
 
-    tok = AutoTokenizer.from_pretrained(MODEL_ID)
+    tok = (
+        AutoTokenizer.from_pretrained(a.resume, local_files_only=True)
+        if a.resume
+        else AutoTokenizer.from_pretrained(MODEL_ID)
+    )
     if tok.pad_token_id is None:
         tok.pad_token = tok.eos_token
 
     ids, labels = encode(tok, load_rows(a.data), a.seq_len)
     log.info(f"  {len(ids)} examples, seq_len {a.seq_len}")
+    fingerprints = {
+        "model_id": MODEL_ID,
+        "data_sha256": data_sha256,
+        "encoded_sha256": tensor_fingerprint(ids, labels),
+        "prompt_sha256": hashlib.sha256(PROMPT.encode("utf-8")).hexdigest(),
+    }
+    if resume_manifest and fingerprints != resume_manifest["fingerprints"]:
+        ap.error("checkpoint dataset, tokenizer or prompt fingerprint mismatch")
 
     log.info(f"loading {MODEL_ID} ({a.dtype}, {a.attention}, {a.method})...")
     # GradScaler requires fp32 trainable parameters; autocast handles fp16 math.
     weight_dtype = torch.float32 if a.dtype == "fp16" else DTYPES[a.dtype]
+    model_ref = a.resume if a.resume and a.method == "full" else MODEL_ID
+    model_kwargs = {}
+    if resume_manifest and a.method == "lora" and resume_manifest.get("base_model_revision"):
+        model_kwargs["revision"] = resume_manifest["base_model_revision"]
     model = AutoModelForCausalLM.from_pretrained(
-        MODEL_ID, dtype=weight_dtype, attn_implementation=a.attention
+        model_ref, dtype=weight_dtype, attn_implementation=a.attention, **model_kwargs
     ).cuda()
     model.config.use_cache = False
     if a.method == "lora":
-        model = configure_lora(model, rank=a.lora_rank, init_adapter=a.init_adapter)
+        model = configure_lora(model, rank=a.lora_rank, init_adapter=a.resume or a.init_adapter)
         if a.init_adapter:
             log.info(f"  warm start from {a.init_adapter}: adapter weights only, fresh optimizer")
     if a.gradient_checkpointing:
@@ -330,6 +446,23 @@ def main() -> None:
 
     tokens_per_step = a.micro_batch * a.grad_accum * a.seq_len
     sampler = TrainingSampler(len(ids), seed=a.seed, sampling=a.sampling)
+    resumed_state = None
+    if a.resume:
+        try:
+            resumed_state = restore_training_bundle(
+                a.resume,
+                model,
+                opt,
+                sampler,
+                training_config=training_config,
+                fingerprints=fingerprints,
+                scaler=scaler,
+            )
+        except ValueError as exc:
+            ap.error(str(exc))
+        log.info(
+            f"  resumed job {a.job_id} at global step {start_step}: {resumed_state['rng_restore']}"
+        )
     torch.cuda.reset_peak_memory_stats()
     times: list[float] = []
     answer_counts: list[int] = []
@@ -337,8 +470,10 @@ def main() -> None:
     processed_counts: list[int] = []
     loss_history: list[float] = []
 
-    log.info(f"training {a.steps} steps, {tokens_per_step:,} nominal token positions/step")
-    for step in range(a.steps):
+    log.info(
+        f"training steps {start_step} through {stop_step}, {tokens_per_step:,} nominal token positions/step"
+    )
+    for step in range(start_step, stop_step):
         torch.cuda.synchronize()
         t0 = time.perf_counter()
 
@@ -385,8 +520,23 @@ def main() -> None:
                 worker_id=a.worker_id, step=step, loss=total, step_time_s=dt, tokens=input_count
             )
         )
-        if step % 25 == 0 or step == a.steps - 1:
+        if step % 25 == 0 or step == stop_step - 1:
             log.info(f"  step {step:>4}  loss {total:.4f}  {dt:.3f}s")
+        if a.checkpoint_every and (step + 1) % a.checkpoint_every == 0 and step + 1 < stop_step:
+            intermediate = a.out.with_name(a.out.name + ".checkpoints") / f"step-{step + 1:08d}"
+            save_training_bundle(
+                intermediate,
+                model,
+                opt,
+                sampler,
+                global_step=step + 1,
+                job_id=a.job_id,
+                training_config=training_config,
+                fingerprints=fingerprints,
+                tokenizer=tok,
+                scaler=scaler,
+            )
+            log.info(f"  checkpoint saved at step {step + 1}: {intermediate}")
 
     # Median with warmup dropped — the same protocol the cost model is fitted
     # against. A mean here would let one slow step move the calibration.
@@ -401,14 +551,14 @@ def main() -> None:
         warmup_measure=a.warmup_measure,
     )
 
-    a.out.mkdir(parents=True, exist_ok=True)
-    if a.save_model:
-        # HF handles tied embedding weights; PEFT saves only trainable adapters.
-        model.save_pretrained(a.out, safe_serialization=True)
-        tok.save_pretrained(a.out)
     meta = {
         "model_id": MODEL_ID,
-        "steps": a.steps,
+        "steps": stop_step,
+        "planned_steps": a.steps,
+        "start_step": start_step,
+        "segment_steps": stop_step - start_step,
+        "job_id": a.job_id,
+        "paused": stop_step < a.steps,
         "config_name": a.config_name,
         "dtype": a.dtype,
         "attention": a.attention,
@@ -427,18 +577,24 @@ def main() -> None:
         "trim_padding": a.trim_padding,
         "seed": a.seed,
         "sampling": a.sampling,
-        "examples_drawn": a.steps * a.micro_batch * a.grad_accum,
+        "examples_drawn": stop_step * a.micro_batch * a.grad_accum,
         "unique_examples_seen": sampler.unique_examples_seen,
         "dataset_coverage": sampler.unique_examples_seen / len(ids),
         "init_adapter": a.init_adapter.as_posix() if a.init_adapter else None,
-        "initialization": "adapter_weights_only" if a.init_adapter else "base_model",
-        "optimizer_initialized_from_checkpoint": False,
+        "initialization": "full_training_resume"
+        if a.resume
+        else "adapter_weights_only"
+        if a.init_adapter
+        else "base_model",
+        "optimizer_initialized_from_checkpoint": bool(a.resume),
+        "resume_from": a.resume.as_posix() if a.resume else None,
+        "rng_restore": resumed_state["rng_restore"] if resumed_state else None,
         "lr": a.lr,
         "lora_rank": model.peft_config["default"].r if a.method == "lora" else None,
         "init_adapter_config": init_adapter_config,
         "trainable_parameters": sum(p.numel() for p in trainable),
         "total_parameters": sum(p.numel() for p in model.parameters()),
-        "data_sha256": hashlib.sha256(a.data.read_bytes()).hexdigest(),
+        "data_sha256": data_sha256,
         "data_rows": len(ids),
         "warmup_measure": a.warmup_measure,
         "step_times_s": times,
@@ -447,7 +603,23 @@ def main() -> None:
         "checkpoint_saved": a.save_model,
         "torch_version": torch.__version__,
     }
-    (a.out / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    if a.save_model:
+        save_training_bundle(
+            a.out,
+            model,
+            opt,
+            sampler,
+            global_step=stop_step,
+            job_id=a.job_id,
+            training_config=training_config,
+            fingerprints=fingerprints,
+            tokenizer=tok,
+            scaler=scaler,
+            metadata=meta,
+        )
+    else:
+        a.out.mkdir(parents=True, exist_ok=True)
+        (a.out / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
     log.info(
         f"\n{a.config_name}: {t_step:.4f}s/step  "

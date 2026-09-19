@@ -421,6 +421,11 @@ class GenerateRequest(BaseModel):
 class MigrationRequest(BaseModel):
     source_pod_id: str
     target_pod_id: str
+    total_steps: int = Field(default=8, ge=2, le=10000)
+    stop_after: int = Field(default=4, ge=1, le=9999)
+    eval_n: int = Field(default=50, ge=1, le=2000)
+    initial_adapter: str | None = None
+    prepare_pods: bool = True
 
 
 def build_app():
@@ -567,6 +572,11 @@ def build_app():
                 kind=name,
                 source_pod_id=req.source_pod_id,
                 target_pod_id=req.target_pod_id,
+                total_steps=req.total_steps,
+                stop_after=req.stop_after,
+                eval_n=req.eval_n,
+                initial_adapter=req.initial_adapter,
+                prepare_pods=req.prepare_pods,
             ).public()
         except JobError as e:
             raise HTTPException(400, str(e)) from e

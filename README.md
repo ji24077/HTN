@@ -135,6 +135,10 @@ The daemon skips unparseable lines rather than crashing — one stray warning sh
 
 ## Commands
 
+For the checkpointed NVIDIA-to-AMD experiment, see the
+[migration runbook](docs/nvidia-amd-migration.md). It covers the approved rental,
+SSH setup, preserved training state, prediction gates, and cleanup limits.
+
 ```bash
 make check        # what is this machine? run first, on every box
 make server       # the hub

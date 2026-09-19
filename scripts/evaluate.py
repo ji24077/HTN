@@ -48,17 +48,43 @@ log = logging.getLogger("eval")
 MAX_NEW = 128  # accented names and long titles need more room than the original 64
 
 
+def _bundle_manifest(path: str) -> dict | None:
+    if not (Path(path) / "training-manifest.json").is_file():
+        return None
+    from gpushare.trainer.checkpoint import verify_training_bundle
+
+    return verify_training_bundle(path)
+
+
+def load_tokenizer(path: str, *, padding_side: str = "left"):
+    """Portable bundles use their verified saved tokenizer, never current main."""
+    from transformers import AutoTokenizer
+
+    bundle = _bundle_manifest(path)
+    local = Path(path)
+    if bundle is not None or (local / "tokenizer_config.json").is_file():
+        return AutoTokenizer.from_pretrained(path, padding_side=padding_side, local_files_only=True)
+    return AutoTokenizer.from_pretrained(MODEL_ID, padding_side=padding_side)
+
+
 def load_model(path: str, dtype: torch.dtype, *, fuse_adapter: bool = False):
     """A HF id, or a directory holding model.safetensors from scripts/train.py."""
     from transformers import AutoModelForCausalLM
 
     p = Path(path)
+    bundle = _bundle_manifest(path)
     if (p / "adapter_config.json").exists():
         from peft import PeftConfig, PeftModel
 
-        cfg = PeftConfig.from_pretrained(path)
-        base = AutoModelForCausalLM.from_pretrained(cfg.base_model_name_or_path, dtype=dtype)
-        adapted = PeftModel.from_pretrained(base, path)
+        cfg = PeftConfig.from_pretrained(path, local_files_only=True)
+        kwargs = {"dtype": dtype}
+        if bundle is not None:
+            revision = bundle.get("base_model_revision")
+            if not revision:
+                raise ValueError("portable LoRA bundle must identify its base model revision")
+            kwargs["revision"] = revision
+        base = AutoModelForCausalLM.from_pretrained(cfg.base_model_name_or_path, **kwargs)
+        adapted = PeftModel.from_pretrained(base, path, local_files_only=True)
         return adapted.merge_and_unload(safe_merge=True) if fuse_adapter else adapted
     if fuse_adapter:
         raise ValueError("--fuse-adapter requires a saved PEFT adapter directory")
@@ -254,9 +280,7 @@ def main() -> None:
     if not torch.cuda.is_available():
         raise SystemExit("no GPU visible — run `make check` first")
 
-    from transformers import AutoTokenizer
-
-    tok = AutoTokenizer.from_pretrained(MODEL_ID, padding_side="left")
+    tok = load_tokenizer(a.model, padding_side="left")
     if tok.pad_token_id is None:
         tok.pad_token = tok.eos_token
 

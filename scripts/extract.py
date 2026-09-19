@@ -8,11 +8,10 @@ import sys
 from dataclasses import asdict
 
 import torch
-from evaluate import load_model
-from transformers import AutoTokenizer
+from evaluate import load_model, load_tokenizer
 
 from gpushare.agent.grounding import check_grounding
-from gpushare.agent.task import MODEL_ID, PROMPT, parse_output
+from gpushare.agent.task import PROMPT, parse_output
 
 
 def main():
@@ -40,7 +39,7 @@ def main():
         parser.error("supply nonempty text and a positive generation limit")
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = torch.bfloat16 if device == "cuda" and torch.cuda.is_bf16_supported() else torch.float32
-    tok = AutoTokenizer.from_pretrained(MODEL_ID)
+    tok = load_tokenizer(args.model)
     if tok.pad_token_id is None:
         tok.pad_token = tok.eos_token
     model = load_model(args.model, dtype, fuse_adapter=args.fuse_adapter).to(device).eval()

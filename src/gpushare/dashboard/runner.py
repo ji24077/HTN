@@ -19,6 +19,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import tarfile
 import tempfile
 import threading
 import time
@@ -134,7 +135,7 @@ class JobManager:
     def _load(self) -> None:
         for path in JOB_ROOT.glob("*.json"):
             try:
-                raw = json.loads(path.read_text())
+                raw = json.loads(path.read_text(encoding="utf-8"))
                 raw.pop("_process", None)
                 job = Job(**raw)
                 if job.status in {"queued", "running", "cancelling"}:
@@ -148,7 +149,7 @@ class JobManager:
     def _persist(self, job: Job) -> None:
         path = JOB_ROOT / f"{job.id}.json"
         tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(job.public(), indent=2, ensure_ascii=False))
+        tmp.write_text(json.dumps(job.public(), indent=2, ensure_ascii=False), encoding="utf-8")
         tmp.replace(path)
 
     def create(
@@ -220,7 +221,7 @@ class JobManager:
             self._persist(job)
         if proc and proc.poll() is None:
             try:
-                os.killpg(proc.pid, signal.SIGTERM)
+                _terminate_local_process(proc)
             except ProcessLookupError:
                 pass
         return job
@@ -257,6 +258,13 @@ def _project_env() -> dict[str, str]:
     return env
 
 
+def _terminate_local_process(proc) -> None:
+    if os.name == "nt":
+        proc.terminate()
+    else:
+        os.killpg(proc.pid, signal.SIGTERM)
+
+
 def _run(
     job: Job,
     args: list[str],
@@ -273,8 +281,10 @@ def _run(
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         bufsize=1,
-        start_new_session=True,
+        start_new_session=os.name != "nt",
     )
     with JOBS._lock:
         job._process = proc
@@ -283,7 +293,7 @@ def _run(
         JOBS.log(job, line)
         if job.cancel_requested:
             try:
-                os.killpg(proc.pid, signal.SIGTERM)
+                _terminate_local_process(proc)
             except ProcessLookupError:
                 pass
             break
@@ -304,6 +314,8 @@ def _capture(args: list[str], *, timeout: int = 30) -> str:
             cwd=ROOT,
             env=_project_env(),
             text=True,
+            encoding="utf-8",
+            errors="replace",
             capture_output=True,
             timeout=timeout,
             check=False,
@@ -385,7 +397,7 @@ def _ssh_info(pod_id: str) -> dict[str, Any]:
     raw = json.loads(_capture([_runpodctl(), "ssh", "info", pod_id, "-o", "json"]))
     ip = str(raw.get("ip", ""))
     port = int(raw.get("port", 0))
-    key = Path((raw.get("ssh_key") or {}).get("path", ""))
+    key = Path(_project_env().get("GPUSHARE_SSH_KEY") or (raw.get("ssh_key") or {}).get("path", ""))
     if not ip or not 1 <= port <= 65535 or not key.is_file():
         raise JobError(f"pod {pod_id} has no usable SSH endpoint")
     return {"ip": ip, "port": port, "key": str(key)}
@@ -402,9 +414,23 @@ def _ssh_args(info: dict[str, Any], remote_command: str) -> list[str]:
         "BatchMode=yes",
         "-o",
         "StrictHostKeyChecking=accept-new",
+        "-o",
+        f"UserKnownHostsFile={_known_hosts_path()}",
+        "-o",
+        "ConnectTimeout=20",
+        "-o",
+        "ServerAliveInterval=15",
+        "-o",
+        "ServerAliveCountMax=2",
         f"root@{info['ip']}",
         remote_command,
     ]
+
+
+def _known_hosts_path() -> str:
+    path = Path(_project_env().get("GPUSHARE_SSH_KNOWN_HOSTS") or STATE_ROOT / "known_hosts")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return str(path.resolve())
 
 
 def _remote(job: Job, info: dict[str, Any], argv: list[str], *, allow_failure: bool = False) -> int:
@@ -425,6 +451,8 @@ def _rsync_transport(info: dict[str, Any]) -> str:
             "BatchMode=yes",
             "-o",
             "StrictHostKeyChecking=accept-new",
+            "-o",
+            f"UserKnownHostsFile={_known_hosts_path()}",
         ]
     )
 
@@ -432,13 +460,48 @@ def _rsync_transport(info: dict[str, Any]) -> str:
 def _sync_project(job: Job, info: dict[str, Any]) -> None:
     # Create only our dedicated directory; never sync --delete into /workspace.
     _run(job, _ssh_args(info, f"mkdir -p {shlex.quote(REMOTE_ROOT)}"))
+    if not shutil.which("rsync") or os.name == "nt":
+        with tempfile.TemporaryDirectory(prefix="gpushare-project-") as tmp:
+            archive = Path(tmp) / "project.tar.gz"
+            with tarfile.open(archive, "w:gz") as tar:
+                for top in (
+                    "src",
+                    "scripts",
+                    "data",
+                    "pyproject.toml",
+                    "uv.lock",
+                    ".python-version",
+                ):
+                    path = ROOT / top
+                    paths = path.rglob("*") if path.is_dir() else [path]
+                    for item in paths:
+                        relative = item.relative_to(ROOT)
+                        if (
+                            not item.is_file()
+                            or item.is_symlink()
+                            or "__pycache__" in relative.parts
+                            or item.suffix in {".pyc", ".safetensors"}
+                            or item.name.startswith(".env")
+                        ):
+                            continue
+                        tar.add(item, arcname=relative.as_posix(), recursive=False)
+            remote_archive = f"/tmp/gpushare-project-{uuid.uuid4().hex}.tar.gz"
+            _run(job, _scp_args(info, str(archive), _scp_remote(info, remote_archive)))
+            command = (
+                f"tar -xzf {shlex.quote(remote_archive)} -C {shlex.quote(REMOTE_ROOT)}"
+                f" && rm -f {shlex.quote(remote_archive)}"
+            )
+            _run(job, _ssh_args(info, command))
+        return
     args = [
         "rsync",
         "-az",
         "--exclude=.git",
         "--exclude=.venv",
         "--exclude=.env",
+        "--exclude=.env*",
         "--exclude=.gpushare",
+        "--exclude=.cache",
         "--exclude=ckpt",
         "--exclude=eval",
         "--exclude=__pycache__",
@@ -461,6 +524,38 @@ def _setup_pod(job: Job, info: dict[str, Any], vendor: str) -> None:
     _run(job, _ssh_args(info, bootstrap))
 
 
+def _setup_migration_pod(job: Job, info: dict[str, Any], vendor: str) -> None:
+    """Isolated matched versions; never resolve the regular CUDA/ROCm lock."""
+    wheel = "rocm7.1" if vendor == "amd" else "cu128"
+    commands = [
+        ["python3", "-m", "venv", ".migration-venv"],
+        [
+            ".migration-venv/bin/python",
+            "-m",
+            "pip",
+            "install",
+            "torch==2.10.0",
+            "--index-url",
+            f"https://download.pytorch.org/whl/{wheel}",
+        ],
+        [
+            ".migration-venv/bin/python",
+            "-m",
+            "pip",
+            "install",
+            "transformers==5.17.0",
+            "peft==0.21.0",
+            "safetensors",
+            "numpy",
+            "pydantic>=2.9",
+            "pydantic-settings>=2.6",
+        ],
+        [".migration-venv/bin/python", "-m", "pip", "install", "--no-deps", "-e", "."],
+    ]
+    for argv in commands:
+        _remote(job, info, argv)
+
+
 def _pull(
     job: Job,
     info: dict[str, Any],
@@ -470,6 +565,17 @@ def _pull(
     exclude_weights: bool = False,
 ) -> None:
     local.mkdir(parents=True, exist_ok=True)
+    if not shutil.which("rsync") or os.name == "nt":
+        remote_archive = f"/tmp/gpushare-transfer-{uuid.uuid4().hex}.tar.gz"
+        exclude = " --exclude='*.safetensors'" if exclude_weights else ""
+        command = f"tar -czf {shlex.quote(remote_archive)}{exclude} -C {shlex.quote(remote)} ."
+        _run(job, _ssh_args(info, command))
+        with tempfile.TemporaryDirectory(prefix="gpushare-download-") as tmp:
+            archive = Path(tmp) / "download.tar.gz"
+            _run(job, _scp_args(info, _scp_remote(info, remote_archive), str(archive)))
+            _extract_transfer_archive(archive, local)
+        _run(job, _ssh_args(info, f"rm -f {shlex.quote(remote_archive)}"))
+        return
     excludes = ["--exclude=*.safetensors"] if exclude_weights else []
     _run(
         job,
@@ -487,14 +593,87 @@ def _pull(
 
 def _push(job: Job, info: dict[str, Any], local: Path, remote: str) -> None:
     _run(job, _ssh_args(info, f"mkdir -p {shlex.quote(remote)}"))
+    if not shutil.which("rsync") or os.name == "nt":
+        if local.is_file():
+            _run(job, _scp_args(info, str(local), _scp_remote(info, remote.rstrip("/") + "/")))
+            return
+        with tempfile.TemporaryDirectory(prefix="gpushare-upload-") as tmp:
+            archive = Path(tmp) / "upload.tar.gz"
+            with tarfile.open(archive, "w:gz") as tar:
+                for path in sorted(local.rglob("*")):
+                    if path.is_symlink():
+                        raise JobError("checkpoint transfer cannot contain symbolic links")
+                    if path.is_file():
+                        tar.add(path, arcname=path.relative_to(local).as_posix(), recursive=False)
+            remote_archive = f"/tmp/gpushare-transfer-{uuid.uuid4().hex}.tar.gz"
+            _run(job, _scp_args(info, str(archive), _scp_remote(info, remote_archive)))
+            _run(
+                job,
+                _ssh_args(
+                    info,
+                    f"tar -xzf {shlex.quote(remote_archive)} -C {shlex.quote(remote)}"
+                    f" && rm -f {shlex.quote(remote_archive)}",
+                ),
+            )
+        return
     src = f"{local}/" if local.is_dir() else str(local)
     dst = f"root@{info['ip']}:{remote.rstrip('/')}/"
     _run(job, ["rsync", "-az", "-e", _rsync_transport(info), src, dst])
 
 
+def _scp_args(info: dict[str, Any], source: str, target: str) -> list[str]:
+    # Native OpenSSH accepts argument arrays on Windows; no local shell/rsync.
+    return [
+        "scp",
+        "-i",
+        info["key"],
+        "-P",
+        str(info["port"]),
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "StrictHostKeyChecking=accept-new",
+        "-o",
+        f"UserKnownHostsFile={_known_hosts_path()}",
+        "-o",
+        "ConnectTimeout=20",
+        source,
+        target,
+    ]
+
+
+def _scp_remote(info: dict[str, Any], path: str) -> str:
+    # Transfer paths are generated internally and intentionally have no spaces
+    # or shell metacharacters; this also works with legacy SCP implementations.
+    if not re.fullmatch(r"/[A-Za-z0-9_./-]+", path):
+        raise JobError("remote transfer path must be an absolute simple POSIX path")
+    return f"root@{info['ip']}:{path}"
+
+
+def _extract_transfer_archive(archive: Path, local: Path) -> None:
+    root = local.resolve()
+    with tarfile.open(archive, "r:gz") as tar:
+        members = tar.getmembers()
+        for member in members:
+            target = (root / member.name).resolve()
+            if not target.is_relative_to(root) or not (member.isdir() or member.isfile()):
+                raise JobError("unsafe path or link in checkpoint transfer archive")
+        for member in members:
+            target = root / member.name
+            if member.isdir():
+                target.mkdir(parents=True, exist_ok=True)
+            else:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                stream = tar.extractfile(member)
+                if stream is None:
+                    raise JobError("unreadable file in checkpoint transfer archive")
+                with stream, target.open("wb") as output:
+                    shutil.copyfileobj(stream, output)
+
+
 def _json(path: Path) -> dict[str, Any]:
     try:
-        return json.loads(path.read_text())
+        return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise JobError(f"missing or invalid result: {path}") from exc
 
@@ -502,12 +681,16 @@ def _json(path: Path) -> dict[str, Any]:
 def _quality(before: dict[str, Any], after: dict[str, Any], tol: float = 0.02) -> dict[str, Any]:
     dp = after["json_parse_rate"] - before["json_parse_rate"]
     de = after["exact_match_rate"] - before["exact_match_rate"]
-    ok = dp >= -tol and de >= -tol
+    before_fields = before.get("field_accuracy", {})
+    after_fields = after.get("field_accuracy", {})
+    field_deltas = {key: after_fields.get(key, 0.0) - value for key, value in before_fields.items()}
+    ok = dp >= -tol and de >= -tol and all(delta >= -tol for delta in field_deltas.values())
     return {
         "status": "ok" if ok else "regressed",
         "tolerance": tol,
         "delta_parse": dp,
         "delta_exact": de,
+        "delta_fields": field_deltas,
         "detail": "model quality preserved" if ok else "model quality regressed",
     }
 
@@ -515,13 +698,13 @@ def _quality(before: dict[str, Any], after: dict[str, Any], tol: float = 0.02) -
 def _write_latest(value: dict[str, Any]) -> None:
     STATE_ROOT.mkdir(parents=True, exist_ok=True)
     tmp = LATEST_PATH.with_suffix(".tmp")
-    tmp.write_text(json.dumps(value, indent=2))
+    tmp.write_text(json.dumps(value, indent=2), encoding="utf-8")
     tmp.replace(LATEST_PATH)
 
 
 def latest_run() -> dict[str, Any] | None:
     try:
-        return json.loads(LATEST_PATH.read_text())
+        return json.loads(LATEST_PATH.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
 
@@ -936,16 +1119,48 @@ def start_inference_optimization(*, pod_id: str) -> Job:
     return JOBS.create("optimize-inference-speed", {"pod_id": pod_id}, work)
 
 
-def start_migration(*, kind: str, source_pod_id: str, target_pod_id: str) -> Job:
-    if kind not in {"migrate-amd-nvidia", "migrate-nextgen"}:
+def start_migration(
+    *,
+    kind: str,
+    source_pod_id: str,
+    target_pod_id: str,
+    total_steps: int = 8,
+    stop_after: int = 4,
+    eval_n: int = 50,
+    initial_adapter: str | None = None,
+    prepare_pods: bool = True,
+) -> Job:
+    if kind not in {"migrate-amd-nvidia", "migrate-nextgen", "migrate-nvidia-amd"}:
         raise JobError("unknown migration kind")
     if source_pod_id == target_pod_id:
         raise JobError("source and target pods must be different")
 
     params = {"source_pod_id": source_pod_id, "target_pod_id": target_pod_id}
+    if kind == "migrate-nvidia-amd":
+        if not 0 < stop_after < total_steps <= 10000 or not 1 <= eval_n <= 2000:
+            raise JobError("invalid bounded migration step/evaluation counts")
+        params.update(total_steps=total_steps, stop_after=stop_after, eval_n=eval_n)
 
     def work(job: Job) -> dict[str, Any]:
         source, target = _pod(source_pod_id), _pod(target_pod_id)
+        if kind == "migrate-nvidia-amd":
+            from gpushare.dashboard.migration import run_resume_migration
+
+            adapter = (ROOT / initial_adapter).resolve() if initial_adapter else None
+            if adapter is not None and not adapter.is_relative_to(ROOT.resolve()):
+                raise JobError("initial adapter must be inside the project")
+            return run_resume_migration(
+                job,
+                source=source,
+                target=target,
+                src_info=_ssh_info(source_pod_id),
+                dst_info=_ssh_info(target_pod_id),
+                total_steps=total_steps,
+                stop_after=stop_after,
+                eval_n=eval_n,
+                initial_adapter=adapter,
+                prepare_pods=prepare_pods,
+            )
         if kind == "migrate-amd-nvidia" and not (
             source["vendor"] == "amd" and target["vendor"] == "nvidia"
         ):
@@ -967,8 +1182,15 @@ def start_migration(*, kind: str, source_pod_id: str, target_pod_id: str) -> Job
             transfer = Path(tmp) / "ckpt"
             JOBS.update(job, "saving and downloading safetensors", 15)
             _pull(job, src_info, checkpoint["remote_checkpoint"], transfer)
-            if not (transfer / "model.safetensors").exists():
-                raise JobError("source checkpoint has no model.safetensors")
+            if not any(
+                (transfer / name).is_file()
+                for name in (
+                    "model.safetensors",
+                    "model.safetensors.index.json",
+                    "adapter_model.safetensors",
+                )
+            ):
+                raise JobError("source checkpoint has no model or adapter safetensors")
 
             JOBS.update(job, "preparing target pod", 35)
             _sync_project(job, dst_info)
@@ -1002,6 +1224,8 @@ def start_migration(*, kind: str, source_pod_id: str, target_pod_id: str) -> Job
         _pull(job, dst_info, target_eval, local / "eval")
         after = _json(local / "eval" / result_name)
         validation = _quality(baseline, after)
+        if validation["status"] != "ok":
+            raise JobError("weights-only migration failed the quality gate; latest run unchanged")
         _write_latest(
             {
                 "job_id": job.id,
@@ -1010,9 +1234,12 @@ def start_migration(*, kind: str, source_pod_id: str, target_pod_id: str) -> Job
                 "local_dir": str(local),
                 "remote_checkpoint": target_ckpt,
                 "migrated_from": source_pod_id,
+                "migration_mode": "weights_only",
             }
         )
         return {
+            "migration_mode": "weights_only",
+            "training_resumed": False,
             "source": source,
             "target": target,
             "before": baseline,
