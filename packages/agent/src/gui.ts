@@ -162,6 +162,12 @@ function openWindow(url: string): void {
   child.unref()
 }
 
+/** Minimal escaping for the few values the 404 above interpolates. */
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+}
+
 // ----------------------------------------------------------------- the page
 
 /**
@@ -816,6 +822,42 @@ export async function runGui(opts: GuiOptions): Promise<void> {
     const supplied = Buffer.from(given ?? '')
     const authorised = supplied.length === tokenBuf.length && timingSafeEqual(supplied, tokenBuf)
     if (!authorised) {
+      /**
+       * A bare 404 here is a dead end, and it is reached by the ordinary route.
+       *
+       * Two agents on one machine is normal — a desktop install and a container, say —
+       * and they hold different tokens on different ports. Opening the right token
+       * against the wrong port then produces a blank "not found" that says nothing about
+       * which of the two things is wrong, and the answer is invisible from the browser.
+       * A container makes this the common case, because it prints its *internal* port.
+       *
+       * Only for a request that wants HTML, i.e. someone looking at it. Machine callers
+       * keep the opaque JSON. This reveals nothing a TCP connect did not already: that
+       * something is listening. It does not say whether the token was close.
+       */
+      if (req.method === 'GET' && (req.headers.accept ?? '').includes('text/html')) {
+        res.writeHead(404, {
+          'content-type': 'text/html; charset=utf-8',
+          'cache-control': 'no-store',
+          'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'",
+          'referrer-policy': 'no-referrer',
+        })
+        res.end('<!doctype html><meta charset="utf-8">'
+          + '<style>body{font:16px/1.6 system-ui;max-width:34rem;margin:15vh auto;padding:0 1.5rem;'
+          + 'color:#14181f;background:#f6f7f9}code{background:#e3e6eb;padding:.1em .3em;border-radius:3px}'
+          + '@media(prefers-color-scheme:dark){body{color:#eef1f5;background:#14181f}'
+          + 'code{background:#2b323d}}</style>'
+          + '<h2>Wrong address for this agent</h2>'
+          + '<p>A DWP agent is listening here, but not on this path. Every agent has its own '
+          + 'single-use address, and more than one can run on a machine — a desktop install '
+          + 'and a container, for instance, on different ports.</p>'
+          + '<p>Ask the one you want for its address:</p>'
+          + '<p><code>docker logs dwp-agent | grep Window</code><br>'
+          + '<code>' + escapeHtml(invocation()) + ' gui-address</code></p>'
+          + '<p>If that prints a port you did not publish, it is the container’s own. '
+          + 'Use the host port from your <code>-p</code> flag and keep the token unchanged.</p>')
+        return
+      }
       send(res, 404, { error: 'not found' })
       return
     }

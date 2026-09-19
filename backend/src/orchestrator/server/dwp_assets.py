@@ -183,6 +183,10 @@ async def join(request: Request):
         if links
         else "<p>No desktop binaries have been published yet. Run the worker from the repository with Node 24 and pnpm.</p>"
     )
+    # Whether to offer the button that mints a code, for a reader who arrived at /join
+    # with nothing in the address bar. Off, the page keeps its old behaviour exactly:
+    # a placeholder, and a reader who has to go and ask someone for a real invite.
+    self_serve = "true" if request.app.state.config.self_serve_join else "false"
     return HTMLResponse(
         '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width">'
         "<title>Connect a device · Dispatch</title><style>body{font:17px/1.6 system-ui;max-width:680px;margin:64px auto;padding:24px;color:#242621;background:#f7f7f2}code{word-break:break-all}a{color:inherit}</style>"
@@ -194,8 +198,19 @@ async def join(request: Request):
         # it never enters this HTML, a proxy cache, or a server log.
         + "<h2>Run it in Docker (recommended)</h2>"
         + "<p>One command, the same on macOS, Windows and Linux. Nothing is compiled and no port needs opening \u2014 this machine dials out.</p>"
+        # Minting is a step 1 that only some readers need, so it is a block that removes
+        # itself rather than a section they have to know to skip. Someone who followed an
+        # invite link already has a code and never sees this; someone who opened /join
+        # cold sees it and nothing else until they have one.
+        + '<div id="mintbox" hidden>'
+        + '<p><label for="label">Name this machine</label><br>'
+        + '<input id="label" type="text" maxlength="40" placeholder="ethans-laptop" autocomplete="off" spellcheck="false" style="font:inherit;padding:8px 10px;border-radius:8px;border:1px solid #c9c9bf;width:16em"></p>'
+        + '<p><button id="mint" style="font:inherit;padding:10px 18px;border-radius:8px;border:1px solid #242621;background:#242621;color:#fff;cursor:pointer">Get my invite</button> <span id="mintnote"></span></p>'
+        + "</div>"
+        + '<div id="cmdbox" hidden>'
         + '<pre id="dockercmd" style="background:#ecece4;padding:16px;border-radius:8px;overflow-x:auto;white-space:pre-wrap"></pre>'
         + '<p><button id="copy" style="font:inherit;padding:8px 14px;border-radius:8px;border:1px solid #242621;background:#fff;cursor:pointer">Copy</button> <span id="copied" hidden></span></p>'
+        + "</div>"
         + "<p>The window is then at <code>http://127.0.0.1:43117/</code> on that machine. Keep the <code>-v</code> volume: it holds the machine\u2019s identity and its record of what it has run.</p>"
         + "<h2>Desktop or iOS app</h2><p>Open the desktop worker or iOS app and paste the invite link from your fleet dashboard. Invitations expire after ten minutes and work once.</p>"
         + downloads
@@ -210,12 +225,53 @@ async def join(request: Request):
         # Windows contributor will paste it, every line after the first is a separate
         # broken command. A single line wraps visually and runs everywhere.
         + "<script>(function(){"
-        + "var c=new URLSearchParams(location.search).get('code')||'';"
-        + "if(!/^[0-9a-fA-F]{32}$/.test(c))c='YOUR-INVITE-CODE';"
-        + "var cmd='docker run -d --restart unless-stopped"
-        + " -v dwp-agent-data:/data -p 127.0.0.1:43117:43117"
+        + "var pre=document.getElementById('dockercmd');"
+        + "var cmdbox=document.getElementById('cmdbox');"
+        + "var mintbox=document.getElementById('mintbox');"
+        + "var cmd='';"
+        # Build the command from a code rather than rendering one into the HTML. A minted
+        # code arrives over fetch and a followed invite arrives in the address bar; both
+        # end up here, so there is one place that decides what a command looks like.
+        #
+        # The label is the operator's free text and lands inside a double-quoted shell
+        # argument, so it is restricted rather than escaped: an escape that is right for
+        # sh is wrong for PowerShell, and this one string has to survive both. Anything
+        # outside [A-Za-z0-9 ._-] is dropped, which cannot close the quote in either
+        # shell. Empty after that means the flag is left out entirely.
+        + "function build(c,label){"
+        + "var safe=(label||'').replace(/[^A-Za-z0-9 ._-]/g,'').trim().slice(0,40);"
+        + "var name=safe?' -e DWP_LABEL=\"'+safe+'\"':'';"
+        + "cmd='docker run -d --restart unless-stopped"
+        + " -v dwp-agent-data:/data -p 127.0.0.1:43117:43117'+name+'"
         + f" -e DWP_INVITE=\"{safe_origin}/join?code='+c+'\" {safe_image}';"
-        + "var pre=document.getElementById('dockercmd');pre.textContent=cmd;"
+        + "pre.textContent=cmd;cmdbox.hidden=false;}"
+        + "var c=new URLSearchParams(location.search).get('code')||'';"
+        + "if(/^[0-9a-fA-F]{32}$/.test(c)){build(c,'');}"
+        + f"else if({self_serve}){{mintbox.hidden=false;}}"
+        + "else{build('YOUR-INVITE-CODE','');}"
+        # Ask the server for a code. The button is disabled for the round trip because a
+        # second click is a second code, and codes are rationed -- an impatient reader
+        # double-clicking could spend the network's hourly allowance on one laptop.
+        + "var mint=document.getElementById('mint');"
+        + "if(mint){mint.onclick=function(){"
+        + "var note=document.getElementById('mintnote');"
+        + "mint.disabled=true;note.textContent='Asking the server\\u2026';"
+        + "fetch('/v1/join-requests',{method:'POST',headers:{'Accept':'application/json'}})"
+        + ".then(function(r){return r.json().then(function(b){return{ok:r.ok,body:b}})})"
+        + ".then(function(res){"
+        + "if(!res.ok){mint.disabled=false;"
+        # The 429 detail is written for this reader; show it rather than a generic line.
+        + "note.textContent=res.body.detail||'Could not get an invite. Try again.';return}"
+        + "build(res.body.code,document.getElementById('label').value);"
+        + "mintbox.hidden=true;"
+        + "note.textContent='';"
+        + "})"
+        # Without this a dropped connection leaves the button disabled under 'Asking the
+        # server...' forever, which reads as the server having hung rather than as
+        # something to retry.
+        + ".catch(function(){mint.disabled=false;"
+        + "note.textContent='Could not reach the server. Check the connection and try again.'});"
+        + "}}"
         # navigator.clipboard does not exist on an insecure origin, and writeText can be
         # refused even where it does. Both were silent: the button did nothing at all,
         # which is worse than not having one. Select the command instead so Ctrl-C still
@@ -245,8 +301,13 @@ async def join(request: Request):
             # This page needs nothing from anywhere, and now carries one inline script
             # that reads the invite code out of the address bar. Say so explicitly rather
             # than leaving the page open to whatever a proxy or extension injects.
+            #
+            # connect-src 'self' is the one addition the mint button needs: it POSTs to
+            # this same origin. default-src 'none' covers connect-src, so without this
+            # the fetch is blocked by the policy and the button fails with nothing but a
+            # console entry to say why.
             "Content-Security-Policy": (
-                "default-src 'none'; style-src 'unsafe-inline'; "
+                "default-src 'none'; style-src 'unsafe-inline'; connect-src 'self'; "
                 "script-src 'unsafe-inline'; form-action 'none'; base-uri 'none'"
             ),
         },

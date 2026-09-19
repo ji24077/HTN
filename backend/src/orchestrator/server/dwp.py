@@ -157,6 +157,52 @@ async def invite(request: Request):
     )
 
 
+@router.post("/v1/join-requests")
+async def join_request(request: Request):
+    """Mint an invite for whoever asked, with no admin token.
+
+    Every invite until now came from someone holding the admin token, which meant adding
+    a machine needed two people in the same conversation: one to mint and one to paste.
+    That is the right shape for a fleet of four and the wrong one for asking a room to
+    contribute laptops, where the admin becomes a queue.
+
+    What is *not* relaxed here is anything after the code. A self-serve invite is the
+    same single-use ten-minute code `/v1/device-invites` returns, redeemed by the same
+    `/hosts/pair`, and the machine that redeems it still has to hold the Ed25519 key it
+    enrolled with for every later connection. This widens who may ask for a code; it does
+    not widen what a code is or what holding one lets a machine do.
+
+    Three limits stand between this and an open tap, and the third is the one that binds:
+    `limit_pairing` caps a single peer at 20 attempts per five minutes, the global cap is
+    1000, and `create_pair_code` allows 10 *unowned* codes per hour across the whole
+    network -- self-serve invites have no owner, so they all share that one quota. Ten
+    machines an hour is a deliberate ceiling, not an oversight: it is the difference
+    between a page that recruits a room and a page that enrolls a botnet. Raise it in
+    `create_pair_code` if a room is genuinely bigger than that.
+    """
+    if not request.app.state.config.self_serve_join:
+        # 404 rather than 403: an endpoint that is switched off should not confirm it
+        # exists and would work for someone better credentialed. There is no credential
+        # that opens this one -- it is either on for everybody or absent.
+        raise HTTPException(404, "Not found")
+    limit_pairing(request)
+    try:
+        code = await request.app.state.store.create_pair_code(None)
+    except EnrollmentLimit:
+        # The reader is a volunteer with a laptop, not an operator reading a log. Say
+        # what they should do rather than which internal quota they met.
+        raise HTTPException(
+            429,
+            "This network has taken on as many new machines as it can for now. Try again in an hour, or ask for an invite directly.",
+            headers={"Retry-After": "3600"},
+        ) from None
+    return JSONResponse(
+        {"code": code, "expires_in": 600, "server": origin(request)},
+        status_code=201,
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @router.post("/hosts/pair")
 async def pair(request: Request):
     limit_pairing(request)
