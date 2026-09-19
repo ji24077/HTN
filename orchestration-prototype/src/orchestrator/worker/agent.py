@@ -1,0 +1,246 @@
+"""Outbound asyncio worker; execution remains behind the Executor protocol."""
+
+import asyncio
+import logging
+import random
+import signal
+from collections.abc import Callable
+
+from websockets.asyncio.client import ClientConnection, connect
+
+from ..shared.protocol import (
+    HEARTBEAT_INTERVAL,
+    MESSAGE_LIMIT,
+    UNHEALTHY_AFTER,
+    VERSION,
+    Executor,
+    Message,
+    Ref,
+    Task,
+    bounded_json,
+    json_loads,
+    task_ref,
+)
+from .config import WorkerConfig
+from .executors import StubExecutor
+
+log = logging.getLogger(__name__)
+
+
+class DirectConnect(connect):
+    def process_redirect(self, exc: Exception) -> Exception:
+        # Never forward the enrolled worker's credential to a redirected host.
+        return exc
+
+
+async def send(socket: ClientConnection, message: Message) -> None:
+    async with asyncio.timeout(5):
+        await socket.send(message.model_dump_json(exclude_none=True))
+
+
+async def receive(socket: ClientConnection) -> Message:
+    message = Message.model_validate(json_loads(await socket.recv()))
+    if message.version != VERSION:
+        raise ValueError("unsupported server protocol version")
+    return message
+
+
+async def execute(executor: Executor, task: Task, report: Callable[[float], None]) -> Message:
+    ref = task_ref(task)
+    try:
+        async with asyncio.timeout(task.spec.timeout_seconds):
+            result = bounded_json(await executor.execute(task.spec, report))
+        return Message(type="complete", ref=ref, result=result)
+    except TimeoutError:
+        return Message(type="failed", ref=ref, error="execution deadline", retryable=True)
+    except Exception as exc:
+        # Cancellation is BaseException and must propagate without a completion.
+        return Message(type="failed", ref=ref, error=(str(exc) or type(exc).__name__)[:2048])
+
+
+class Agent:
+    def __init__(self, config: WorkerConfig, executor: Executor):
+        self.config = config
+        self.executor = executor
+
+    async def run(self) -> None:
+        delay = 1.0
+        while True:
+            started = asyncio.get_running_loop().time()
+            try:
+                await self.session()
+            except Exception as exc:
+                # Log the exception class, not connection headers or credentials.
+                log.warning("worker disconnected: %s", type(exc).__name__)
+            if asyncio.get_running_loop().time() - started > 60:
+                delay = 1.0
+            await asyncio.sleep(delay + random.uniform(0, delay / 2))
+            delay = min(delay * 2, 30)
+
+    async def session(self) -> None:
+        config = self.config
+        async with DirectConnect(
+            config.url,
+            additional_headers={
+                "Authorization": f"Bearer {config.token}",
+                "X-Worker-ID": config.worker_id,
+            },
+            open_timeout=10,
+            close_timeout=2,
+            max_size=MESSAGE_LIMIT,
+            max_queue=4,
+            ping_interval=None,
+            compression=None,
+            proxy=None,
+        ) as socket:
+            await send(socket, Message(type="hello", capabilities=config.capabilities))
+            async with asyncio.timeout(10):
+                welcome = await receive(socket)
+            if welcome.type != "welcome" or not welcome.session_id:
+                raise ValueError("invalid server handshake")
+            log.info("worker connected worker=%s session=%s", config.worker_id, welcome.session_id)
+            await self.work_loop(socket, welcome.session_id)
+
+    async def work_loop(self, socket: ClientConnection, session: str) -> None:
+        current: Task | None = None
+        work: asyncio.Task | None = None
+        result_sent = False
+        progress = 0.0
+        sequence = 0
+        pending: dict[int, Ref | None] = {}
+        loop = asyncio.get_running_loop()
+        last_heartbeat_ack = loop.time()
+
+        def matching(ref: Ref | None) -> bool:
+            return ref is not None and current is not None and ref == task_ref(current)
+
+        async def clear() -> None:
+            nonlocal current, work, result_sent, progress
+            if work is not None:
+                work.cancel()
+                await asyncio.gather(work, return_exceptions=True)
+            current, work, result_sent = None, None, False
+            progress = 0.0
+
+        def report(value: float) -> None:
+            nonlocal progress
+            progress = min(100.0, max(0.0, float(value)))
+            log.info("task progress %.0f%%", progress)
+
+        async def heartbeat() -> None:
+            nonlocal sequence
+            sequence += 1
+            ref = task_ref(current) if current else None
+            pending[sequence] = ref
+            await send(
+                socket,
+                Message(
+                    type="heartbeat",
+                    sequence=sequence,
+                    active=[ref] if ref else [],
+                    paused=self.config.paused,
+                    progress=progress,
+                ),
+            )
+
+        reader = asyncio.create_task(receive(socket))
+        ticker = asyncio.create_task(asyncio.sleep(HEARTBEAT_INTERVAL))
+        try:
+            await heartbeat()
+            while True:
+                waiting = {reader, ticker}
+                if work is not None and not result_sent:
+                    waiting.add(work)
+                done, _ = await asyncio.wait(waiting, return_when=asyncio.FIRST_COMPLETED)
+
+                # Handle server messages first, so revocation wins over a local
+                # completion when both are ready. The database also fences it.
+                if reader in done:
+                    message = reader.result()
+                    reader = asyncio.create_task(receive(socket))
+                    match message.type:
+                        case "heartbeat_ack":
+                            if message.sequence not in pending:
+                                raise ValueError("unknown heartbeat acknowledgment")
+                            sent = pending.pop(message.sequence)
+                            last_heartbeat_ack = loop.time()
+                            # An old idle heartbeat cannot revoke newer work.
+                            if matching(sent) and sent not in message.active:
+                                log.info("assignment revoked task=%s", current.spec.id)
+                                await clear()
+                        case "assign":
+                            task = message.task
+                            if current is not None or task is None:
+                                raise ValueError("unexpected assignment")
+                            if (
+                                task.session_id != session
+                                or task.worker_id != self.config.worker_id
+                                or task.spec.kind != self.executor.kind
+                            ):
+                                raise ValueError("invalid assignment identity or executor")
+                            current = task
+                            await send(socket, Message(type="ack", ref=task_ref(task)))
+                        case "ack_accepted":
+                            if matching(message.ref) and work is None:
+                                log.info(
+                                    "task started task=%s generation=%s",
+                                    current.spec.id,
+                                    current.generation,
+                                )
+                                work = asyncio.create_task(execute(self.executor, current, report))
+                        case "result_accepted" | "revoke":
+                            if matching(message.ref):
+                                log.info("%s task=%s", message.type, current.spec.id)
+                                await clear()
+                        case _:
+                            raise ValueError("unexpected server message")
+
+                if work is not None and work in done and not result_sent:
+                    await send(socket, work.result())
+                    # Do not free the local slot until the server accepts or
+                    # revokes the result. Exclude completed work from wait().
+                    result_sent = True
+
+                if ticker in done:
+                    if loop.time() - last_heartbeat_ack >= UNHEALTHY_AFTER:
+                        raise TimeoutError("heartbeat acknowledgment timeout")
+                    await heartbeat()
+                    ticker = asyncio.create_task(asyncio.sleep(HEARTBEAT_INTERVAL))
+        finally:
+            reader.cancel()
+            ticker.cancel()
+            await clear()
+            await asyncio.gather(reader, ticker, return_exceptions=True)
+
+
+async def run_worker() -> None:
+    executor = StubExecutor()
+    agent = Agent(WorkerConfig.from_env(executor.kind), executor)
+    task = asyncio.create_task(agent.run())
+    loop = asyncio.get_running_loop()
+    installed = []
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, task.cancel)
+            installed.append(sig)
+        except NotImplementedError:
+            pass  # asyncio.run still handles Ctrl-C on unsupported platforms.
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    finally:
+        for sig in installed:
+            loop.remove_signal_handler(sig)
+
+
+def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    try:
+        asyncio.run(run_worker())
+    except KeyboardInterrupt:
+        pass
+
+
+if __name__ == "__main__":
+    main()

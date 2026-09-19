@@ -1,0 +1,13 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+.ruff_cache/
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+.demo/
+frontend/node_modules/
+frontend/coverage/
+src/orchestrator/server/web/

@@ -1,0 +1,461 @@
+"""PostgreSQL owns task state, capacity, leases, and transactional audit events."""
+
+import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from datetime import datetime, timedelta
+from importlib.resources import files
+
+import asyncpg
+from pydantic import JsonValue
+
+from ...shared.protocol import (
+    ACK_SECONDS,
+    LEASE_SECONDS,
+    UNHEALTHY_AFTER,
+    Capabilities,
+    Ref,
+    Submission,
+    Task,
+    TaskSpec,
+    Worker,
+    bounded_json,
+    json_loads,
+    json_text,
+    task_ref,
+)
+
+
+class Conflict(Exception):
+    pass
+
+
+class StaleAssignment(Exception):
+    pass
+
+
+class StaleSession(Exception):
+    pass
+
+
+class NotFound(Exception):
+    pass
+
+
+def task_from_row(row: asyncpg.Record) -> Task:
+    values = dict(row)
+    values.pop("id")
+    return Task.model_validate(values)
+
+
+async def configure_connection(conn: asyncpg.Connection) -> None:
+    for typename in ("json", "jsonb"):
+        await conn.set_type_codec(
+            typename, schema="pg_catalog", encoder=json_text, decoder=json_loads, format="text"
+        )
+
+
+async def event(conn, entity: str, entity_id: str, before: str, after: str, **details) -> None:
+    await conn.execute(
+        """INSERT INTO events(entity,entity_id,previous_state,new_state,details)
+           VALUES($1,$2,$3,$4,$5)""",
+        entity,
+        entity_id,
+        before,
+        after,
+        details,
+    )
+
+
+class Store:
+    def __init__(self, pool: asyncpg.Pool):
+        self.pool = pool
+
+    @classmethod
+    async def open(cls, url: str) -> "Store":
+        pool = await asyncpg.create_pool(
+            url,
+            min_size=1,
+            max_size=10,
+            timeout=10,
+            command_timeout=5,
+            init=configure_connection,
+        )
+        store = cls(pool)
+        try:
+            async with store.change() as (conn, _):
+                await conn.execute(
+                    files("orchestrator.server.db").joinpath("schema.sql").read_text()
+                )
+        except BaseException:
+            await store.close()
+            raise
+        return store
+
+    async def close(self) -> None:
+        try:
+            async with asyncio.timeout(5):
+                await self.pool.close()
+        except TimeoutError:
+            self.pool.terminate()
+
+    @asynccontextmanager
+    async def change(self) -> AsyncIterator[tuple[asyncpg.Connection, datetime]]:
+        # A coarse database lock deliberately serializes prototype mutations,
+        # including across processes. Move to finer row locks before scaling.
+        async with asyncio.timeout(5):
+            async with self.pool.acquire() as conn:
+                async with conn.transaction():
+                    await conn.execute("SELECT pg_advisory_xact_lock(71420931)")
+                    now = await conn.fetchval("SELECT clock_timestamp()")
+                    yield conn, now
+
+    async def task(self, task_id: str) -> Task:
+        row = await self.pool.fetchrow("SELECT * FROM tasks WHERE id=$1", task_id)
+        if row is None:
+            raise NotFound("task not found")
+        return task_from_row(row)
+
+    async def tasks(self) -> list[Task]:
+        rows = await self.pool.fetch("SELECT * FROM tasks ORDER BY created_at DESC,id LIMIT 500")
+        return [task_from_row(row) for row in rows]
+
+    async def workers(self) -> list[Worker]:
+        rows = await self.pool.fetch("SELECT * FROM workers ORDER BY id LIMIT 500")
+        return [Worker.model_validate(dict(row)) for row in rows]
+
+    async def events(self, after: int) -> list[dict]:
+        rows = await self.pool.fetch(
+            "SELECT * FROM events WHERE id>$1 ORDER BY id LIMIT 500", after
+        )
+        return [dict(row) for row in rows]
+
+    async def submit(self, specs: list[TaskSpec]) -> list[Task]:
+        # Validate the in-process planner boundary as well as the HTTP boundary.
+        specs = Submission(tasks=specs).tasks
+        result = []
+        async with self.change() as (conn, _):
+            for spec in specs:
+                encoded = spec.model_dump(mode="json")
+                row = await conn.fetchrow("SELECT * FROM tasks WHERE id=$1", spec.id)
+                if row is not None:
+                    if json_text(
+                        TaskSpec.model_validate(row["spec"]).model_dump(mode="json")
+                    ) != json_text(encoded):
+                        raise Conflict("task ID already exists with a different specification")
+                else:
+                    row = await conn.fetchrow(
+                        "INSERT INTO tasks(id,spec,state) VALUES($1,$2,'queued') RETURNING *",
+                        spec.id,
+                        encoded,
+                    )
+                    await event(conn, "task", spec.id, "", "queued", job_id=spec.job_id)
+                result.append(task_from_row(row))
+        return result
+
+    @staticmethod
+    async def _worker(conn, worker_id: str, session: str) -> Worker:
+        row = await conn.fetchrow("SELECT * FROM workers WHERE id=$1", worker_id)
+        if row is None or row["session_id"] != session:
+            raise StaleSession("worker session superseded")
+        return Worker.model_validate(dict(row))
+
+    @staticmethod
+    async def _worker_event(conn, worker: Worker, state: str) -> None:
+        rows = await conn.fetch(
+            "SELECT id,generation FROM tasks WHERE worker_id=$1 AND state IN ('assigned','running')",
+            worker.id,
+        )
+        await event(
+            conn,
+            "worker",
+            worker.id,
+            worker.state,
+            state,
+            session_id=worker.session_id,
+            tasks=[{"task_id": row["id"], "generation": row["generation"]} for row in rows],
+        )
+
+    async def register(self, worker_id: str, session: str, capabilities: Capabilities) -> None:
+        async with self.change() as (conn, now):
+            previous = await conn.fetchval("SELECT state FROM workers WHERE id=$1", worker_id)
+            rows = await conn.fetch(
+                "SELECT * FROM tasks WHERE worker_id=$1 AND state IN ('assigned','running')",
+                worker_id,
+            )
+            tasks = [task_from_row(row) for row in rows]
+            for task in tasks:
+                await self._fail(conn, task, "worker_reconnected", retryable=True)
+            await conn.execute(
+                """INSERT INTO workers(id,session_id,capabilities,state,last_seen,paused)
+                   VALUES($1,$2,$3,'alive',$4,false) ON CONFLICT(id) DO UPDATE
+                   SET session_id=$2,capabilities=$3,state='alive',last_seen=$4,paused=false""",
+                worker_id,
+                session,
+                capabilities.model_dump(mode="json"),
+                now,
+            )
+            await event(
+                conn,
+                "worker",
+                worker_id,
+                previous or "",
+                "alive",
+                session_id=session,
+                reason="connected",
+                superseded_tasks=[task_ref(t).model_dump() for t in tasks],
+            )
+
+    async def disconnect(self, worker_id: str, session: str) -> None:
+        async with self.change() as (conn, _):
+            try:
+                worker = await self._worker(conn, worker_id, session)
+            except StaleSession:
+                return  # An old socket must not change its replacement's state.
+            if worker.state == "alive":
+                await self._worker_event(conn, worker, "unhealthy")
+                await conn.execute("UPDATE workers SET state='unhealthy' WHERE id=$1", worker_id)
+
+    @staticmethod
+    def _valid(task: Task, worker_id: str, session: str, ref: Ref, now: datetime) -> bool:
+        return (
+            task.state in {"assigned", "running"}
+            and task_ref(task) == ref
+            and task.worker_id == worker_id
+            and task.session_id == session
+            and task.lease_until is not None
+            and task.lease_until > now
+            and task.deadline is not None
+            and task.deadline > now
+        )
+
+    @staticmethod
+    async def _renew(conn, task: Task, now: datetime) -> None:
+        until = min(now + timedelta(seconds=LEASE_SECONDS), task.deadline)
+        await conn.execute("UPDATE tasks SET lease_until=$2 WHERE id=$1", task.spec.id, until)
+
+    async def heartbeat(
+        self, worker_id: str, session: str, active: list[Ref], paused: bool, progress: float = 0
+    ) -> list[Ref]:
+        accepted = []
+        async with self.change() as (conn, now):
+            worker = await self._worker(conn, worker_id, session)
+            if worker.state != "alive":
+                await self._worker_event(conn, worker, "alive")
+            await conn.execute(
+                "UPDATE workers SET state='alive',last_seen=$2,paused=$3 WHERE id=$1",
+                worker_id,
+                now,
+                paused,
+            )
+            for ref in active:
+                row = await conn.fetchrow("SELECT * FROM tasks WHERE id=$1", ref.task_id)
+                if row is None:
+                    continue
+                task = task_from_row(row)
+                if task.state == "running" and self._valid(task, worker_id, session, ref, now):
+                    await self._renew(conn, task, now)
+                    await conn.execute(
+                        "UPDATE tasks SET progress=$2 WHERE id=$1", ref.task_id, progress
+                    )
+                    accepted.append(ref)
+        return accepted
+
+    async def claim(self, worker_id: str, session: str) -> Task | None:
+        async with self.change() as (conn, now):
+            worker = await self._worker(conn, worker_id, session)
+            if (
+                worker.paused
+                or worker.state != "alive"
+                or (now - worker.last_seen).total_seconds() >= UNHEALTHY_AFTER
+            ):
+                return None
+            occupied = await conn.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM tasks WHERE worker_id=$1 AND state IN ('assigned','running'))",
+                worker_id,
+            )
+            if occupied:
+                return None
+            caps = worker.capabilities
+            row = await conn.fetchrow(
+                """SELECT * FROM tasks WHERE state='queued'
+                   AND spec->>'kind'=ANY($1::text[])
+                   AND spec->'requirements'->>'runtime'=$2
+                   AND (spec->'requirements'->>'vram_mib')::int <= $3
+                   AND (spec->>'target_worker_id' IS NULL OR spec->>'target_worker_id'=$4
+                        OR (generation>0 AND COALESCE((spec->>'allow_failover')::boolean,true)))
+                   ORDER BY created_at,id LIMIT 1""",
+                caps.kinds,
+                caps.runtime,
+                caps.vram_mib,
+                worker_id,
+            )
+            if row is None:
+                return None
+            task = task_from_row(row)
+            deadline = now + timedelta(seconds=task.spec.timeout_seconds)
+            lease = min(now + timedelta(seconds=ACK_SECONDS), deadline)
+            row = await conn.fetchrow(
+                """UPDATE tasks SET state='assigned',generation=generation+1,worker_id=$2,
+                   session_id=$3,lease_until=$4,deadline=$5,result=NULL,failure='',progress=0,started_at=NULL
+                   WHERE id=$1 RETURNING *""",
+                task.spec.id,
+                worker_id,
+                session,
+                lease,
+                deadline,
+            )
+            task = task_from_row(row)
+            await event(
+                conn,
+                "task",
+                task.spec.id,
+                "queued",
+                "assigned",
+                worker_id=worker_id,
+                session_id=session,
+                generation=task.generation,
+                lease_until=lease.isoformat(),
+            )
+            return task
+
+    async def _owned(self, conn, worker_id: str, session: str, ref: Ref) -> Task:
+        await self._worker(conn, worker_id, session)
+        row = await conn.fetchrow("SELECT * FROM tasks WHERE id=$1", ref.task_id)
+        if row is None:
+            raise StaleAssignment("assignment no longer exists")
+        return task_from_row(row)
+
+    async def ack(self, worker_id: str, session: str, ref: Ref) -> None:
+        async with self.change() as (conn, now):
+            task = await self._owned(conn, worker_id, session, ref)
+            if not self._valid(task, worker_id, session, ref, now):
+                raise StaleAssignment("assignment expired or superseded")
+            await self._renew(conn, task, now)
+            if task.state == "running":
+                return
+            await conn.execute(
+                "UPDATE tasks SET state='running',started_at=$2 WHERE id=$1", ref.task_id, now
+            )
+            await event(
+                conn,
+                "task",
+                ref.task_id,
+                "assigned",
+                "running",
+                worker_id=worker_id,
+                generation=ref.generation,
+            )
+
+    @staticmethod
+    async def _fail(conn, task: Task, reason: str, retryable: bool) -> None:
+        state = "queued" if retryable and task.generation < task.spec.max_attempts else "failed"
+        await conn.execute(
+            """UPDATE tasks SET state=$2,worker_id=NULL,session_id=NULL,lease_until=NULL,
+               deadline=NULL,failure=$3,progress=0,started_at=NULL WHERE id=$1""",
+            task.spec.id,
+            state,
+            reason,
+        )
+        await event(
+            conn,
+            "task",
+            task.spec.id,
+            task.state,
+            state,
+            worker_id=task.worker_id,
+            session_id=task.session_id,
+            generation=task.generation,
+            reason=reason,
+        )
+
+    async def finish(
+        self,
+        worker_id: str,
+        session: str,
+        ref: Ref,
+        result: JsonValue,
+        failure: str = "",
+        retryable: bool = False,
+    ) -> None:
+        bounded_json(result)
+        async with self.change() as (conn, now):
+            task = await self._owned(conn, worker_id, session, ref)
+            if (
+                task.state == "succeeded"
+                and task_ref(task) == ref
+                and task.worker_id == worker_id
+                and task.session_id == session
+                and not failure
+            ):
+                return  # Never overwrite an already accepted result.
+            if task.state != "running" or not self._valid(task, worker_id, session, ref, now):
+                raise StaleAssignment("assignment expired, cancelled, or superseded")
+            if failure:
+                await self._fail(conn, task, failure, retryable)
+                return
+            await conn.execute(
+                "UPDATE tasks SET state='succeeded',result=$2,lease_until=NULL,deadline=NULL,progress=100 WHERE id=$1",
+                ref.task_id,
+                result,
+            )
+            await event(
+                conn,
+                "task",
+                ref.task_id,
+                task.state,
+                "succeeded",
+                worker_id=worker_id,
+                generation=ref.generation,
+            )
+
+    async def cancel(self, task_id: str) -> None:
+        async with self.change() as (conn, _):
+            row = await conn.fetchrow("SELECT * FROM tasks WHERE id=$1", task_id)
+            if row is None:
+                raise NotFound("task not found")
+            task = task_from_row(row)
+            if task.state in {"succeeded", "failed", "cancelled"}:
+                return
+            await conn.execute(
+                "UPDATE tasks SET state='cancelled',lease_until=NULL,deadline=NULL WHERE id=$1",
+                task_id,
+            )
+            await event(
+                conn,
+                "task",
+                task_id,
+                task.state,
+                "cancelled",
+                worker_id=task.worker_id,
+                generation=task.generation,
+            )
+
+    async def reconcile(self) -> None:
+        async with self.change() as (conn, now):
+            # Capture affected tasks before expiry clears their worker assignment.
+            rows = await conn.fetch("SELECT * FROM workers WHERE state!='offline'")
+            for row in rows:
+                worker = Worker.model_validate(dict(row))
+                elapsed = (now - worker.last_seen).total_seconds()
+                state = worker.state
+                if elapsed >= LEASE_SECONDS:
+                    state = "offline"
+                elif elapsed >= UNHEALTHY_AFTER:
+                    state = "unhealthy"
+                if state != worker.state:
+                    await self._worker_event(conn, worker, state)
+                    await conn.execute("UPDATE workers SET state=$2 WHERE id=$1", worker.id, state)
+            rows = await conn.fetch(
+                """SELECT * FROM tasks WHERE state IN ('assigned','running')
+                   AND (lease_until <= $1 OR deadline <= $1)""",
+                now,
+            )
+            for row in rows:
+                task = task_from_row(row)
+                reason = "lease_expired"
+                if task.deadline <= now:
+                    reason = "execution_deadline"
+                elif task.state == "assigned":
+                    reason = "ack_timeout"
+                await self._fail(conn, task, reason, retryable=True)
