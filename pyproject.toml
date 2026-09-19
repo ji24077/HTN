@@ -45,8 +45,12 @@ rocm = [
     # thing "pytorch-triton-rocm". Changing the index URL means changing this.
     "triton-rocm; sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]
-# Ji: pure Python, no heavy deps. Dashboard is static HTML served by the server.
-agent = []
+# Ji: agents + dashboard. The LLM decision layer speaks to any OpenAI-compatible
+# endpoint (Baseten today, OpenAI if its balance is topped up), so the OpenAI SDK
+# is the client either way and the vendor is a base_url, not a dependency.
+agent = [
+    "openai>=1.40",
+]
 
 dev = [
     "ruff>=0.7",

@@ -9,7 +9,6 @@ from gpushare.contracts import (
     TrainSync,
     WorkerRegister,
     classify_chip,
-    emit,
     parse_event,
 )
 
