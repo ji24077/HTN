@@ -66,6 +66,35 @@ switch (command) {
     break
   }
 
+  /**
+   * Adopt this server's release key, for an agent that paired before signed releases
+   * existed. Shown and confirmed explicitly, because it is the moment trust is
+   * established and it should not be possible to do by accident.
+   */
+  case 'trust-updates': {
+    const cfg = requireConfig()
+    const res = await fetch(`${cfg.server}/release/latest`).catch(() => null)
+    if (!res?.ok) {
+      console.error(`\n  ${cfg.server} is not offering a signed release.\n`)
+      process.exit(1)
+    }
+    const release = await res.json() as { publicKey: string; manifest: { version: string } }
+    if (cfg.releaseKey === release.publicKey) {
+      console.log(`\n  Already trusting this key. Nothing to do.\n`)
+      break
+    }
+    if (flag('yes') === undefined) {
+      console.log(`\n  ${cfg.server} signs its releases with:\n\n      ${release.publicKey}\n`)
+      console.log(`  Current release: ${release.manifest.version}`)
+      console.log(`\n  Only trust this if it matches the key the person running the network told you.`)
+      console.log(`  To accept:  pnpm agent trust-updates --yes\n`)
+      break
+    }
+    saveConfig({ ...cfg, releaseKey: release.publicKey })
+    console.log(`\n  Trusted. Updates signed by this key will now install.\n`)
+    break
+  }
+
   case 'update': {
     const cfg = requireConfig()
     const { privateKey } = ensureKeypair()
@@ -115,6 +144,7 @@ switch (command) {
   run [--allow-browser]                                 connect and accept work
   set-server --server <url>                             point at a new server address
   update [--force]                                      install the latest signed release
+  trust-updates [--yes]                                 adopt this server's release key
   pause | resume                                        local kill switch (works offline)
   status                                                show identity and capability
   browser-probe [--url <url>]                           launch Chromium and report observed egress

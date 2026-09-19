@@ -32,6 +32,8 @@ const STABLE_HEARTBEATS = 2
 const MAX_BACKOFF_MS = 30_000
 /** A dial that has not completed by now is not going to. */
 const HANDSHAKE_TIMEOUT_MS = 15_000
+/** How often a connected agent asks whether a newer release exists. */
+const UPDATE_CHECK_MS = 10 * 60 * 1000
 
 type Running = { controller: AbortController; leaseId: string; renew: NodeJS.Timeout }
 
@@ -69,6 +71,8 @@ export function connect(cfg: AgentConfig, privateKey: KeyObject): void {
     // only — our writes disappear into it while the socket still looks open — so the
     // absence of inbound traffic is the only reliable signal we have.
     let lastInbound = Date.now()
+    let updating = false
+    let lastUpdateCheck = Date.now()
 
     const send = (type: string, payload: unknown, replyTo?: string): void => {
       if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(envelope(type, payload, replyTo)))
@@ -99,6 +103,41 @@ export function connect(cfg: AgentConfig, privateKey: KeyObject): void {
       startHeartbeat()
     })
 
+    /**
+     * Take an update if one is offered, we can verify it, and no work is in flight.
+     *
+     * Updating while holding a task would abandon it mid-flight; the queue would recover
+     * it, but throwing work away to install a patch is rude and unnecessary when waiting
+     * costs nothing.
+     */
+    const maybeUpdate = (offered: string | null): void => {
+      if (!offered || cfg.autoUpdate === false) return
+      if (offered === cfg.installedRelease) return
+      if (running.size > 0) return
+      if (updating) return
+      updating = true
+
+      hostLog.info('update.available', { have: cfg.installedRelease ?? null, offered })
+      void applyUpdate(cfg, privateKey)
+        .then(result => {
+          if (result.status === 'updated') {
+            console.log(`\n  Updated to ${result.to}. Restarting.\n`)
+            stopped = true
+            try { ws.close(1000, 'updating') } catch {}
+            setTimeout(restartIntoNewVersion, 500)
+            return
+          }
+          if (result.status === 'refused') {
+            hostLog.error('update.refused', { reason: result.reason })
+            console.error(`\n  Refused an update: ${result.reason}\n`)
+          } else if (result.status === 'unavailable') {
+            hostLog.warn('update.unavailable', { reason: result.reason })
+          }
+          updating = false
+        })
+        .catch((err: unknown) => { hostLog.warn('update.failed', { err }); updating = false })
+    }
+
     const startHeartbeat = (): void => {
       if (heartbeat) clearInterval(heartbeat)
       heartbeat = setInterval(() => {
@@ -126,6 +165,16 @@ export function connect(cfg: AgentConfig, privateKey: KeyObject): void {
         // Our own ping, so a server that stops responding is detectable even when it
         // has nothing to say to us.
         if (ws.readyState === WebSocket.OPEN) { try { ws.ping() } catch {} }
+
+        // An agent that stays connected for days would otherwise only ever learn about a
+        // release at connect time, which for a stable machine means never.
+        if (cfg.autoUpdate !== false && Date.now() - lastUpdateCheck > UPDATE_CHECK_MS) {
+          lastUpdateCheck = Date.now()
+          void fetch(`${cfg.server}/release/latest`, { signal: AbortSignal.timeout(15_000) })
+            .then(r => (r.ok ? r.json() : null))
+            .then((r: { manifest?: { version?: string } } | null) => maybeUpdate(r?.manifest?.version ?? null))
+            .catch(() => {})
+        }
       }, heartbeatMs)
     }
 
@@ -147,23 +196,7 @@ export function connect(cfg: AgentConfig, privateKey: KeyObject): void {
            * it, and verifies the signature itself. Updating while holding work would
            * abandon it mid-flight, so wait until the machine is idle.
            */
-          const offered = ack.data.releaseVersion
-          if (offered && cfg.autoUpdate !== false && offered !== cfg.installedRelease && running.size === 0) {
-            hostLog.info('update.available', { have: cfg.installedRelease ?? null, offered })
-            void applyUpdate(cfg, privateKey).then(result => {
-              if (result.status === 'updated') {
-                console.log(`\n  Updated to ${result.to}. Restarting.\n`)
-                stopped = true
-                try { ws.close(1000, 'updating') } catch {}
-                setTimeout(restartIntoNewVersion, 500)
-              } else if (result.status === 'refused') {
-                hostLog.error('update.refused', { reason: result.reason })
-                console.error(`\n  Refused an update: ${result.reason}\n`)
-              } else if (result.status === 'unavailable') {
-                hostLog.warn('update.unavailable', { reason: result.reason })
-              }
-            }).catch((err: unknown) => hostLog.warn('update.failed', { err }))
-          }
+          maybeUpdate(ack.data.releaseVersion)
 
           // Clock skew shows up here first, and misattributed timings later.
           const skewMs = Date.now() - Date.parse(ack.data.serverTime)

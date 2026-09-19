@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
@@ -10,6 +10,8 @@ import { loadConfig, saveConfig, type AgentConfig } from './config.ts'
 
 const exec = promisify(execFile)
 const log = createLogger({ component: 'agent' })
+
+const IS_WINDOWS = process.platform === 'win32'
 
 /** Where this agent is installed — three levels up from packages/agent/src. */
 export function installRoot(): string {
@@ -33,10 +35,17 @@ export type UpdateResult =
 export async function applyUpdate(
   cfg: AgentConfig,
   privateKey: KeyObject,
-  opts: { force?: boolean } = {},
+  opts: { force?: boolean; trustOnFirstUse?: boolean } = {},
 ): Promise<UpdateResult> {
-  if (!cfg.releaseKey) {
-    return { status: 'refused', reason: 'this agent pinned no release key when it paired, so it cannot verify updates' }
+  // An agent that paired before this server offered signed releases has nothing to
+  // verify against. It can adopt the key it is offered, but only on a deliberate,
+  // explicit instruction — never silently, and never as part of an automatic update.
+  if (!cfg.releaseKey && !opts.trustOnFirstUse) {
+    return {
+      status: 'refused',
+      reason: 'this computer pinned no release key when it paired, so it cannot verify updates.\n' +
+        '  Run  pnpm agent trust-updates  to see the key and decide, or pair again to pin it automatically',
+    }
   }
 
   let signed: SignedRelease
@@ -49,7 +58,8 @@ export async function applyUpdate(
     return { status: 'unavailable', reason: err instanceof Error ? err.message : String(err) }
   }
 
-  if (!verifyRelease(signed, cfg.releaseKey)) {
+  const pinned = cfg.releaseKey ?? signed.publicKey
+  if (!verifyRelease(signed, pinned)) {
     // Either the server is serving something the operator did not sign, or the operator
     // rotated keys. Both need a human; neither justifies running the code.
     log.error('update.signature_rejected', { version: signed.manifest.version })
@@ -82,11 +92,15 @@ export async function applyUpdate(
 
     // Unpack over the install, then reconcile dependencies. Only source is replaced;
     // ~/.dwp — keys, config, cached artifacts — is a separate directory and untouched.
+    //
+    // tar is bsdtar on Windows 10 1803 and newer, so the same invocation works there.
+    // pnpm is not: it is a .cmd shim, which Node refuses to spawn without a shell, so a
+    // Windows host would report every update as unavailable with an opaque EINVAL.
     await exec('tar', ['-xzf', archive, '-C', root])
-    await exec('pnpm', ['install', '--silent'], { cwd: root, timeout: 600_000 })
+    await exec('pnpm', ['install', '--silent'], { cwd: root, timeout: 600_000, shell: IS_WINDOWS })
 
     const previous = cfg.installedRelease ?? null
-    saveConfig({ ...cfg, installedRelease: signed.manifest.version })
+    saveConfig({ ...cfg, installedRelease: signed.manifest.version, releaseKey: pinned })
     log.info('update.installed', { from: previous, to: signed.manifest.version })
     return { status: 'updated', from: previous, to: signed.manifest.version }
   } catch (err) {
@@ -103,7 +117,10 @@ export async function applyUpdate(
  * stdio inherited so whoever is watching the window keeps seeing output.
  */
 export function restartIntoNewVersion(): never {
-  const { spawn } = require('node:child_process') as typeof import('node:child_process')
+  // `require` does not exist in an ES module. An earlier version called it here, so the
+  // update installed correctly and then the restart threw — leaving the agent updated
+  // and dead, which is the worst of both outcomes and invisible to whoever owns the
+  // machine. Import it properly instead.
   const child = spawn(process.execPath, process.argv.slice(1), {
     detached: true,
     stdio: 'inherit',

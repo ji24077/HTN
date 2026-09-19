@@ -36,14 +36,24 @@ pnpm invite sams-laptop
 
 ### The one-time part, per computer
 
-Send them an invite link. They run, once:
+Send them an invite link. They run, once — on macOS or Linux:
 
 ```bash
 ./scripts/join.sh https://your-address ABCD-1234
 ```
 
-That checks their Node version, installs dependencies, pairs, and starts taking work.
-Pairing generates a keypair on their machine and stores it in `~/.dwp/`.
+or, on Windows, from PowerShell:
+
+```powershell
+.\scripts\join.ps1 https://your-address ABCD-1234
+```
+
+The invite page shows both and they run only their own. Either one checks their Node
+version, installs dependencies, pairs, and starts taking work. Pairing generates a keypair
+on their machine and stores it in `~/.dwp/` (`C:\Users\<name>\.dwp` on Windows).
+
+If PowerShell refuses to run the script, that is the execution policy rather than the
+script: `powershell -ExecutionPolicy Bypass -File .\scripts\join.ps1 <url> <code>`.
 
 **A pairing code is needed once per computer, not once per session.** It is single-use and
 expires in ten minutes.
@@ -116,4 +126,17 @@ about it.
   scenarios cover the software's behaviour.
 - **Your own machine may not resolve your own tunnel address.** Observed here on phone
   tethering. It works for everyone else; agents on this machine need `DWP_DNS_FALLBACK=1`,
-  which `join.sh` sets by default.
+  which `join.sh` and `join.ps1` both set by default.
+- **Windows hosts join, but have not been run end to end.** The agent, the join script and
+  the tooling all have Windows paths now and a Windows host is just another host to the
+  scheduler — nothing filters on OS. What is untested is the machine itself: everything
+  below was rehearsed on macOS only.
+- **The private key is protected differently on Windows.** Windows has no POSIX mode bits,
+  so the `0600` check that guards the key on macOS and Linux cannot run there. The
+  equivalent is an ACL granting only the current account, applied by `icacls` when the key
+  is created. If that call fails the agent says so loudly and continues, where its POSIX
+  counterpart would refuse to start — a deliberate difference, since the usual Windows case
+  is a single-account laptop rather than a shared box.
+- **The remote-browser debug-port assertion now runs on Windows too**, reading command
+  lines from `Win32_Process` rather than `ps`. It is only skipped if PowerShell itself
+  cannot be run, and says so when that happens instead of reporting a pass.
