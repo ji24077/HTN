@@ -14,7 +14,14 @@ import asyncpg
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from orchestrator.server.db.store import Conflict, EnrollmentLimit, StaleAssignment, Store
+from orchestrator.server.db.store import (
+    Conflict,
+    EnrollmentLimit,
+    NotFound,
+    StaleAssignment,
+    StaleSession,
+    Store,
+)
 from orchestrator.server.updates import ChangeFeed
 from orchestrator.shared.protocol import Capabilities, TaskSpec, task_ref
 
@@ -35,6 +42,7 @@ class PrivateDatabaseTests(unittest.IsolatedAsyncioTestCase):
                 await admin.execute("CREATE ROLE anon; CREATE ROLE authenticated")
                 first = await Store.open(url, schema="orchestrator")
                 second = await Store.open(url, schema="orchestrator")
+                self.assertFalse(await first.has_active_enrollments())
                 self.assertIsNone(await admin.fetchval("SELECT to_regclass('public.tasks')"))
                 for role in ("anon", "authenticated"):
                     self.assertFalse(
@@ -169,14 +177,23 @@ class PrivateDatabaseTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNone(await second.device_key(device_id))
                 self.assertFalse(await second.enrolled_worker(device_id))
                 self.assertFalse(await second.use_assertion_jti(device_id, str(uuid4()), expiry))
+                caps = Capabilities(runtime="cpu", vram_mib=0, kinds=["echo"])
+                with self.assertRaises(StaleSession):
+                    await second.register(
+                        device_id, "revoked-session", caps, expected_device_key=public_key
+                    )
+                self.assertFalse(
+                    await first.pool.fetchval(
+                        "SELECT EXISTS(SELECT 1 FROM workers WHERE id=$1)", device_id
+                    )
+                )
                 await first.pool.execute(
                     "UPDATE dwp_devices SET revoked_at=NULL WHERE worker_id=$1", device_id
                 )
 
                 # The existing scheduler owns DWP tasks, generations and attestations.
-                caps = Capabilities(runtime="cpu", vram_mib=0, kinds=["echo"])
                 session = str(uuid4())
-                await first.register(device_id, session, caps)
+                await first.register(device_id, session, caps, expected_device_key=public_key)
                 await first.submit(
                     [
                         TaskSpec(
@@ -195,6 +212,13 @@ class PrivateDatabaseTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNone(await first.claim(device_id, session))
                 ref = task_ref(task)
                 await first.ack(device_id, session, ref)
+                with self.assertRaises(StaleSession):
+                    await second.register(
+                        device_id, "wrong-key-session", caps, expected_device_key="wrong-key"
+                    )
+                unchanged = await first.task(task.spec.id)
+                self.assertEqual(unchanged.session_id, session)
+                self.assertEqual(unchanged.state, "running")
                 proof = {"signature": "verified-by-gateway", "attempt": ref.generation}
                 await first.finish(device_id, session, ref, {"ok": True}, attestation=proof)
                 await second.finish(device_id, session, ref, {"wrong": True}, attestation={})
@@ -234,6 +258,72 @@ class PrivateDatabaseTests(unittest.IsolatedAsyncioTestCase):
                     *[first.create_pair_code(owner) for _ in range(11)], return_exceptions=True
                 )
                 self.assertEqual(sum(isinstance(x, EnrollmentLimit) for x in codes), 3)
+
+                # A stale reservation is expired by reconciliation and can no longer activate.
+                owner = str(uuid4())
+                await first.reserve_enrollment("stale-worker", str(uuid4()), owner, "Test", token)
+                await first.pool.execute(
+                    """UPDATE worker_enrollments SET created_at=created_at-interval '1 hour'
+                       WHERE worker_id='stale-worker'"""
+                )
+                await second.reconcile()
+                self.assertFalse(await first.finish_enrollment("stale-worker", "late-key"))
+                # A key that then fails revocation is still recorded on the expired row.
+                self.assertFalse(
+                    await first.finish_enrollment("stale-worker", None, retain_key="late-key")
+                )
+                self.assertEqual(await first.cancel_enrollment("stale-worker", owner), "late-key")
+                self.assertEqual(
+                    await first.pool.fetchval(
+                        "SELECT state FROM worker_enrollments WHERE worker_id='stale-worker'"
+                    ),
+                    "failed",
+                )
+                self.assertEqual(
+                    [
+                        row["details"]
+                        for row in await first.pool.fetch(
+                            "SELECT details FROM events WHERE entity='enrollment' AND entity_id='stale-worker'"
+                        )
+                    ],
+                    [{"reason": "expired"}],
+                )
+                # Withdrawal is owner-checked, idempotent, and refused once the worker registered.
+                self.assertTrue(await first.has_active_enrollments())
+                with self.assertRaises(NotFound):
+                    await first.cancel_enrollment("enrolled-worker", str(uuid4()))
+                self.assertEqual(
+                    await first.cancel_enrollment("enrolled-worker", user_id), "test-key-id"
+                )
+                # Until revocation is confirmed, repeating returns the same key to retry.
+                self.assertEqual(
+                    await first.cancel_enrollment("enrolled-worker", user_id), "test-key-id"
+                )
+                await first.clear_enrollment_key("enrolled-worker")
+                self.assertIsNone(await first.cancel_enrollment("enrolled-worker", user_id))
+                self.assertFalse(
+                    await second.worker_authorized("enrolled-worker", f"Bearer {token}")
+                )
+                self.assertEqual(
+                    await first.pool.fetchval(
+                        "SELECT count(*) FROM worker_enrollments WHERE state='active'"
+                    ),
+                    0,
+                )
+                # A fleet containing only paired DWP devices can still authenticate.
+                self.assertTrue(await second.has_active_enrollments())
+                capabilities = Capabilities(runtime="cpu", vram_mib=0, kinds=["stub"])
+                with self.assertRaises(StaleSession):
+                    await second.register(
+                        "enrolled-worker", "session-1", capabilities, enrolled=True
+                    )
+                # A static WORKER_TOKENS credential for that ID is unaffected by the withdrawal.
+                await second.register("enrolled-worker", "session-static", capabilities)
+                await first.reserve_enrollment("joined-worker", str(uuid4()), owner, "Test", token)
+                self.assertTrue(await first.finish_enrollment("joined-worker", "joined-key"))
+                await second.register("joined-worker", "session-2", capabilities, enrolled=True)
+                with self.assertRaises(Conflict):
+                    await first.cancel_enrollment("joined-worker", owner)
             finally:
                 if feed:
                     await feed.close()

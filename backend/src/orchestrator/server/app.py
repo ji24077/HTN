@@ -81,6 +81,15 @@ def create_app(surface: str = "combined") -> FastAPI:
             app.state.config, app.state.store, app.state.cache = config, store, cache
             app.state.supabase_auth = auth
             app.state.enrollment = enrollment
+            if (
+                surface == "combined"
+                and not config.worker_tokens
+                and not await store.has_active_enrollments()
+            ):
+                log.warning(
+                    "no worker can authenticate: set WORKER_TOKENS or enroll workers "
+                    "through the public server"
+                )
             # Keep the local demo cookie valid across server restarts so the
             # browser can reconnect its stream. Rotating the admin token revokes it.
             app.state.ui_session = hmac.new(
@@ -143,12 +152,15 @@ def create_app(surface: str = "combined") -> FastAPI:
         worker_id = socket.headers.get("x-worker-id", "")
         header = socket.headers.get("authorization")
         allowed = authorized(header, config.worker_tokens.get(worker_id))
+        enrolled = False
         if not allowed and worker_id and header and worker_id not in config.worker_tokens:
-            allowed = await socket.app.state.store.worker_authorized(worker_id, header)
+            allowed = enrolled = await socket.app.state.store.worker_authorized(worker_id, header)
         if not allowed:
             await socket.close(code=1008)
             return
-        await serve_worker(socket, socket.app.state.store, socket.app.state.cache, worker_id)
+        await serve_worker(
+            socket, socket.app.state.store, socket.app.state.cache, worker_id, enrolled
+        )
 
     if surface in {"combined", "worker"}:
         app.add_api_websocket_route("/v1/worker", worker)

@@ -33,6 +33,9 @@ from ...shared.protocol import (
 )
 from .connection import connection_options
 
+# A reservation older than this never receives its provider key; the reconciler closes it.
+PENDING_ENROLLMENT_SECONDS = 300
+
 
 class Conflict(Exception):
     pass
@@ -325,15 +328,90 @@ class Store:
                 hashlib.sha256(token.encode()).hexdigest(),
             )
 
-    async def finish_enrollment(self, worker_id: str, key_id: str | None):
+    async def finish_enrollment(
+        self, worker_id: str, key_id: str | None, *, retain_key: str | None = None
+    ) -> bool:
+        """Activate or fail a pending reservation; False once the reconciler already closed it.
+
+        On failure, `retain_key` records a provider key that could not be revoked so a later
+        withdrawal can retry.
+        """
+        state = "active" if key_id else "failed"
         async with self.change() as (conn, _):
-            await conn.execute(
-                "UPDATE worker_enrollments SET state=$2,tailscale_key_id=$3 WHERE worker_id=$1 AND state='pending'",
+            row = await conn.fetchrow(
+                """UPDATE worker_enrollments SET state=$2,tailscale_key_id=$3
+                   WHERE worker_id=$1 AND state='pending' RETURNING worker_id""",
                 worker_id,
-                "active" if key_id else "failed",
-                key_id,
+                state,
+                key_id or retain_key,
             )
-            await event(conn, "enrollment", worker_id, "pending", "active" if key_id else "failed")
+            if row is None:
+                if retain_key:
+                    # The reconciler already failed this reservation; still record the key
+                    # that could not be revoked, without another state transition.
+                    await conn.execute(
+                        """UPDATE worker_enrollments SET tailscale_key_id=COALESCE(tailscale_key_id,$2)
+                           WHERE worker_id=$1 AND state='failed'""",
+                        worker_id,
+                        retain_key,
+                    )
+                return False
+            await event(conn, "enrollment", worker_id, "pending", state)
+            return True
+
+    async def has_active_enrollments(self) -> bool:
+        return await self.pool.fetchval(
+            """SELECT EXISTS(
+                SELECT 1 FROM worker_enrollments WHERE state='active'
+                UNION ALL
+                SELECT 1 FROM dwp_devices WHERE revoked_at IS NULL
+            )"""
+        )
+
+    async def cancel_enrollment(self, worker_id: str, user_id: str) -> str | None:
+        """Withdraw the caller's unused enrollment; returns the provider key ID to revoke."""
+        async with self.change() as (conn, _):
+            row = await conn.fetchrow(
+                """SELECT state,tailscale_key_id FROM worker_enrollments
+                   WHERE worker_id=$1 AND user_id=$2""",
+                worker_id,
+                UUID(user_id),
+            )
+            if row is None:
+                raise NotFound("enrollment not found")
+            if row["state"] == "failed":
+                # Already closed; repeating only retries a revocation that failed earlier.
+                return row["tailscale_key_id"]
+            # A worker that has ever registered is fleet state, not an unused enrollment.
+            if await conn.fetchval("SELECT 1 FROM workers WHERE id=$1", worker_id):
+                raise Conflict("worker already connected; remove it through fleet management")
+            await conn.execute(
+                "UPDATE worker_enrollments SET state='failed' WHERE worker_id=$1", worker_id
+            )
+            await event(conn, "enrollment", worker_id, row["state"], "failed", reason="cancelled")
+            return row["tailscale_key_id"]
+
+    async def clear_enrollment_key(self, worker_id: str) -> None:
+        """Forget a provider key once its revocation succeeded."""
+        await self.pool.execute(
+            "UPDATE worker_enrollments SET tailscale_key_id=NULL WHERE worker_id=$1 AND state='failed'",
+            worker_id,
+        )
+
+    @staticmethod
+    async def _expire_enrollments(conn, now: datetime) -> None:
+        # One round trip: reconciliation shares a five-second transaction with lease recovery.
+        await conn.execute(
+            """WITH expired AS (
+                   UPDATE worker_enrollments SET state='failed' WHERE worker_id IN (
+                       SELECT worker_id FROM worker_enrollments
+                       WHERE state='pending' AND created_at <= $1 LIMIT 100)
+                   RETURNING worker_id)
+               INSERT INTO events(entity,entity_id,previous_state,new_state,details)
+               SELECT 'enrollment', worker_id, 'pending', 'failed', $2::jsonb FROM expired""",
+            now - timedelta(seconds=PENDING_ENROLLMENT_SECONDS),
+            {"reason": "expired"},
+        )
 
     async def events(self, after: int) -> list[dict]:
         rows = await self.pool.fetch(
@@ -387,8 +465,33 @@ class Store:
             tasks=[{"task_id": row["id"], "generation": row["generation"]} for row in rows],
         )
 
-    async def register(self, worker_id: str, session: str, capabilities: Capabilities) -> None:
+    async def register(
+        self,
+        worker_id: str,
+        session: str,
+        capabilities: Capabilities,
+        *,
+        enrolled: bool = False,
+        expected_device_key: str | None = None,
+    ) -> None:
         async with self.change() as (conn, now):
+            # Database authentication ran outside this lock; an enrollment withdrawn since must not
+            # register. Static WORKER_TOKENS credentials are unaffected by enrollment history.
+            if enrolled:
+                state = await conn.fetchval(
+                    "SELECT state FROM worker_enrollments WHERE worker_id=$1", worker_id
+                )
+                if state != "active":
+                    raise StaleSession("worker enrollment withdrawn")
+            if expected_device_key is not None:
+                # Signed-device authentication also precedes this transaction;
+                # recheck before superseding a session or recovering its tasks.
+                key = await conn.fetchval(
+                    "SELECT public_key FROM dwp_devices WHERE worker_id=$1 AND revoked_at IS NULL",
+                    worker_id,
+                )
+                if key != expected_device_key:
+                    raise StaleSession("device revoked or identity changed")
             previous = await conn.fetchval("SELECT state FROM workers WHERE id=$1", worker_id)
             rows = await conn.fetch(
                 "SELECT * FROM tasks WHERE worker_id=$1 AND state IN ('assigned','running')",
@@ -675,3 +778,4 @@ class Store:
                 elif task.state == "assigned":
                     reason = "ack_timeout"
                 await self._fail(conn, task, reason, retryable=True)
+            await self._expire_enrollments(conn, now)

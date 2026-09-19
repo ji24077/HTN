@@ -39,10 +39,24 @@ export function eventText(event: AuditEvent, tasks: Task[]) {
   const who = workerName(
     typeof event.details.worker_id === "string"
       ? event.details.worker_id
-      : event.entity === "worker"
+      : event.entity === "worker" || event.entity === "enrollment"
         ? event.entity_id
         : null,
   );
+  if (event.entity === "enrollment") {
+    const reason = event.details.reason;
+    const outcome =
+      event.new_state === "active"
+        ? "enrolled"
+        : reason === "cancelled"
+          ? "enrollment withdrawn"
+          : reason === "expired"
+            ? "enrollment expired"
+            : event.new_state === "failed"
+              ? "enrollment failed"
+              : `enrollment ${event.new_state}`;
+    return `${who} ${outcome}`;
+  }
   const task = tasks.find((task) => task.spec.id === event.entity_id);
   const name = task ? taskTitle(task) : event.entity_id;
   if (event.entity === "worker")

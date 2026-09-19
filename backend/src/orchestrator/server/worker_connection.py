@@ -46,7 +46,7 @@ async def cache_presence(cache: Redis | None, worker_id: str, session: str) -> N
 
 
 async def serve_worker(
-    socket: WebSocket, store: Store, cache: Redis | None, worker_id: str
+    socket: WebSocket, store: Store, cache: Redis | None, worker_id: str, enrolled: bool = False
 ) -> None:
     session = None
     try:
@@ -55,7 +55,7 @@ async def serve_worker(
         if hello.type != "hello" or hello.capabilities is None:
             raise ValueError("expected hello with capabilities")
         new_session = secrets.token_hex(16)
-        await store.register(worker_id, new_session, hello.capabilities)
+        await store.register(worker_id, new_session, hello.capabilities, enrolled=enrolled)
         session = new_session
         await send(socket, Message(type="welcome", session_id=session))
         log.info("worker connected worker=%s session=%s", worker_id, session)

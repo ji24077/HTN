@@ -155,8 +155,6 @@ async def pair(request: Request):
         raise HTTPException(400, "Invalid or expired pairing code") from None
     except EnrollmentLimit:
         raise HTTPException(429, "Device enrollment limit reached") from None
-    except EnrollmentLimit:
-        raise HTTPException(429, "Device enrollment limit reached") from None
     except ValueError:
         raise HTTPException(400, "Invalid pairing request") from None
     return JSONResponse(
@@ -287,7 +285,10 @@ class Connection:
         if not kinds:
             raise ValueError("no supported adapters")
         await self.store.register(
-            self.worker_id, self.session, Capabilities(runtime="cpu", vram_mib=0, kinds=kinds)
+            self.worker_id,
+            self.session,
+            Capabilities(runtime="cpu", vram_mib=0, kinds=kinds),
+            expected_device_key=self.public_key,
         )
         self.registered = True
         self.paused = hello.consent.paused or not hello.consent.allowCompute

@@ -113,7 +113,9 @@ class FakeStore:
         self.jtis.add(jti)
         return True
 
-    async def register(self, worker_id, session, capabilities):
+    async def register(self, worker_id, session, capabilities, *, expected_device_key=None):
+        if expected_device_key != self.public_key:
+            raise StaleSession("device revoked")
         for current in self.tasks:
             if current.state in {"assigned", "running"}:
                 current.state = "queued"

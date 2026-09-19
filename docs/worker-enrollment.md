@@ -86,6 +86,23 @@ uv run --project backend --env-file .local/workers/my-computer.env orchestrator-
 The profile stores the worker's credential and paths, not the Supabase session,
 password, OAuth client secret, or Tailscale auth key. The auth key is used only
 in memory for initial enrollment; the Tailscale node identity persists locally.
+The file is UTF-8 dotenv syntax as read by `uv run --env-file`: every value is
+double-quoted with only backslash, double quote, and dollar sign escaped, so
+non-ASCII paths and `$` survive loading.
+
+Local paths that the profile cannot hold (containing line breaks) are rejected
+before anything is enrolled. If the network join or the profile write fails
+after the backend has issued the identity, setup withdraws that enrollment
+through the API while still signed in, deletes the partial profile, and asks you
+to re-run; further Ctrl-C presses during that short, bounded cleanup only print
+a wait notice. A node that never joined cannot retry automatically because the
+single-use auth key is not saved. If the withdrawal does not complete, setup
+keeps the profile instead and says the outcome is unknown, since the server may
+have committed the withdrawal before the response was lost: running
+`orchestrator-worker` with the profile retries the join through Tailscale's
+interactive sign-in link if the enrollment is still active, and otherwise an
+administrator should check that worker. A crash or forced termination during
+cleanup cannot guarantee any of this.
 
 ## API used by a future desktop app
 
@@ -101,6 +118,19 @@ and demo sessions cannot enroll workers. The private gateway has no enrollment
 route. A successful, non-cacheable response contains the new `worker_id`,
 `worker_token`, `server_url`, and single-use `tailscale_auth_key`.
 
+When enrollment is switched off the response is 503 with
+`{"detail": {"code": "enrollment_not_configured"}}`; any other 503 (for example
+`{"error": "database unavailable"}`) is a temporary outage and the CLI says so.
+
+`DELETE /v1/worker-enrollments/{worker_id}` withdraws an enrollment the same
+user created whose computer never connected: it marks the record failed, revokes
+the unused auth key when possible, and returns 204. Repeating the call is
+harmless and retries a revocation that failed earlier; the key ID stays on the
+record until revocation succeeds. It returns 404 for another user's enrollment
+and 409 once the worker has registered, since a connected worker is fleet state
+rather than an unused enrollment. Revoking the auth key does not remove a node
+that already joined Tailscale.
+
 Keys expire after ten minutes, are not reusable, create persistent tagged nodes,
 and are preauthorized for device approval. Persistent node credentials have a
 separate lifetime from the initial enrollment key. Auth keys are never stored
@@ -111,12 +141,19 @@ The database serializes enrollment reservations across API processes and limits
 each user to ten attempts per hour and 100 pending/active enrollments. Reusing a
 request ID returns 409; credentials cannot be retrieved again. Failed attempts
 still count toward the hourly limit. Provider errors are sanitized, and a key
-created before a database failure is revoked when possible.
+created before a database failure is revoked when possible, reusing the OAuth
+access token that created it. Key issuance and activation share a one-minute
+deadline; the reconciler expires reservations still pending after five minutes,
+and a key issued for an expired reservation is revoked rather than returned.
+A withdrawn enrollment can no longer authenticate, including a worker whose
+connection was accepted just before the withdrawal. A worker ID listed in
+`WORKER_TOKENS` keeps that static credential regardless of enrollment history.
 
-A failed/interrupted CLI setup can leave an unused enrollment record; setup
-recovery and fleet lifecycle/revocation UI remain follow-up work. This is a
-shared fleet for approved administrators, not customer/tenant isolation. The
-desktop UI and its distribution installer are not part of this change.
+A setup interrupted by a crash or network loss before it can call the withdraw
+route still leaves an active record; fleet lifecycle/revocation UI remains
+follow-up work. This is a shared fleet for approved administrators, not
+customer/tenant isolation. The desktop UI and its distribution installer are not
+part of this change.
 
 References: [Tailscale OAuth clients](https://tailscale.com/docs/features/oauth-clients),
 [tags](https://tailscale.com/docs/features/tags),
