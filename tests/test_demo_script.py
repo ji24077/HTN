@@ -1,5 +1,11 @@
 """Offline checks of the demo's oracle and checkpoint guard; no native GPU claims."""
 
+import pytest
+
+# Needs the real trainer. Installed by the `cuda`/`rocm` extras on a GPU box;
+# on a laptop this module skips rather than breaking collection for everyone.
+pytest.importorskip("torch", reason="install the cuda extra to run trainer tests")
+
 import importlib.util
 import json
 import subprocess

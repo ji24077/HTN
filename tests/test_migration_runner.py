@@ -17,6 +17,11 @@ from gpushare.dashboard import migration, runner
 
 @pytest.fixture
 def fake_hosts(tmp_path, monkeypatch):
+    # The bundle format is built with real tensors, so this fixture needs the
+    # trainer — which lives behind the cuda/rocm extras. Skipping keeps the
+    # eight tests in this module that do not touch it runnable on a laptop;
+    # without the guard they all failed collection instead.
+    pytest.importorskip("torch", reason="install the cuda extra to run trainer tests")
     from gpushare.trainer import checkpoint
 
     root = tmp_path / "project"

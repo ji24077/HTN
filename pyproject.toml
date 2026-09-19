@@ -63,6 +63,12 @@ agent = [
 dev = [
     "ruff>=0.7",
     "pytest>=8",
+    # The checkpoint/resume/migration tests build real tensors to verify the
+    # bundle format, so they need numpy on a laptop too — without it they do
+    # not fail, they fail to import, and `make test` reports collection errors
+    # instead of a result. numpy is ~15 MB; torch is not here on purpose, and
+    # the handful of tests that need it skip themselves.
+    "numpy>=2.0",
 ]
 
 [project.scripts]
