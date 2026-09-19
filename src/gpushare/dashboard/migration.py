@@ -17,6 +17,56 @@ from gpushare.agent.task import REQUIRED_FIELDS
 PYTHON = ".migration-venv/bin/python"
 INFERENCE = {"batch": 8, "dtype": "bf16", "fuse_adapter": False, "length_bucketing": False}
 
+NATIVE_GPU_PROBE = """
+import json, sys
+report = {"probe": "native_gpu", "expected_vendor": sys.argv[1],
+          "gpu": None, "vendor": None, "free_memory_bytes": None,
+          "total_memory_bytes": None, "smoke_test": "not_run"}
+try:
+    import torch
+    report.update(torch=torch.__version__, hip=torch.version.hip, cuda=torch.version.cuda)
+    report["vendor"] = "amd" if torch.version.hip else "nvidia" if torch.version.cuda else "cpu"
+    if report["vendor"] != report["expected_vendor"] or not torch.cuda.is_available():
+        raise RuntimeError("native GPU backend is unavailable or has the wrong vendor")
+    report["gpu"] = torch.cuda.get_device_name(0)
+    free, total = torch.cuda.mem_get_info(0)
+    report.update(free_memory_bytes=free, total_memory_bytes=total,
+                  process_allocated_bytes=torch.cuda.memory_allocated(0),
+                  process_reserved_bytes=torch.cuda.memory_reserved(0))
+    if free <= 0:
+        raise RuntimeError("native GPU reports zero free memory; aborting before package installation")
+    torch.cuda.reset_peak_memory_stats(0)
+    x = torch.randn((32, 32), device="cuda", dtype=torch.bfloat16, requires_grad=True)
+    loss = (x @ x).float().square().mean()
+    loss.backward()
+    torch.cuda.synchronize(0)
+    if not torch.isfinite(loss).item() or not torch.isfinite(x.grad).all().item():
+        raise RuntimeError("native BF16 forward/backward produced non-finite values")
+    report.update(smoke_test="passed", peak_allocated_bytes=torch.cuda.max_memory_allocated(0),
+                  peak_reserved_bytes=torch.cuda.max_memory_reserved(0))
+except Exception as exc:
+    report.update(smoke_test="failed", error=str(exc))
+print(json.dumps(report), flush=True)
+"""
+
+
+def _native_preflight(job, info, vendor: str, destination: Path) -> dict:
+    """Use shipped Torch only; preserve failure evidence before any installation."""
+    from gpushare.dashboard import runner as r
+
+    command = shlex.join(["python3", "-c", NATIVE_GPU_PROBE, vendor])
+    try:
+        report = json.loads(r._capture(r._ssh_args(info, command), timeout=120))
+    except Exception as exc:  # noqa: BLE001 - retain even transport/import failures
+        report = {"probe": "native_gpu", "expected_vendor": vendor,
+                  "smoke_test": "failed", "error": r._redact(str(exc))}
+    destination.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+    if report.get("smoke_test") != "passed" or report.get("vendor") != vendor:
+        raise r.JobError(f"{vendor} native GPU preflight failed: {report.get('error', 'invalid result')}; evidence: {destination.name}")
+    r.JOBS.log(job, f"native GPU preflight passed: {report['gpu']}, "
+               f"{report['free_memory_bytes'] / 1e9:.3f} GB free; BF16 forward/backward passed")
+    return report
+
 
 def _gate(before: dict, after: dict, *, tolerance: float = 0.02) -> dict:
     from gpushare.dashboard import runner as r
@@ -74,6 +124,25 @@ def _verify_remote(job, info, remote: str):
     r._remote(job, info, [PYTHON, "-c", code, remote])
 
 
+def _collect_training_evidence(job, info, checkpoint: str, destination: Path) -> dict:
+    """Retain process allocator/step evidence before a later evaluation can fail."""
+    from gpushare.dashboard import runner as r
+
+    code = "import pathlib,sys; print(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))"
+    argv = [PYTHON, "-c", code, f"{checkpoint}/meta.json"]
+    command = f"cd {shlex.quote(r.REMOTE_ROOT)} && {shlex.join(argv)}"
+    report = json.loads(r._capture(r._ssh_args(info, command), timeout=120))
+    destination.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+    r.JOBS.log(
+        job,
+        f"training evidence: {report['gpu']}, completed optimizer steps "
+        f"{report['start_step']} -> {report['steps']}; "
+        f"process peak allocated {report['peak_vram_gb']:.3f} GB, "
+        f"reserved {report['peak_reserved_gb']:.3f} GB; saved {destination.name}",
+    )
+    return report
+
+
 def run_resume_migration(
     job,
     *,
@@ -126,6 +195,12 @@ def run_resume_migration(
     local_eval = local / "eval"
     local_eval.mkdir()
 
+    r.JOBS.update(job, "checking native GPU memory and execution before installation", 2)
+    native_preflight = {}
+    for side, pod, info in (("target", target, dst_info), ("source", source, src_info)):
+        native_preflight[side] = _native_preflight(
+            job, info, pod["vendor"], local / f"{side}-native-preflight.json"
+        )
     r.JOBS.update(job, "preparing and checking both GPU backends", 5)
     preflight = {}
     for side, pod, info in (("source", source, src_info), ("target", target, dst_info)):
@@ -197,6 +272,9 @@ def run_resume_migration(
         ],
     )
     _verify_remote(job, src_info, source_ckpt)
+    source_training = _collect_training_evidence(
+        job, src_info, source_ckpt, local / "source-training.json"
+    )
 
     eval_common = [
         "--data",
@@ -289,6 +367,9 @@ def run_resume_migration(
         ],
     )
     _verify_remote(job, dst_info, resumed_ckpt)
+    target_training = _collect_training_evidence(
+        job, dst_info, resumed_ckpt, local / "target-training.json"
+    )
     r.JOBS.update(job, "validating continued job and completed training state", 90)
     after, final_gate = evaluate_target(f"{relative_run}/resumed-ckpt", "after")
     r._pull(job, dst_info, resumed_ckpt, local / "ckpt")
@@ -303,6 +384,8 @@ def run_resume_migration(
         "resumed_to_step": total_steps,
         "input_sha256": hashes,
         "preflight": preflight,
+        "native_preflight": native_preflight,
+        "training": {"source": source_training, "target": target_training},
         "before": baseline,
         "target_before_resume": before_resume,
         "after": after,

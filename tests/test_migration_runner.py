@@ -2,8 +2,11 @@
 
 import io
 import json
+import shlex
 import shutil
+import sys
 import tarfile
+from types import SimpleNamespace
 
 import pytest
 
@@ -34,6 +37,7 @@ def fake_hosts(tmp_path, monkeypatch):
         "fail_verify": False,
         "source_json_parse_rate": 1.0,
         "source_exact_match_rate": 1.0,
+        "native_failure": None,
     }
     monkeypatch.setattr(runner, "ROOT", root)
     monkeypatch.setattr(runner, "RUN_ROOT", root / "runs")
@@ -44,7 +48,10 @@ def fake_hosts(tmp_path, monkeypatch):
     monkeypatch.setattr(
         runner, "_sync_project", lambda job, info: events.append((info["side"], "sync"))
     )
-    monkeypatch.setattr(runner, "_setup_migration_pod", lambda *args: None)
+    monkeypatch.setattr(
+        runner, "_setup_migration_pod",
+        lambda job, info, vendor: events.append((info["side"], "setup")),
+    )
     monkeypatch.setattr(runner, "_run", lambda *args, **kwargs: 0)
     monkeypatch.setattr(
         migration,
@@ -91,6 +98,13 @@ def fake_hosts(tmp_path, monkeypatch):
             }
             (out / "training-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
             (out / "adapter_config.json").write_text("{}", encoding="utf-8")
+            (out / "meta.json").write_text(json.dumps({
+                "gpu": "RTX 4090" if side == "source" else "MI300X",
+                "start_step": 0 if side == "source" else 4,
+                "steps": manifest["global_step"],
+                "peak_vram_gb": 1.5,
+                "peak_reserved_gb": 2.0,
+            }), encoding="utf-8")
             return 0
         assert argv[1] == "scripts/evaluate.py"
         is_before = "target-before-resume" in options["--out"]
@@ -121,6 +135,28 @@ def fake_hosts(tmp_path, monkeypatch):
     monkeypatch.setattr(runner, "_push", push)
     monkeypatch.setattr(runner, "_pull", pull)
     monkeypatch.setattr(runner, "_remote", remote)
+
+    def capture(argv, **kwargs):
+        if "native_gpu" in argv[-1]:
+            vendor = shlex.split(argv[-1])[-1]
+            side = "target" if vendor == "amd" else "source"
+            events.append((side, "native_preflight"))
+            failed = controls["native_failure"] == side
+            return json.dumps({
+                "vendor": vendor, "gpu": vendor,
+                "free_memory_bytes": 0 if failed else 10**10,
+                "total_memory_bytes": 2 * 10**10,
+                "smoke_test": "failed" if failed else "passed",
+                "error": "zero free memory" if failed else None,
+            })
+        # The evidence read is a real SSH command; map its remote metadata path
+        # into the fake host and keep its ordering relative to evaluations.
+        path = shlex.split(argv[-1])[-1]
+        side = "target" if path.endswith("resumed-ckpt/meta.json") else "source"
+        events.append((side, "training_evidence"))
+        return remote_path({"side": side}, path).read_text(encoding="utf-8")
+
+    monkeypatch.setattr(runner, "_capture", capture)
     monkeypatch.setattr(
         checkpoint,
         "verify_training_bundle",
@@ -128,14 +164,14 @@ def fake_hosts(tmp_path, monkeypatch):
     )
     info = {"ip": "127.0.0.1", "port": 22, "key": "unused-fake-key"}
 
-    def run():
+    def run(prepare_pods=False):
         return migration.run_resume_migration(
             runner.Job(id="migration-test", kind="migrate-nvidia-amd", params={}),
             source={"id": "source", "vendor": "nvidia"},
             target={"id": "target", "vendor": "amd"},
             src_info={**info, "side": "source"},
             dst_info={**info, "side": "target"},
-            prepare_pods=False,
+            prepare_pods=prepare_pods,
         )
 
     return run, events, published, controls
@@ -144,6 +180,7 @@ def fake_hosts(tmp_path, monkeypatch):
 def test_full_migration_checks_target_before_resume_and_publishes_only_at_end(fake_hosts):
     run, events, published, _ = fake_hosts
     result = run()
+    assert events[:2] == [("target", "native_preflight"), ("source", "native_preflight")]
     assert events.index(("target", "verify")) < events.index(("target", "target_before"))
     assert events.index(("target", "target_before")) < events.index(("target", "resume"))
     assert events.index(("target", "resume")) < events.index(("target", "target_after"))
@@ -162,6 +199,65 @@ def test_failed_transfer_or_quality_never_publishes_and_precheck_failure_never_r
         run()
     assert not published
     assert (("target", "resume") in events) == (failure == "fail_after")
+
+
+@pytest.mark.parametrize("side", ["target", "source"])
+def test_native_probe_failure_retains_evidence_before_any_setup_or_training(fake_hosts, side):
+    run, events, published, controls = fake_hosts
+    controls["native_failure"] = side
+    with pytest.raises(runner.JobError, match="native GPU preflight failed"):
+        run(prepare_pods=True)
+    assert all(stage == "native_preflight" for _, stage in events)
+    path = runner.RUN_ROOT / "migration-test" / f"{side}-native-preflight.json"
+    evidence = json.loads(path.read_text(encoding="utf-8"))
+    assert evidence["free_memory_bytes"] == 0
+    assert evidence["smoke_test"] == "failed"
+    assert "zero free memory" in evidence["error"]
+    assert not published
+
+
+def test_standalone_native_probe_rejects_zero_free_before_allocating(monkeypatch, capsys):
+    def forbidden(*args, **kwargs):
+        pytest.fail("empty GPU must be rejected before allocating or launching kernels")
+
+    fake_torch = SimpleNamespace(
+        __version__="native-test",
+        version=SimpleNamespace(hip="7.1", cuda=None),
+        cuda=SimpleNamespace(
+            is_available=lambda: True,
+            get_device_name=lambda index: "MI300X",
+            mem_get_info=lambda index: (0, 192 * 1024**3),
+            memory_allocated=lambda index: 0,
+            memory_reserved=lambda index: 0,
+            reset_peak_memory_stats=forbidden,
+        ),
+        randn=forbidden,
+    )
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+    monkeypatch.setattr(sys, "argv", ["native-probe", "amd"])
+    exec(compile(migration.NATIVE_GPU_PROBE, "native-probe", "exec"), {})
+    report = json.loads(capsys.readouterr().out)
+    assert report["gpu"] == "MI300X"
+    assert report["free_memory_bytes"] == 0
+    assert report["smoke_test"] == "failed"
+    assert "zero free memory" in report["error"]
+
+
+def test_training_evidence_survives_final_quality_rejection(fake_hosts):
+    run, events, published, controls = fake_hosts
+    controls["fail_after"] = True
+    with pytest.raises(runner.JobError):
+        run()
+    local = runner.RUN_ROOT / "migration-test"
+    for side, start, end, evaluation in (
+        ("source", 0, 4, "source_eval"), ("target", 4, 8, "target_after")
+    ):
+        evidence = json.loads((local / f"{side}-training.json").read_text(encoding="utf-8"))
+        assert (evidence["start_step"], evidence["steps"]) == (start, end)
+        assert evidence["peak_vram_gb"] == 1.5
+        assert evidence["peak_reserved_gb"] == 2.0
+        assert events.index((side, "training_evidence")) < events.index((side, evaluation))
+    assert not published
 
 
 def test_gate_rejects_different_examples_even_with_perfect_metrics():

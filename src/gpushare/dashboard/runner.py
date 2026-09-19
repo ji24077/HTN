@@ -11,6 +11,7 @@ from __future__ import annotations
 import contextlib
 import functools
 import json
+import logging
 import math
 import os
 import re
@@ -148,9 +149,28 @@ class JobManager:
 
     def _persist(self, job: Job) -> None:
         path = JOB_ROOT / f"{job.id}.json"
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(job.public(), indent=2, ensure_ascii=False), encoding="utf-8")
-        tmp.replace(path)
+        # Windows readers, antivirus, and sync clients can briefly deny replacement.
+        # Keep the old complete record until a closed, uniquely named file is ready.
+        tmp: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=JOB_ROOT,
+                prefix=f".{job.id}-", suffix=".tmp", delete=False,
+            ) as stream:
+                tmp = Path(stream.name)
+                json.dump(job.public(), stream, indent=2, ensure_ascii=False)
+            for attempt in range(8):
+                try:
+                    os.replace(tmp, path)
+                    break
+                except PermissionError:
+                    if attempt == 7:
+                        raise
+                    time.sleep(min(0.05 * 2**attempt, 0.5))
+        finally:
+            if tmp is not None:
+                with contextlib.suppress(OSError):
+                    tmp.unlink(missing_ok=True)
 
     def create(
         self,
@@ -166,18 +186,22 @@ class JobManager:
                 raise JobError(f"{busy.kind} job {busy.id[:8]} is already running")
             job = Job(id=uuid.uuid4().hex, kind=kind, params=params)
             self._jobs[job.id] = job
-            self._persist(job)
+            try:
+                self._persist(job)
+            except Exception:
+                del self._jobs[job.id]
+                raise
 
         thread = threading.Thread(target=self._run, args=(job, work), daemon=True)
         thread.start()
         return job
 
     def _run(self, job: Job, work: Callable[[Job], dict[str, Any]]) -> None:
-        with self._lock:
-            job.status = "running"
-            job.started_at = time.time()
-            self._persist(job)
         try:
+            with self._lock:
+                job.status = "running"
+                job.started_at = time.time()
+                self._persist(job)
             result = work(job)
             with self._lock:
                 if job.cancel_requested:
@@ -190,13 +214,29 @@ class JobManager:
         except Exception as exc:  # noqa: BLE001 - this is the job boundary
             with self._lock:
                 job.status = "cancelled" if job.cancel_requested else "failed"
-                job.error = str(exc)
-                self.log(job, f"ERROR: {exc}")
+                job.error = _redact(str(exc))
+                # The original exception may itself be a persistence failure.
+                # Append in memory; only the terminal write below should persist.
+                job.logs.append(f"ERROR: {job.error}"[-2000:])
         finally:
             with self._lock:
                 job.finished_at = time.time()
                 job._process = None
-                self._persist(job)
+                try:
+                    self._persist(job)
+                except Exception as exc:  # noqa: BLE001 - preserve terminal state
+                    message = _redact(f"Could not persist final job state: {exc}")
+                    job.status = "failed"
+                    job.stage = "failed"
+                    job.error = f"{job.error}; {message}" if job.error else message
+                    job.logs.append(f"ERROR: {message}"[-2000:])
+                    # If storage recovers, record the failed status, not a stale
+                    # running/success record. A permanent failure stays visible in
+                    # memory and server logs without recursive error handling.
+                    try:
+                        self._persist(job)
+                    except Exception:  # noqa: BLE001 - no further writes can help
+                        logging.getLogger(__name__).error("Job %s: %s", job.id, message)
 
     def get(self, job_id: str) -> Job:
         with self._lock:

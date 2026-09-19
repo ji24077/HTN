@@ -3,8 +3,15 @@
 This branch adds a migration test for the Qwen extraction model: train on NVIDIA,
 pause at an optimizer-step boundary, move a complete checkpoint to AMD, compare
 predictions before updating any weights, then continue the same training job.
-Local tests validate checkpoint restoration and orchestration. A real CUDA-to-ROCm
-run is still required before claiming hardware migration works.
+Local tests validate checkpoint restoration and orchestration. Two paid attempts
+stopped before model training; hardware migration has not passed.
+
+This is a checkpoint-portability test, not a CUDA/HIP source translator. The
+Qwen workload extracts structured fields from text; it has not been trained on
+code translation. The product requirement now includes accepting an existing
+workload and converting vendor-specific code in both directions. Neither that
+conversion layer nor an AMD-to-NVIDIA return test is implemented by this runner.
+Preserve this distinction in demos and teammate handoffs.
 
 ## Approved rental and current state
 
@@ -21,10 +28,49 @@ the planned 90-minute compute/storage estimate is $4.845. The guard rejects
 a plan exceeding the authorized budget. The actual bill must be collected
 separately; estimates do not include unknown account-specific taxes.
 
-No Pods have been created for this test. MCP authentication has passed a real
-`initialize`, `tools/list`, and `list-pods` request, returning zero Pods. Codex
-must reload its MCP connection to load the configured tools into the active
-session. Provisioning remains paused pending that connection refresh.
+RunPod MCP is connected. Paid MI300X inventory changed from `NONE` at 09:45 UTC
+to `LOW` at 09:52 UTC on 2026-09-19. A real allocation then succeeded for both
+approved GPUs in EU-RO-1. The first attempt stopped during package setup when
+Windows denied an atomic job-log replacement inside OneDrive. No model training
+ran in that attempt. Both Pods were deleted and their absence independently
+verified; the conservative elapsed-time cost estimate was $0.4194.
+
+Job persistence now retries brief sharing locks and records permanent failures.
+The retry controller keeps frequently rewritten job logs outside OneDrive and
+reserves $0.50 for the first attempt, leaving a $14.50 ceiling for the retry.
+Only successful training steps and process GPU memory measurements count as
+workload evidence; provider `RUNNING` status or device-wide allocated memory
+alone does not establish that our model ran. Alternative-provider research is
+stopped because this experiment must use RunPod for the sponsor track.
+
+The second session, `migration-20260919-3f0391f297eb`, ran from 10:05:04 to
+10:10:10 UTC. RTX 4090 Pod `q8mm5vemo4vv4d` passed the CUDA BF16 smoke test.
+MI300X Pod `6kyo6xfy67tepj` failed the ROCm BF16 smoke test: a 76 MiB allocation
+failed with 191.98 GiB total GPU memory and zero bytes free. PyTorch reported
+only 1,024 bytes allocated by this process and 2 MiB reserved but unallocated.
+This happened before model loading or training. The underlying cause of the
+unavailable device memory is not established; it must not be described as this
+model using 192 GiB. Both Pods were deleted and MCP independently listed none.
+
+The second elapsed-time cost estimate is $0.2746; combined with the first
+attempt, the estimate is $0.6940. Provider billing records were not yet returned,
+so these are estimates, not a final invoice. Both attempts completed zero model
+optimizer steps. The second attempt's independent two-second GPU samples also
+showed zero utilization throughout setup. There are no migrated predictions,
+resumed training results, or conversion results to claim from these rentals.
+
+The runner now probes each image's native PyTorch runtime before installing
+anything, checking AMD first. It records free/total memory and runs a small BF16
+forward/backward check. A failed probe preserves JSON evidence and blocks all
+package installation and model training. This new guard has local regression
+coverage; it has not yet been exercised on another paid rental.
+
+The second job's frozen input copies are in
+`.gpushare/runs/c84a0a2825544ee38c70e42ea855a333/input/`. Sanitized job logs,
+session results, and utilization evidence are under `.cache/migration-results/`
+with the session ID prefix. These are ignored runtime artifacts. The next run
+must check native GPU allocation before package installation and maintain the
+remaining cumulative budget; there is no active rental now.
 
 RunPod's inspected REST v2 schema and runpodctl 2.14.0 expose no server-side Pod
 termination deadline. Our watchdog is an independent local process, with a

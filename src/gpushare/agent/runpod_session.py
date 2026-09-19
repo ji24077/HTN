@@ -156,7 +156,13 @@ class RunpodClient:
                 raise
         return None
 
-    def check_quote(self, record: dict):
+    def check_quote(self, record: dict, *, allow_unavailable_target_probe: bool = False):
+        if allow_unavailable_target_probe and not (
+            record.get("role") == "target" and record.get("gpu_id") == "AMD Instinct MI300X OAM"
+            and record.get("gpu_count") == 1 and record.get("cloud") == "SECURE"
+            and record.get("data_center_ids") == ["EU-RO-1"]
+        ):
+            raise SessionError("Unavailable allocation probe is restricted to the approved AMD target")
         query = urllib.parse.urlencode({"include": "AVAILABILITY", "product": "POD",
                                        "count": record["gpu_count"], "cloud": record["cloud"]})
         response = self.request("GET", "/catalog/gpus?" + query)
@@ -164,6 +170,8 @@ class RunpodClient:
         if len(matches) != 1:
             raise SessionError("Quoted GPU is absent from the current catalog")
         gpu = matches[0]
+        if gpu.get(record["cloud"].lower()) is False:
+            raise SessionError("Quoted GPU does not support the approved cloud")
         rate = gpu.get("price", {}).get(record["cloud"].lower())
         if rate is None or not math.isclose(
             number(rate, "catalog price") * record["gpu_count"], record["hourly_gpu_usd"],
@@ -171,12 +179,16 @@ class RunpodClient:
         ):
             raise SessionError("GPU quote changed; prepare a new reviewed plan")
         available = {"LOW", "MEDIUM", "HIGH"}
-        if gpu.get("availability") not in available:
+        if gpu.get("availability") not in available and not allow_unavailable_target_probe:
             raise SessionError("Quoted GPU is no longer available")
         centers = {dc.get("id") for dc in gpu.get("dataCenters", [])
                    if dc.get("availability") in available}
-        if not centers.intersection(record["data_center_ids"]):
+        center_available = bool(centers.intersection(record["data_center_ids"]))
+        if not center_available and not allow_unavailable_target_probe:
             raise SessionError("Quoted GPU is unavailable in the approved data center")
+        return {"availability": gpu.get("availability"),
+                "approved_data_center_available": center_available,
+                "availability_probe_permitted": allow_unavailable_target_probe}
 
 
 @contextlib.contextmanager
@@ -246,6 +258,9 @@ class Session:
             if len(records) != 2 or {r["role"] for r in records} != ROLES:
                 raise SessionError("Unsafe session Pod roles")
             ids = []
+            permission = journal.get("allow_unavailable_target_probe", False)
+            if not isinstance(permission, bool):
+                raise SessionError("Invalid unavailable-target probe permission")
             for record in records:
                 if record["owner_session"] != self.session_id:
                     raise SessionError("Pod owner reference mismatch")
@@ -253,6 +268,13 @@ class Session:
                     raise SessionError("Pod name does not belong to this session")
                 if record["gpu_count"] != 1 or record["cloud"] != "SECURE":
                     raise SessionError("Unsafe GPU configuration")
+                probe = record.get("allow_unavailable_target_probe", False)
+                if not isinstance(probe, bool) or (probe and not (
+                    permission and record["role"] == "target"
+                    and record["gpu_id"] == "AMD Instinct MI300X OAM"
+                    and record["data_center_ids"] == ["EU-RO-1"]
+                )):
+                    raise SessionError("Unsafe unavailable-target probe permission")
                 number(record["hourly_gpu_usd"], "GPU quote", 0.001)
                 if record.get("id") is not None:
                     if not valid_id(record["id"]) or record["id"] in baseline:
@@ -295,9 +317,12 @@ class Session:
             self._save(journal)
             return journal
 
-    def prepare(self, plan: dict):
+    def prepare(self, plan: dict, *, allow_unavailable_target_probe: bool = False):
+        """Prepare a bounded run; the explicit probe flag bypasses AMD stock only."""
         if not isinstance(plan, dict):
             raise SessionError("Plan must be a JSON object")
+        if not isinstance(allow_unavailable_target_probe, bool):
+            raise SessionError("Unavailable-target probe permission must be a boolean")
         now = self.clock()
         budget = number(plan.get("budget_usd"), "budget", 0.01)
         duration = number(plan.get("max_duration_seconds"), "duration", 1)
@@ -331,7 +356,8 @@ class Session:
                 raise SessionError("Only the approved EU-RO-1 location is supported")
             if not 1 <= number(payload.get("disk"), "disk") <= 100 or payload.get("mounts"):
                 raise SessionError("Use at most 100 GB container disk and no separate volumes")
-            if item.get("available") is not True:
+            probe = allow_unavailable_target_probe and role == "target"
+            if item.get("available") is not True and not (probe and item.get("available") is False):
                 raise SessionError("Quoted GPU was unavailable")
             quoted_at = timestamp(item.get("quoted_at_utc"))
             if not 0 <= now - quoted_at <= 900:
@@ -348,11 +374,14 @@ class Session:
                             "name": payload["name"], "gpu_id": expected_gpu, "gpu_count": 1,
                             "cloud": "SECURE", "data_center_ids": ["EU-RO-1"],
                             "hourly_gpu_usd": rate, "quoted_at": quoted_at,
+                            "quoted_available": item["available"],
+                            "allow_unavailable_target_probe": probe,
                             "payload_hash": digest(payload), "state": "planned", "id": None})
         journal = {"version": 1, "session_id": self.session_id, "plan_hash": digest(plan),
                    "budget_usd": budget, "storage_allowance_per_hour": storage,
                    "created_at": now, "deadline": now + duration, "pods": records,
                    "baseline_ids": [], "baseline_recorded": False, "state": "prepared",
+                   "allow_unavailable_target_probe": allow_unavailable_target_probe,
                    "cleanup_requested": False, "watchdog_heartbeat_at": None}
         self._budget(journal, now)
         with file_lock(self.lock_path):
@@ -450,7 +479,16 @@ class Session:
             for item in plan["pods"]:
                 role = item["role"]
                 record = next(r for r in self.read()["pods"] if r["role"] == role)
-                self.client.check_quote(record)
+                if record.get("allow_unavailable_target_probe", False):
+                    observed_quote = self.client.check_quote(
+                        record, allow_unavailable_target_probe=True
+                    )
+                else:
+                    observed_quote = self.client.check_quote(record)
+                if isinstance(observed_quote, dict):
+                    self.mutate(lambda j, selected_role=role, observed=observed_quote: next(
+                        r for r in j["pods"] if r["role"] == selected_role
+                    ).update(last_catalog_check=observed))
 
                 def intent(j, selected_role=role):
                     self._require_create(j)

@@ -44,7 +44,7 @@ class FakeClient:
     def list_pods(self):
         return copy.deepcopy(list(self.pods.values()))
 
-    def check_quote(self, record):
+    def check_quote(self, record, *, allow_unavailable_target_probe=False):
         if self.reject_quote:
             raise SessionError("GPU quote changed")
 
@@ -352,3 +352,99 @@ def test_live_quote_price_and_stock(availability, price, center, passes):
     else:
         with pytest.raises(SessionError):
             client.check_quote(record)
+
+
+class ProbeClient(FakeClient):
+    """Exercise real quote validation against an entirely in-memory catalog."""
+
+    def __init__(self, clock, *, target_price=2.39, source_stock="LOW"):
+        super().__init__(clock)
+        catalog = {"gpus": [
+            {"id": "AMD Instinct MI300X OAM", "secure": True,
+             "price": {"secure": target_price}, "availability": "NONE", "dataCenters": []},
+            {"id": "NVIDIA GeForce RTX 4090", "secure": True,
+             "price": {"secure": 0.74}, "availability": source_stock,
+             "dataCenters": [{"id": "EU-RO-1", "availability": source_stock}]},
+        ]}
+        self.catalog_client = RunpodClient(
+            "private-test-key", opener=lambda *a, **k: Response(json.dumps(catalog).encode())
+        )
+
+    def check_quote(self, record, *, allow_unavailable_target_probe=False):
+        return self.catalog_client.check_quote(
+            record, allow_unavailable_target_probe=allow_unavailable_target_probe
+        )
+
+
+def probe_plan():
+    plan = make_plan()
+    plan["pods"].reverse()  # Probe AMD before any NVIDIA rental is attempted.
+    plan["pods"][0]["available"] = False
+    return plan
+
+
+@pytest.mark.parametrize("flag,unavailable_role", [(False, "target"), (True, "source")])
+def test_probe_permission_does_not_relax_normal_or_source_preparation(tmp_path, flag, unavailable_role):
+    clock = Clock()
+    client = ProbeClient(clock)
+    session = Session(tmp_path, SESSION_ID, client, clock=clock)
+    plan = make_plan()
+    next(item for item in plan["pods"] if item["role"] == unavailable_role)["available"] = False
+    with pytest.raises(SessionError, match="unavailable"):
+        session.prepare(plan, allow_unavailable_target_probe=flag)
+    assert client.creates == 0
+
+
+def test_explicit_unavailable_probe_posts_once_and_rejection_closes_cleanly(tmp_path):
+    clock = Clock()
+    client = ProbeClient(clock)
+    client.fail_create = 1
+    session = Session(tmp_path, SESSION_ID, client, clock=clock, sleep=lambda _: None)
+    plan = probe_plan()
+    session.prepare(plan, allow_unavailable_target_probe=True)
+    session.heartbeat()
+    with pytest.raises(APIError):
+        session.create(plan)
+    journal = session.read()
+    assert client.creates == 1 and client.deletes == []
+    assert journal["state"] == "closed"
+    target = journal["pods"][0]
+    assert target["role"] == "target" and target["state"] == "rejected"
+    assert target["quoted_available"] is False
+    assert target["last_catalog_check"]["availability"] == "NONE"
+    assert target["last_catalog_check"]["availability_probe_permitted"] is True
+    assert journal["pods"][1]["state"] == "planned"
+
+
+def test_unavailable_target_probe_still_rejects_changed_price(tmp_path):
+    clock = Clock()
+    client = ProbeClient(clock, target_price=2.40)
+    session = Session(tmp_path, SESSION_ID, client, clock=clock)
+    plan = probe_plan()
+    session.prepare(plan, allow_unavailable_target_probe=True)
+    session.heartbeat()
+    with pytest.raises(SessionError, match="quote changed"):
+        session.create(plan)
+    assert client.creates == 0
+    assert session.read()["state"] == "closed"
+
+
+def test_target_probe_never_bypasses_source_live_availability(tmp_path):
+    clock = Clock()
+    client = ProbeClient(clock, source_stock="NONE")
+    session = Session(tmp_path, SESSION_ID, client, clock=clock, sleep=lambda _: None)
+    plan = probe_plan()
+    session.prepare(plan, allow_unavailable_target_probe=True)
+    session.heartbeat()
+    with pytest.raises(SessionError, match="no longer available"):
+        session.create(plan)
+    assert client.creates == 1  # AMD only; unavailable NVIDIA never gets a POST.
+    assert client.deletes == ["pod-00001"]
+    assert session.read()["state"] == "closed"
+
+
+def test_source_cannot_use_target_probe_even_via_direct_client():
+    record = {"role": "source", "gpu_id": "NVIDIA GeForce RTX 4090", "gpu_count": 1,
+              "cloud": "SECURE", "data_center_ids": ["EU-RO-1"], "hourly_gpu_usd": .74}
+    with pytest.raises(SessionError, match="restricted"):
+        ProbeClient(Clock()).check_quote(record, allow_unavailable_target_probe=True)
