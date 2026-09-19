@@ -98,9 +98,17 @@ def run_eval(model, tok, rows: list[dict], *, batch: int, seq_len: int) -> EvalR
 
 
 @torch.no_grad()
-def _loss(model, tok, rows: list[dict], *, seq_len: int, n: int = 64) -> float | None:
+def _loss(
+    model, tok, rows: list[dict], *, seq_len: int, n: int = 64, batch: int = 8
+) -> float | None:
     """Secondary metric. Target tokens only, same masking as training — a loss
-    computed over the prompt too would not be comparable to the training curve."""
+    computed over the prompt too would not be comparable to the training curve.
+
+    Batched because the logits are the memory hazard here, not the weights:
+    Qwen's 151,936 vocab means one forward over 64 x 192 tokens materialises
+    ~3.7 GB of logits in bf16, and cross-entropy upcasts on top of that. A
+    0.5B model OOMing on its own eval would look like a chip problem.
+    """
     from gpushare.agent.task import build_example
 
     sys.path.insert(0, str(Path(__file__).parent))
@@ -114,8 +122,19 @@ def _loss(model, tok, rows: list[dict], *, seq_len: int, n: int = 64) -> float |
         )
     except SystemExit:
         return None
-    out = model(input_ids=ids.cuda(), labels=labels.cuda())
-    return float(out.loss)
+
+    # Token-weighted, not a mean of means: batches hold different numbers of
+    # supervised tokens once padding is masked out, so averaging the per-batch
+    # losses would silently weight short targets more heavily.
+    total, count = 0.0, 0
+    for i in range(0, len(ids), batch):
+        x, y = ids[i : i + batch].cuda(), labels[i : i + batch].cuda()
+        ntok = int((y != -100).sum())
+        if ntok == 0:
+            continue
+        total += float(model(input_ids=x, labels=y).loss) * ntok
+        count += ntok
+    return total / count if count else None
 
 
 def _serialise(r: EvalResult) -> dict:
