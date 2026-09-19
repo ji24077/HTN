@@ -61,7 +61,16 @@ const PORT_TRIES = 20
 type Lock = { port: number; token: string; pid: number; startedAt: string; version: string }
 
 function readLock(): Lock | null {
-  try { return JSON.parse(readFileSync(LOCK_PATH, 'utf8')) as Lock } catch { return null }
+  let lock: Lock
+  try { lock = JSON.parse(readFileSync(LOCK_PATH, 'utf8')) as Lock } catch { return null }
+  // A lock outlives the process that wrote it. Trusting it blindly sends the window to a
+  // dead port, where the page sits on its placeholder forever with no way out from inside
+  // the app -- so check the recorded pid is actually alive first. Signal 0 tests for
+  // existence without delivering anything; EPERM means it exists under another user.
+  try { process.kill(lock.pid, 0) } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'EPERM') return null
+  }
+  return lock
 }
 
 function writeLock(lock: Lock): void {
@@ -423,16 +432,29 @@ function render(s) {
   $('updateHint').textContent = s.updating ? 'Installing an update. It will restart itself.' : s.updateNote
 }
 
+let rendered = false
+let misses = 0
 async function tick() {
   if (quitting) return
   try {
     render(await api('state'))
+    rendered = true
+    misses = 0
     show($('footer'), true)
     $('footer').textContent = 'Closing this window does not stop the agent.'
   } catch {
-    // A restart after an update lands here for a second or two. Say so rather than
-    // showing an error that looks like a crash.
+    // A restart after an update lands here for a second or two, so the first few
+    // failures are not worth alarming anyone about. But if render() has never run, the
+    // page is still showing its "starting…" placeholder and will show it forever --
+    // which is indistinguishable from a hang. Say what happened and what to do.
+    misses += 1
     $('footer').textContent = 'Reconnecting to the agent…'
+    if (!rendered && misses >= 5) {
+      $('sub').textContent = 'cannot reach the agent'
+      show($('footer'), true)
+      $('footer').textContent =
+        'The agent is not responding on this address. Close this window and open DWP Agent again.'
+    }
   }
 }
 

@@ -1,6 +1,6 @@
 import { closeSync, openSync, readFileSync, readSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 
 /** DWP_HOME lets several agents coexist on one machine for local testing. */
 export const AGENT_HOME = process.env.DWP_HOME ?? join(homedir(), '.dwp')
@@ -45,7 +45,18 @@ export function installRoot(): string {
  * the instructions we print differs between the two.
  */
 export function isCompiledBinary(): boolean {
-  return import.meta.url.includes('$bunfs') || import.meta.url.includes('B:/~BUN')
+  // Bun's virtual filesystem marker, which is the reliable signal -- when it is present.
+  // Its spelling is Bun's business and has varied by platform and version: on Windows a
+  // backslashed form slips past a check written for forward slashes, and then a compiled
+  // binary believes it is running from source. That is not cosmetic. It told a Windows
+  // user to "Start it with: pnpm agent run", a command that cannot exist on a machine
+  // that only ever downloaded an executable.
+  const url = import.meta.url
+  if (url.includes('$bunfs') || url.includes('~BUN') || url.includes('~bun')) return true
+  // Fall back to what is being executed. Running from source means node or bun is the
+  // host process; a compiled binary is named after itself.
+  const exe = basename(process.execPath).toLowerCase().replace(/\.exe$/, '')
+  return exe !== 'node' && exe !== 'bun' && exe !== 'deno'
 }
 
 /** How this agent is invoked, for messages people are meant to copy. */
