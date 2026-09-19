@@ -206,6 +206,7 @@ def test_a_full_gpu_sends_the_job_to_one_with_room(monkeypatch):
     )
     monkeypatch.setattr(runner, "_ssh_info", lambda pid: {"pod": pid})
     monkeypatch.setattr(runner, "_free_vram_gb", lambda info: free[info["pod"]])
+    monkeypatch.setattr(runner, "_free_disk_gb", lambda info: 30.0)
     logged: list[str] = []
     monkeypatch.setattr(runner.JOBS, "log", lambda job, text: logged.append(text))
 
@@ -220,6 +221,31 @@ def test_a_full_gpu_sends_the_job_to_one_with_room(monkeypatch):
     assert "as requested" in logged[-1]
 
 
+def test_a_pod_with_the_gpu_but_no_disk_is_skipped(monkeypatch):
+    """500 steps trained, then the checkpoint could not be written.
+
+    That is the failure this covers: the GPU was free, the run took two
+    minutes, and `save_file` raised "No space left on device" — the one moment
+    where all the work is already spent. VRAM alone is not enough of a check.
+    """
+    monkeypatch.setattr(
+        runner,
+        "list_pods",
+        lambda: [
+            {"id": "full-disk", "name": "pod-a", "status": "running", "cost_per_hour": 0.5},
+            {"id": "ok", "name": "pod-b", "status": "running", "cost_per_hour": 0.7},
+        ],
+    )
+    monkeypatch.setattr(runner, "_ssh_info", lambda pid: {"pod": pid})
+    monkeypatch.setattr(runner, "_free_vram_gb", lambda info: 23.5)
+    monkeypatch.setattr(runner, "_free_disk_gb", lambda info: 1.0 if info["pod"] == "full-disk" else 30.0)
+    monkeypatch.setattr(runner.JOBS, "log", lambda job, text: None)
+
+    pod, _ = runner._place(object(), need_gb=16.0, preferred_pod_id="full-disk")
+
+    assert pod["id"] == "ok", "a pod with a free GPU but no disk was accepted"
+
+
 def test_placement_reports_every_pod_it_tried_when_none_fit(monkeypatch):
     monkeypatch.setattr(
         runner,
@@ -228,13 +254,17 @@ def test_placement_reports_every_pod_it_tried_when_none_fit(monkeypatch):
     )
     monkeypatch.setattr(runner, "_ssh_info", lambda pid: {"pod": pid})
     monkeypatch.setattr(runner, "_free_vram_gb", lambda info: 1.2)
+    monkeypatch.setattr(runner, "_free_disk_gb", lambda info: 30.0)
     monkeypatch.setattr(runner, "_gpu_occupants", lambda info: "3910603, 23178 MiB")
+    monkeypatch.setattr(runner.JOBS, "log", lambda job, text: None)
+    monkeypatch.setattr(runner, "_reclaim", lambda job, info, pod: False)
 
     try:
         runner._place(object(), need_gb=16.0, preferred_pod_id="a")
     except runner.JobError as e:
-        assert "pod-a: 1.2 GB free" in str(e)
+        assert "pod-a: 1.2 GB VRAM free" in str(e)
         assert "3910603" in str(e), "the occupant has to be named or there is nothing to act on"
+        assert "even after reclaiming" in str(e)
     else:
         raise AssertionError("placement accepted a pod with no room")
 
@@ -259,3 +289,50 @@ def test_predicted_training_vram_is_near_the_measured_peak():
     )
 
     assert 13.8 <= need <= 13.8 * runner.VRAM_MARGIN * 1.2, need
+
+
+def test_reclaim_is_a_last_resort_not_a_routine_reset(monkeypatch):
+    """A free pod wins over clearing an occupied one.
+
+    "Reset the GPU before every job" would work and would also kill whatever
+    model is being demonstrated at the time. Relocation costs nothing, so it is
+    tried first and reclaim only runs when no pod fits as it is.
+    """
+    monkeypatch.setattr(
+        runner,
+        "list_pods",
+        lambda: [
+            {"id": "busy", "name": "serving", "status": "running", "cost_per_hour": 0.5},
+            {"id": "free", "name": "idle", "status": "running", "cost_per_hour": 0.7},
+        ],
+    )
+    monkeypatch.setattr(runner, "_ssh_info", lambda pid: {"pod": pid})
+    monkeypatch.setattr(runner, "_free_vram_gb", lambda info: 0.9 if info["pod"] == "busy" else 23.5)
+    monkeypatch.setattr(runner, "_free_disk_gb", lambda info: 30.0)
+    monkeypatch.setattr(runner.JOBS, "log", lambda job, text: None)
+    reclaimed: list[str] = []
+    monkeypatch.setattr(runner, "_reclaim", lambda job, info, pod: reclaimed.append(pod["id"]) or True)
+
+    pod, _ = runner._place(object(), need_gb=16.0, preferred_pod_id="busy")
+
+    assert pod["id"] == "free"
+    assert not reclaimed, "an occupied pod was cleared while an idle one was available"
+
+
+def test_reclaim_runs_when_nothing_fits(monkeypatch):
+    freed = {"done": False}
+    monkeypatch.setattr(
+        runner,
+        "list_pods",
+        lambda: [{"id": "only", "name": "solo", "status": "running", "cost_per_hour": 0.5}],
+    )
+    monkeypatch.setattr(runner, "_ssh_info", lambda pid: {"pod": pid})
+    monkeypatch.setattr(runner, "_free_vram_gb", lambda info: 23.5 if freed["done"] else 0.9)
+    monkeypatch.setattr(runner, "_free_disk_gb", lambda info: 30.0)
+    monkeypatch.setattr(runner, "_gpu_occupants", lambda info: "123, 22631 MiB")
+    monkeypatch.setattr(runner.JOBS, "log", lambda job, text: None)
+    monkeypatch.setattr(runner, "_reclaim", lambda job, info, pod: freed.__setitem__("done", True) or True)
+
+    pod, _ = runner._place(object(), need_gb=16.0, preferred_pod_id="only")
+
+    assert pod["id"] == "only" and freed["done"]

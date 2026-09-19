@@ -468,6 +468,18 @@ TRAIN_SEQ_LEN = 192
 VRAM_MARGIN = 1.20
 
 
+# A 0.5B checkpoint is ~1.2 GB, and the base model has to be fetched before it
+# can be written. Both land on the same overlay, so placement has to clear the
+# sum with room to spare: a run that trains for two minutes and then cannot
+# serialise has cost the GPU time for nothing.
+DISK_NEED_GB = 6.0
+
+
+def _free_disk_gb(info: dict[str, Any], path: str = REMOTE_ROOT) -> float:
+    out = _capture(_ssh_args(info, f"df -BM --output=avail {shlex.quote(path)} 2>/dev/null | tail -1"))
+    return max((int(x) for x in re.findall(r"\d+", out)), default=0) / 1024
+
+
 def _free_vram_gb(info: dict[str, Any]) -> float:
     out = _capture(
         _ssh_args(info, "nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits")
@@ -522,6 +534,46 @@ def predicted_train_vram_gb(
     return predict_peak_vram_gb(cfg=cfg, model=MODELS["qwen2.5-0.5b"], cal=cal) * VRAM_MARGIN
 
 
+def _reclaim(job: Job, info: dict[str, Any], pod: dict[str, Any]) -> bool:
+    """Free a pod by dropping what this dashboard put there. Never anything else.
+
+    Two reclaimable things, in the order they cost least:
+
+    - Checkpoints from earlier runs. Only the newest is ever read back, so the
+      rest are ~1.2 GB each of nothing. The newest is kept because serving
+      resolves the model through it.
+    - Our own resident inference server. This is the destructive one: it is very
+      likely the model someone is demonstrating, which is why it is a last
+      resort rather than a routine "clear the GPU before every job".
+
+    A process we did not start is left alone. On rented hardware that could be
+    another tenant, and killing it would be neither ours to do nor recoverable.
+    """
+    freed = False
+    latest = (latest_run() or {}).get("job_id", "")
+    stale = _capture(
+        _ssh_args(
+            info,
+            f"ls -1d {REMOTE_ROOT}/.runs/*/ckpt 2>/dev/null | grep -v {shlex.quote(latest or 'none')} || true",
+        )
+    ).split()
+    if stale:
+        _capture(_ssh_args(info, "rm -rf " + " ".join(shlex.quote(d) for d in stale)))
+        JOBS.log(job, f"reclaimed {len(stale)} old checkpoint(s) on {pod['name']}")
+        freed = True
+
+    if _capture(_ssh_args(info, 'pgrep -f "serve[.]py" || true')).strip():
+        JOBS.log(
+            job,
+            f"stopping the inference server on {pod['name']} — no other pod had room. "
+            "Reload the model from the picker when the job finishes.",
+        )
+        _capture(_ssh_args(info, 'pkill -f "serve[.]py" || true'))
+        time.sleep(3)  # the allocator returns the memory to the driver on exit
+        freed = True
+    return freed
+
+
 def _place(job: Job, *, need_gb: float, preferred_pod_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
     """Pick a pod with room, preferring the one that was asked for.
 
@@ -548,20 +600,50 @@ def _place(job: Job, *, need_gb: float, preferred_pod_id: str) -> tuple[dict[str
         pod = pods[pod_id]
         try:
             info = _ssh_info(pod_id)
-            free = _free_vram_gb(info)
+            free, disk = _free_vram_gb(info), _free_disk_gb(info)
         except Exception as e:  # noqa: BLE001 — an unreachable pod is a candidate we skip
             surveyed.append(f"{pod['name']}: unreachable ({type(e).__name__})")
             continue
-        if free >= need_gb:
+        if free >= need_gb and disk >= DISK_NEED_GB:
             where = "as requested" if pod_id == preferred_pod_id else "moved from the requested pod"
-            JOBS.log(job, f"placing on {pod['name']}: {free:.1f} GB free, needs {need_gb:.1f} GB ({where})")
+            JOBS.log(
+                job,
+                f"placing on {pod['name']}: {free:.1f} GB VRAM and {disk:.1f} GB disk free, "
+                f"needs {need_gb:.1f} GB / {DISK_NEED_GB:.0f} GB ({where})",
+            )
             return pod, info
-        surveyed.append(f"{pod['name']}: {free:.1f} GB free{(' — ' + o) if (o := _gpu_occupants(info)) else ''}")
+        if free < need_gb:
+            surveyed.append(
+                f"{pod['name']}: {free:.1f} GB VRAM free"
+                + (f" — {o}" if (o := _gpu_occupants(info)) else "")
+            )
+        else:
+            # Named separately because the fix is different: this pod has the
+            # GPU but not the room to write the result.
+            surveyed.append(f"{pod['name']}: only {disk:.1f} GB disk free")
+
+    # Nothing fits as-is. Only now is it worth taking something away, and the
+    # requested pod goes first: if the user has to lose a loaded model, lose the
+    # one on the machine they actually asked for.
+    JOBS.log(job, "no pod had room as-is — reclaiming space")
+    for pod_id in order:
+        pod = pods[pod_id]
+        try:
+            info = _ssh_info(pod_id)
+            if not _reclaim(job, info, pod):
+                continue
+            free, disk = _free_vram_gb(info), _free_disk_gb(info)
+        except Exception:  # noqa: BLE001 — a pod that fails to clear is one we skip
+            continue
+        if free >= need_gb and disk >= DISK_NEED_GB:
+            JOBS.log(job, f"placing on {pod['name']} after reclaiming: {free:.1f} GB VRAM, {disk:.1f} GB disk")
+            return pod, info
 
     raise JobError(
-        f"no pod has room for this job (needs {need_gb:.1f} GB). "
+        f"no pod has room for this job (needs {need_gb:.1f} GB VRAM, {DISK_NEED_GB:.0f} GB disk), "
+        "even after reclaiming. "
         + " | ".join(surveyed)
-        + " — stop an inference server, or rent another pod"
+        + " — rent another pod, or use a smaller batch"
     )
 
 
@@ -941,6 +1023,13 @@ def start_training_optimization(*, pod_id: str) -> Job:
         JOBS.update(job, "validating the chosen config on held-out data", 90)
         validation, quality = _validate_selection(job, info, selection, fixed_tokens)
 
+        # The validation run is a complete re-train from the same base model,
+        # not merely a benchmark. Keep its checkpoint address so the guided UI
+        # can serve the agent-trained model beside the manual baseline.
+        remote_checkpoint = (
+            f"{REMOTE_ROOT}/.runs/{job.id}/validate/ckpt" if quality is not None else None
+        )
+
         return {
             "pod": pod,
             "candidates": valid,
@@ -948,6 +1037,7 @@ def start_training_optimization(*, pod_id: str) -> Job:
             "fixed_tokens_per_step": fixed_tokens,
             "quality": quality,
             "validation": validation,
+            "remote_checkpoint": remote_checkpoint,
         }
 
     return JOBS.create("optimize-training-speed", {"pod_id": pod_id}, work)
@@ -1220,6 +1310,7 @@ def available_models() -> list[dict[str, Any]]:
                 "ref": latest["remote_checkpoint"],
                 "kind": "finetuned",
                 "job_id": latest.get("job_id"),
+                "pod_id": latest.get("pod_id"),
                 "detail": "trained from this dashboard",
             }
         )
@@ -1235,12 +1326,42 @@ def available_models() -> list[dict[str, Any]]:
                 "detail": "500 steps, json_parse_rate 1.000 / exact_match 0.910",
             }
         )
+
+    agent_job = next(
+        (
+            job
+            for job in JOBS.list()
+            if job["kind"] == "optimize-training-speed"
+            and job["status"] == "complete"
+            and job.get("result", {}).get("remote_checkpoint")
+        ),
+        None,
+    )
+    if agent_job:
+        result = agent_job["result"]
+        out.append(
+            {
+                "id": "agent-trained",
+                "label": "fine-tuned (agent optimized)",
+                "ref": result["remote_checkpoint"],
+                "kind": "agent",
+                "job_id": agent_job["id"],
+                "pod_id": result.get("pod", {}).get("id"),
+                "detail": "same base model, trained with the agent-selected config",
+            }
+        )
     return out
 
 
 def _model_ref(model_id: str, pod_id: str) -> str:
     for m in available_models():
         if m["id"] == model_id:
+            required_pod = m.get("pod_id")
+            if required_pod and required_pod != pod_id:
+                raise JobError(
+                    f"{m['label']} is stored on pod {required_pod}; "
+                    "select that pod before loading it"
+                )
             return m["ref"]
     raise JobError(f"unknown model {model_id!r}")
 
