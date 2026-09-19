@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import logging
+import os
 import platform
 import random
 import signal
@@ -87,6 +88,16 @@ async def execute(executor: Executor, task: Task, report: Callable[[float], None
         try:
             async with asyncio.timeout(task.spec.timeout_seconds):
                 result = bounded_json(await executor.execute(task.spec, report))
+            if (
+                task.spec.kind == "python_project"
+                and isinstance(result, dict)
+                and result.get("ok") is False
+            ):
+                error = (
+                    "project_code: " + str(result.get("error", "Project execution failed"))[:1900]
+                )
+                record("failed", message=error)
+                return Message(type="failed", ref=ref, error=error, retryable=False)
             report(100)
             record("succeeded", result_url=f"/v1/tasks/{task.spec.id}")
             return Message(type="complete", ref=ref, result=result)
@@ -193,6 +204,14 @@ class Agent:
 
         async def clear() -> None:
             nonlocal current, work, result_sent, progress
+            if work is None and current is not None and current.spec.kind == "python_project":
+                # Revoked before execution started: there are no project files to remove.
+                self.journal.emit(
+                    current.spec.id,
+                    current.generation,
+                    "cleaned",
+                    {"workspace_removed": True, "processes_stopped": True},
+                )
             if work is not None:
                 work.cancel()
                 await asyncio.gather(work, return_exceptions=True)
@@ -256,7 +275,8 @@ class Agent:
                             if (
                                 task.session_id != session
                                 or task.worker_id != self.config.worker_id
-                                or task.spec.kind != self.executor.kind
+                                or task.spec.kind
+                                not in getattr(self.executor, "kinds", (self.executor.kind,))
                             ):
                                 raise ValueError("invalid assignment identity or executor")
                             current = task
@@ -304,7 +324,14 @@ class Agent:
 
 async def run_worker() -> None:
     executor = StubExecutor()
-    config = WorkerConfig.from_env(executor.kind)
+    if os.getenv("WORKER_EXECUTOR") == "python_project":
+        from .executors.python_project import PythonProjectExecutor
+
+        config = WorkerConfig.from_env("python_project")
+        executor = PythonProjectExecutor(config.url, config.worker_id)
+    else:
+        config = WorkerConfig.from_env(executor.kind)
+    config.capabilities.kinds = list(getattr(executor, "kinds", (executor.kind,)))
     init_sentry("worker", worker_id=config.worker_id)
 
     async def run():

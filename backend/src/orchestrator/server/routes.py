@@ -20,7 +20,7 @@ async def read_snapshot(request: Request):
     async with store.pool.acquire() as conn:
         async with conn.transaction(isolation="repeatable_read", readonly=True):
             workers = await conn.fetch("SELECT * FROM workers ORDER BY id LIMIT 500")
-            tasks = await conn.fetch("SELECT * FROM tasks ORDER BY created_at DESC,id LIMIT 500")
+            tasks = await conn.fetch("SELECT * FROM tasks WHERE spec->>'kind' != 'python_project' ORDER BY created_at DESC,id LIMIT 500")
             events = await conn.fetch("SELECT * FROM events ORDER BY id DESC LIMIT 40")
     return {
         "workers": [dict(w) for w in workers],

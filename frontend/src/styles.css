@@ -1134,8 +1134,11 @@ details[open] > summary {
   margin-top: 3px;
 }
 .timeline .event-message {
-  color: #98413e;
+  color: var(--ink);
   margin: 7px 0;
+}
+.timeline .error .event-message {
+  color: #98413e;
 }
 .timeline summary {
   font-size: 10px;
@@ -1945,4 +1948,143 @@ details[open] > summary {
   .log-line {
     grid-template-columns: 80px minmax(0, 1fr);
   }
+}
+.compose-mode {
+  display: flex;
+  padding: 15px 24px 0;
+  gap: 8px;
+}
+.compose-mode button {
+  flex: 1;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  padding: 8px;
+  font-size: 12px;
+}
+.compose-mode button[aria-pressed="true"] {
+  background: var(--soft);
+  color: var(--green);
+  border-color: #9ac4ae;
+}
+.upload-zone {
+  border: 1px dashed #a7bfb2;
+  background: #f8fbf9;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 9px;
+  text-align: center;
+  padding: 26px 15px;
+  margin-top: 20px;
+}
+.upload-zone > svg {
+  color: var(--green);
+}
+.upload-zone strong {
+  font-size: 13px;
+}
+.upload-zone span,
+.upload-zone small {
+  font-size: 11px;
+  color: var(--muted);
+}
+.simulation-form textarea,
+.question-callout textarea {
+  width: 100%;
+  min-height: 100px;
+  resize: vertical;
+}
+.upload-files {
+  list-style: none;
+  padding: 0;
+}
+.upload-files li {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.upload-files small {
+  display: block;
+  color: var(--muted);
+  font-size: 10px;
+}
+.simulation-limits {
+  margin-top: 10px;
+  font-size: 11px !important;
+}
+.simulation-progress {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 18px;
+  margin-bottom: 25px;
+}
+.simulation-progress p {
+  font-size: 12px;
+  line-height: 1.8;
+  margin-bottom: 8px;
+  overflow-wrap: anywhere;
+}
+.simulation-progress > details,
+.validation-results {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+  margin-top: 12px;
+}
+.simulation-progress details details {
+  margin: 10px 0;
+}
+.pipeline-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 16px 0;
+  font-size: 10px;
+  color: var(--muted);
+}
+.pipeline-steps span {
+  padding: 6px 8px;
+  background: #f2f4f6;
+  border-radius: 4px;
+}
+.pipeline-steps .current {
+  color: var(--green);
+  background: var(--soft);
+}
+.pipeline-task-list {
+  max-height: 240px;
+  overflow: auto;
+  margin-bottom: 14px;
+}
+.pipeline-task-list button {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: white;
+  padding: 9px;
+  font-size: 11px;
+}
+.pipeline-task-list button.selected {
+  background: var(--soft);
+}
+.pipeline-task-list small {
+  display: block;
+  font-size: 10px;
+  color: var(--muted);
+}
+.pipeline-executions .log-line pre {
+  grid-column: 1/-1;
+}
+.simulation-progress .question-callout button {
+  margin-top: 10px;
 }

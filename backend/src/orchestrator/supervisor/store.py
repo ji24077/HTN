@@ -4,7 +4,7 @@ from datetime import timedelta
 
 from fastapi.encoders import jsonable_encoder
 
-from ..server.db.store import Conflict, NotFound, event, task_from_row
+from ..server.db.store import Conflict, NotFound, cancel_job_tasks, event, task_from_row
 from ..shared.execution import scrub_execution
 from ..shared.protocol import json_text
 
@@ -86,6 +86,10 @@ class SupervisorStore:
                 "SELECT * FROM supervisor_actions WHERE job_id=$1 ORDER BY at DESC LIMIT 20",
                 job_id,
             )
+            simulation = await conn.fetchrow(
+                "SELECT phase,data->>'message' AS message,data->'checks' AS checks,data->'limits' AS limits FROM simulation_jobs WHERE job_id=$1",
+                job_id,
+            )
             reserved = await conn.fetch(
                 """SELECT r.worker_id,r.expires_at,w.state,w.capabilities FROM job_reservations r
                    JOIN workers w ON w.id=r.worker_id WHERE r.job_id=$1 AND r.expires_at>clock_timestamp()""",
@@ -94,6 +98,7 @@ class SupervisorStore:
         result = jsonable_encoder(
             {
                 "job": dict(job),
+                "simulation": dict(simulation) if simulation else None,
                 "counts": [dict(r) for r in counts],
                 "tasks": [dict(r) for r in tasks],
                 "reservations": [dict(r) for r in workers],
@@ -219,7 +224,10 @@ class SupervisorStore:
                 if old["request"] != request:
                     raise Conflict("action ID already used with different arguments")
                 return old["result"]
-            job = await conn.fetchrow("SELECT * FROM supervised_jobs WHERE id=$1", job_id)
+            job = await conn.fetchrow(
+                "SELECT j.*,EXISTS(SELECT 1 FROM simulation_jobs WHERE job_id=j.id) AS managed FROM supervised_jobs j WHERE id=$1",
+                job_id,
+            )
             if job is None:
                 raise NotFound("job not found")
             if job["state"] in TERMINAL:
@@ -232,6 +240,11 @@ class SupervisorStore:
                     job_id,
                 )
             operation = action.operation
+            managed = job["managed"]
+            if managed and operation not in {"pause_job", "resume_job", "cancel_job"}:
+                raise Conflict(
+                    "Simulation tasks and reservations are owned by the preprocessing state machine; use job controls"
+                )
             if action.task_id:
                 row = await conn.fetchrow(
                     "SELECT * FROM tasks WHERE id=$1 AND spec->>'job_id'=$2", action.task_id, job_id
@@ -308,41 +321,34 @@ class SupervisorStore:
                     operation
                 ]
                 await conn.execute("UPDATE supervised_jobs SET state=$2 WHERE id=$1", job_id, state)
+                if managed:
+                    await conn.execute(
+                        """WITH simulation AS (
+                            UPDATE simulation_jobs SET revision=revision+1,
+                                phase=CASE WHEN $2='cancelled' THEN 'cancelled' ELSE phase END,
+                                data=CASE WHEN $2='cancelled' THEN jsonb_set(data,'{message}',to_jsonb($3::text)) ELSE data END
+                            WHERE job_id=$1
+                        )
+                        UPDATE tasks SET spec=jsonb_set(spec,'{payload,phase}','"cancelled"'::jsonb)
+                        WHERE id=$1 AND $2='cancelled'""",
+                        job_id,
+                        state,
+                        action.reason,
+                    )
                 if state in {"paused", "cancelled"}:
                     await conn.execute("DELETE FROM job_reservations WHERE job_id=$1", job_id)
                 if state == "cancelled":
-                    rows = await conn.fetch(
-                        "SELECT * FROM tasks WHERE spec->>'job_id'=$1 AND state NOT IN ('succeeded','cancelled')",
-                        job_id,
-                    )
-                    for row in rows:
-                        task = task_from_row(row)
-                        await conn.execute(
-                            """UPDATE tasks SET state='cancelled',lease_until=NULL,deadline=NULL,
-                               worker_id=NULL,session_id=NULL WHERE id=$1""",
-                            task.spec.id,
-                        )
-                        await event(
-                            conn,
-                            "task",
-                            task.spec.id,
-                            task.state,
-                            "cancelled",
-                            generation=task.generation,
-                            worker_id=task.worker_id,
-                            reason=action.reason,
-                        )
+                    await cancel_job_tasks(conn, job_id, action.reason, include_failed=True)
                 result = {"job_id": job_id, "state": state}
             await conn.execute(
-                "INSERT INTO supervisor_actions(job_id,action_id,request,result) VALUES($1,$2,$3,$4)",
+                """WITH action AS (
+                    INSERT INTO supervisor_actions(job_id,action_id,request,result) VALUES($1,$2,$3,$4)
+                )
+                INSERT INTO supervisor_events(job_id,kind,data) VALUES($1,'supervisor_action',$5)""",
                 job_id,
                 action.action_id,
                 request,
                 result,
-            )
-            await conn.execute(
-                "INSERT INTO supervisor_events(job_id,kind,data) VALUES($1,'supervisor_action',$2)",
-                job_id,
                 {"action_id": str(action.action_id), **result},
             )
             return result
@@ -362,17 +368,28 @@ class SupervisorStore:
             )
             all_states = {r["state"] for r in states}
             state = job["state"]
-            finished = bool(all_states) and all_states <= TERMINAL and not pending
+            simulation_phase = await conn.fetchval(
+                "SELECT phase FROM simulation_jobs WHERE job_id=$1", job_id
+            )
+            finished = (
+                (bool(all_states) and all_states <= TERMINAL and not pending)
+                if simulation_phase is None
+                else (simulation_phase in {"completed", "failed", "cancelled"} and not pending)
+            )
             if finished:
                 await conn.execute("DELETE FROM job_reservations WHERE job_id=$1", job_id)
                 state = (
-                    "cancelled"
-                    if state == "cancelled"
-                    else "failed"
-                    if "failed" in all_states
-                    else "cancelled"
-                    if "cancelled" in all_states
-                    else "succeeded"
+                    state
+                    if simulation_phase is not None
+                    else (
+                        "cancelled"
+                        if state == "cancelled"
+                        else "failed"
+                        if "failed" in all_states
+                        else "cancelled"
+                        if "cancelled" in all_states
+                        else "succeeded"
+                    )
                 )
                 if job["state"] not in TERMINAL:
                     # One more wake observes the authoritative terminal state and
