@@ -33,6 +33,11 @@ class ModelSpec:
     d_model: int
     n_heads: int
     vocab: int
+    n_kv_heads: int | None = None  # None == MHA. Fewer KV heads is GQA.
+
+    @property
+    def kv_heads(self) -> int:
+        return self.n_kv_heads or self.n_heads
 
     def param_flops_per_token(self) -> float:
         """Every matmul that scales with parameter count. fwd + bwd."""
@@ -84,10 +89,20 @@ class ModelSpec:
         """
         b = DTYPE_BYTES[dtype]
         linear = micro_batch * seq_len * self.layers * self.d_model * _ACT_PER_TOKEN * b
+
+        # Logits: micro_batch x seq_len x vocab, plus an fp32 copy because
+        # cross-entropy upcasts. Negligible for GPT-2's 50k vocab on a 124M
+        # model; DOMINANT for Qwen2.5-0.5B, where a 152k vocab against 896
+        # hidden means the logits outweigh the weights. Omitting it is why the
+        # first version of this model under-predicted peak memory.
+        logits = micro_batch * seq_len * self.vocab * (b + 4)
+
         if attention == "sdpa":
-            return linear
+            return linear + logits
+        # Eager stages a seq x seq score matrix per QUERY head. GQA shrinks the
+        # KV cache, not this term — the scores still exist per query head.
         attn = micro_batch * self.n_heads * seq_len * seq_len * self.layers * b
-        return linear + attn
+        return linear + logits + attn
 
     def min_vram_gb(
         self, *, dtype: DType, micro_batch: int, seq_len: int, attention: Attention
@@ -115,6 +130,19 @@ MODELS: dict[str, ModelSpec] = {
     # Cuts sync cost ~4x, but the simulator says it still pins H at the ceiling
     # on a 100 Mbps link — shrinking the model is not enough to escape it. Kept
     # as the cheap config for smoke tests, not as the fix for a slow network.
+    # The actual workload: full fine-tune, JSON extraction. Real config from
+    # Qwen/Qwen2.5-0.5B — 24 layers, 896 hidden, 14 query heads over 2 KV
+    # heads (GQA), tied embeddings. The 151,936 vocab is what makes the logits
+    # term above matter.
+    "qwen2.5-0.5b": ModelSpec(
+        name="qwen2.5-0.5b",
+        params=494_000_000,
+        layers=24,
+        d_model=896,
+        n_heads=14,
+        n_kv_heads=2,
+        vocab=151_936,
+    ),
     "nanogpt-30m": ModelSpec(
         name="nanogpt-30m", params=30_000_000, layers=6, d_model=384, n_heads=6, vocab=50_257
     ),
