@@ -1,4 +1,4 @@
-.PHONY: help setup-server setup-cuda setup-rocm setup-agent check probe fit data train eval server worker mock test fmt
+.PHONY: help setup-server setup-cuda setup-rocm setup-agent check probe fit data train eval server worker mock ui test fmt
 
 help:
 	@grep -E '^[a-z-]+:.*?##' $(MAKEFILE_LIST) | sed 's/:.*##/\t/'
@@ -33,6 +33,8 @@ worker:        ## run the worker daemon
 	PYTHONUNBUFFERED=1 uv run gpushare-worker
 mock:          ## replay fake events into the dashboard
 	uv run gpushare-mock
+ui:            ## research console — data -> RunPod training -> verified agent actions
+	uv run --extra server --extra agent gpushare-ui
 
 test:          ## contract tests - run before every push
 	uv run pytest -q

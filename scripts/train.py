@@ -97,6 +97,11 @@ def main() -> None:
     ap.add_argument("--worker-id", default="w1")
     ap.add_argument("--job-id", default="j1")
     ap.add_argument("--config-name", default="optimized")
+    ap.add_argument(
+        "--no-save",
+        action="store_true",
+        help="measure the real workload and write meta.json without writing the ~1 GB weights",
+    )
     a = ap.parse_args()
 
     if not torch.cuda.is_available():
@@ -163,10 +168,11 @@ def main() -> None:
     peak = torch.cuda.max_memory_allocated() / 1e9
 
     a.out.mkdir(parents=True, exist_ok=True)
-    save_file(
-        {k: v.contiguous().cpu() for k, v in model.state_dict().items()},
-        str(a.out / "model.safetensors"),
-    )
+    if not a.no_save:
+        save_file(
+            {k: v.contiguous().cpu() for k, v in model.state_dict().items()},
+            str(a.out / "model.safetensors"),
+        )
     meta = {
         "model_id": MODEL_ID,
         "steps": a.steps,
@@ -187,7 +193,7 @@ def main() -> None:
     log.info(
         f"\n{a.config_name}: {t_step:.4f}s/step  "
         f"{tokens_per_step / t_step:,.0f} tok/s  {peak:.2f} GB peak\n"
-        f"  saved {a.out}/model.safetensors"
+        + (f"  saved {a.out}/model.safetensors" if not a.no_save else "  measurement only")
     )
     # The invariant the whole before/after claim rests on. State it every run so
     # a config that quietly does less work cannot pass unnoticed.

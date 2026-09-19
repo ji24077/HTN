@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GPUShare Research Console</title>
+  <style>
+    :root {
+      --bg: #08110f;
+      --panel: #0d1916;
+      --panel-2: #101f1b;
+      --line: #21362f;
+      --ink: #edf7f2;
+      --muted: #8fa69c;
+      --mint: #7cf2b5;
+      --mint-2: #2bc880;
+      --amber: #ffc86b;
+      --red: #ff7b78;
+      --blue: #85b9ff;
+      --radius: 18px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 12% -10%, rgba(43,200,128,.15), transparent 31rem),
+        radial-gradient(circle at 88% 18%, rgba(133,185,255,.08), transparent 25rem),
+        var(--bg);
+      font: 14px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      min-height: 100vh;
+    }
+    button, input, select { font: inherit; }
+    button { cursor: pointer; }
+    .shell { max-width: 1460px; margin: 0 auto; padding: 28px; }
+    header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 28px; }
+    .eyebrow { color: var(--mint); text-transform: uppercase; letter-spacing: .16em; font-size: 11px; font-weight: 800; }
+    h1 { font-size: clamp(30px, 5vw, 58px); line-height: .98; letter-spacing: -.055em; margin: 8px 0 12px; max-width: 850px; }
+    .sub { color: var(--muted); max-width: 760px; font-size: 16px; }
+    .live-pill { border: 1px solid var(--line); background: rgba(13,25,22,.78); border-radius: 999px; padding: 10px 14px; white-space: nowrap; }
+    .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--mint); margin-right: 8px; box-shadow: 0 0 0 5px rgba(124,242,181,.08); }
+    .dot.off { background: var(--red); }
+    .grid { display: grid; gap: 16px; }
+    .overview { grid-template-columns: 1.2fr .8fr; margin-bottom: 16px; }
+    .card { background: linear-gradient(145deg, rgba(16,31,27,.96), rgba(11,22,19,.96)); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px; box-shadow: 0 18px 50px rgba(0,0,0,.17); }
+    .card h2, .card h3 { margin: 0; letter-spacing: -.025em; }
+    .card h2 { font-size: 22px; }
+    .card h3 { font-size: 17px; }
+    .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; font-weight: 750; }
+    .model-id { font: 700 19px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--mint); margin: 6px 0 18px; }
+    .task-example { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .code { background: #07100d; border: 1px solid #1b3029; border-radius: 12px; padding: 14px; color: #cbe2d8; font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-word; min-height: 104px; }
+    .facts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; height: 100%; }
+    .fact { background: rgba(7,16,13,.65); border: 1px solid var(--line); border-radius: 14px; padding: 14px; }
+    .fact strong { display: block; font-size: 24px; letter-spacing: -.04em; margin-top: 5px; }
+    .fact span { color: var(--muted); font-size: 12px; }
+    .section-head { display: flex; justify-content: space-between; align-items: end; gap: 16px; margin: 32px 0 14px; }
+    .section-head h2 { margin: 0; font-size: 25px; letter-spacing: -.035em; }
+    .section-head p { color: var(--muted); margin: 0; }
+    .pipeline { grid-template-columns: repeat(3, 1fr); }
+    .step { position: relative; overflow: hidden; min-height: 336px; display: flex; flex-direction: column; }
+    .step-no { color: var(--mint); font: 800 12px ui-monospace, monospace; margin-bottom: 14px; }
+    .step p { color: var(--muted); }
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
+    .form-row.one { grid-template-columns: 1fr; }
+    label { color: var(--muted); font-size: 12px; display: block; }
+    input, select {
+      width: 100%; margin-top: 5px; padding: 10px 11px; color: var(--ink); background: #07100d;
+      border: 1px solid var(--line); border-radius: 10px; outline: none;
+    }
+    input:focus, select:focus { border-color: var(--mint-2); box-shadow: 0 0 0 3px rgba(43,200,128,.1); }
+    .btn { border: 0; border-radius: 11px; padding: 11px 14px; font-weight: 800; background: var(--mint); color: #06100c; transition: transform .12s ease, opacity .12s ease; }
+    .btn:hover { transform: translateY(-1px); }
+    .btn:disabled { opacity: .35; cursor: not-allowed; transform: none; }
+    .btn.secondary { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+    .btn.danger { background: transparent; color: var(--red); border: 1px solid rgba(255,123,120,.35); }
+    .step .btn { width: 100%; margin-top: auto; }
+    .status-line { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; margin: 12px 0; min-height: 20px; }
+    .status-line b { color: var(--ink); }
+    .metrics { grid-template-columns: repeat(4, 1fr); }
+    .metric { padding: 18px; }
+    .metric .value { font-size: 32px; font-weight: 850; letter-spacing: -.05em; margin: 6px 0 2px; }
+    .delta { color: var(--mint); font-size: 12px; }
+    .muted { color: var(--muted); }
+    .actions { grid-template-columns: repeat(4, 1fr); }
+    .action { min-height: 300px; display: flex; flex-direction: column; }
+    .action-icon { width: 36px; height: 36px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 11px; margin-bottom: 16px; color: var(--mint); font-weight: 900; }
+    .action p { color: var(--muted); min-height: 62px; }
+    .action .btn { margin-top: auto; width: 100%; }
+    .validation { margin-top: 12px; padding: 9px 10px; border-radius: 9px; background: rgba(124,242,181,.06); color: var(--mint); font-size: 12px; }
+    .run-panel { margin-top: 18px; }
+    .run-top { display: flex; justify-content: space-between; gap: 16px; align-items: center; }
+    .progress { height: 7px; background: #07100d; border-radius: 999px; overflow: hidden; margin: 14px 0; }
+    .progress > div { height: 100%; background: linear-gradient(90deg, var(--mint-2), var(--mint)); width: 0; transition: width .35s ease; }
+    .log { height: 260px; overflow: auto; background: #050b09; border: 1px solid #172820; border-radius: 12px; padding: 13px; color: #a9c4b8; font: 11px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; }
+    .samples { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 16px; }
+    .sample { border: 1px solid var(--line); border-radius: 13px; padding: 14px; background: rgba(7,16,13,.55); }
+    .sample .in { color: var(--muted); margin-bottom: 8px; }
+    .sample .out { font: 12px/1.5 ui-monospace, monospace; word-break: break-word; }
+    .ok { color: var(--mint); }
+    .warn { color: var(--amber); }
+    .bad { color: var(--red); }
+    .toast { position: fixed; right: 22px; bottom: 22px; max-width: 390px; background: #13231e; border: 1px solid var(--line); border-radius: 12px; padding: 13px 15px; box-shadow: 0 20px 50px rgba(0,0,0,.35); display: none; z-index: 5; }
+    .footnote { color: var(--muted); font-size: 12px; margin-top: 10px; }
+    @media (max-width: 1100px) { .pipeline, .actions { grid-template-columns: 1fr 1fr; } .overview { grid-template-columns: 1fr; } }
+    @media (max-width: 720px) { .shell { padding: 18px; } header { display: block; } .live-pill { display: inline-block; margin-top: 16px; } .pipeline, .actions, .metrics, .samples, .task-example { grid-template-columns: 1fr; } .facts { grid-template-columns: 1fr 1fr; } }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <div>
+        <div class="eyebrow">GPUShare / Research Console</div>
+        <h1>가설이 아니라,<br>실행으로 확인합니다.</h1>
+        <div class="sub">Qwen2.5-0.5B에 구조화 출력을 학습시키고, RunPod에서 측정한 뒤, 에이전트의 네 가지 결정을 동일한 held-out 평가로 자동 검증합니다.</div>
+      </div>
+      <div class="live-pill"><span id="healthDot" class="dot"></span><span id="healthText">연결 확인 중</span></div>
+    </header>
+
+    <section class="grid overview">
+      <article class="card">
+        <div class="label">Research workload</div>
+        <div id="modelId" class="model-id">Qwen/Qwen2.5-0.5B</div>
+        <div class="task-example">
+          <div><div class="label">입력</div><div id="exampleIn" class="code">불러오는 중…</div></div>
+          <div><div class="label">목표 JSON</div><div id="exampleOut" class="code">불러오는 중…</div></div>
+        </div>
+      </article>
+      <article class="card">
+        <div class="label">Current evidence</div>
+        <div class="facts">
+          <div class="fact"><span>Train rows</span><strong id="trainRows">—</strong></div>
+          <div class="fact"><span>Held-out</span><strong id="heldRows">—</strong></div>
+          <div class="fact"><span>GPU</span><strong id="gpuName" style="font-size:16px">—</strong></div>
+          <div class="fact"><span>Step time</span><strong id="stepTime">—</strong></div>
+          <div class="fact"><span>Peak VRAM</span><strong id="peakVram">—</strong></div>
+          <div class="fact"><span>Tests</span><strong>60</strong></div>
+        </div>
+      </article>
+    </section>
+
+    <div class="section-head">
+      <div><div class="eyebrow">End-to-end</div><h2>연구 파이프라인</h2></div>
+      <p>각 단계는 실제 산출물을 다음 단계에 넘깁니다.</p>
+    </div>
+    <section class="grid pipeline">
+      <article class="card step">
+        <div class="step-no">01 / DATA</div><h3>데이터 생성</h3>
+        <p>Baseten의 호스팅 모델로 다양한 문장/레코드 쌍을 만들고 중복·불충실 샘플을 제거합니다.</p>
+        <div class="form-row">
+          <label>전체 목표<input id="dataTotal" type="number" min="100" max="10000" value="2000"></label>
+          <label>Held-out<input id="dataHeld" type="number" min="20" max="2000" value="200"></label>
+        </div>
+        <div class="status-line"><span class="dot"></span><span id="dataStatus">현재 데이터 사용 가능</span></div>
+        <button id="generateBtn" class="btn" data-testid="generate-data">데이터 다시 생성</button>
+      </article>
+
+      <article class="card step">
+        <div class="step-no">02 / TRAIN</div><h3>RunPod에서 학습</h3>
+        <p>선택한 GPU에 코드와 데이터를 동기화하고, baseline 평가부터 fine-tune까지 실제로 실행합니다.</p>
+        <div class="form-row one"><label>GPU Pod<select id="trainPod" data-testid="train-pod"><option value="">Pod 불러오는 중…</option></select></label></div>
+        <div class="form-row">
+          <label>Steps<input id="trainSteps" type="number" min="10" max="10000" value="500"></label>
+          <label>Micro batch<input id="microBatch" type="number" min="1" max="128" value="16"></label>
+        </div>
+        <div class="status-line"><span class="dot"></span><span>baseline과 after를 같은 held-out으로 평가</span></div>
+        <button id="trainBtn" class="btn" data-testid="run-training">학습 + 자동 평가 실행</button>
+      </article>
+
+      <article class="card step">
+        <div class="step-no">03 / VERIFY</div><h3>결과 확인</h3>
+        <p>유효 JSON 비율만 보지 않고 모든 필드가 맞는 exact match와 샘플 실패까지 함께 확인합니다.</p>
+        <div class="form-row">
+          <div class="fact"><span>JSON parse</span><strong id="parseCompact">—</strong></div>
+          <div class="fact"><span>Exact match</span><strong id="exactCompact">—</strong></div>
+        </div>
+        <div id="gateCompact" class="validation">아직 실행된 평가가 없습니다.</div>
+        <button id="resultsBtn" class="btn secondary">아래 결과로 이동</button>
+      </article>
+    </section>
+
+    <div class="section-head" id="results">
+      <div><div class="eyebrow">Measured outcome</div><h2>학습 전후 결과</h2></div>
+      <p id="sampleCount">고정 held-out 평가</p>
+    </div>
+    <section class="grid metrics">
+      <article class="card metric"><div class="label">JSON parse / before</div><div id="parseBefore" class="value">—</div><div class="muted">유효 스키마 출력</div></article>
+      <article class="card metric"><div class="label">JSON parse / after</div><div id="parseAfter" class="value">—</div><div id="parseDelta" class="delta">—</div></article>
+      <article class="card metric"><div class="label">Exact match / before</div><div id="exactBefore" class="value">—</div><div class="muted">5개 필드 모두 정확</div></article>
+      <article class="card metric"><div class="label">Exact match / after</div><div id="exactAfter" class="value">—</div><div id="exactDelta" class="delta">—</div></article>
+    </section>
+    <section id="samples" class="samples"></section>
+
+    <div class="section-head">
+      <div><div class="eyebrow">Human-triggered / machine-verified</div><h2>에이전트 액션</h2></div>
+      <p>결정은 사용자가 시작하고, 결과 검증은 자동입니다.</p>
+    </div>
+    <section class="grid actions">
+      <article class="card action">
+        <div class="action-icon">A→N</div><h3>AMD → NVIDIA</h3>
+        <p>벤더 중립 safetensors를 대상 Pod로 옮긴 뒤 같은 200개 샘플을 다시 평가합니다.</p>
+        <label>Source<select id="amdSource"></select></label>
+        <label style="margin-top:8px">Target<select id="amdTarget"></select></label>
+        <div class="validation">자동 gate: parse / exact ±2%</div>
+        <button id="migrateAmdBtn" class="btn" data-testid="migrate-amd">마이그레이션 + 검증</button>
+      </article>
+      <article class="card action">
+        <div class="action-icon">N→N+</div><h3>Next generation</h3>
+        <p>서로 다른 NVIDIA 세대 사이에서 체크포인트 이동과 결과 보존을 확인합니다.</p>
+        <label>Source<select id="nextSource"></select></label>
+        <label style="margin-top:8px">Target<select id="nextTarget"></select></label>
+        <div class="validation">자동 gate: 동일 모델·동일 데이터</div>
+        <button id="migrateNextBtn" class="btn" data-testid="migrate-next">다음 세대로 이동</button>
+      </article>
+      <article class="card action">
+        <div class="action-icon">↗</div><h3>Training speed</h3>
+        <p>동일한 3,072 tokens/step에서 batch×accum 후보를 실제로 40스텝씩 측정합니다.</p>
+        <label>Measure on<select id="trainingOptPod"></select></label>
+        <div class="validation">자동 gate: fixed work + finite loss</div>
+        <button id="optTrainBtn" class="btn" data-testid="optimize-training">실측 튜닝 실행</button>
+      </article>
+      <article class="card action">
+        <div class="action-icon">≫</div><h3>Inference speed</h3>
+        <p>순차 생성과 16-way batched 생성을 같은 64개 프롬프트로 비교합니다.</p>
+        <label>Measure on<select id="inferenceOptPod"></select></label>
+        <div class="validation">자동 gate: 같은 토큰 수 + 품질 ±2%</div>
+        <button id="optInferBtn" class="btn" data-testid="optimize-inference">추론 벤치마크 실행</button>
+      </article>
+    </section>
+
+    <section class="card run-panel">
+      <div class="run-top">
+        <div><div class="label">Live job</div><h2 id="jobTitle">대기 중</h2></div>
+        <button id="cancelBtn" class="btn danger" style="width:auto" disabled>작업 중지</button>
+      </div>
+      <div class="progress"><div id="progressBar"></div></div>
+      <div id="jobMeta" class="status-line">버튼을 누르면 실제 실행 로그가 여기에 표시됩니다.</div>
+      <div id="log" class="log">No active job.</div>
+      <div class="footnote">브라우저를 닫아도 서버 프로세스가 살아 있는 동안 job은 계속됩니다. 원격 체크포인트는 RunPod에 남고 측정 결과만 로컬로 내려받습니다.</div>
+    </section>
+  </main>
+  <div id="toast" class="toast"></div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const e = (value) => String(value ?? "").replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+    const pct = (value) => value == null ? '—' : `${(value * 100).toFixed(1)}%`;
+    const num = (value, digits=2) => value == null ? '—' : Number(value).toFixed(digits);
+    let activeJob = null;
+    let pods = [];
+
+    function toast(message, bad=false) {
+      const box = $('toast'); box.textContent = message; box.style.display = 'block'; box.className = `toast ${bad ? 'bad' : ''}`;
+      setTimeout(() => box.style.display = 'none', 4200);
+    }
+
+    async function api(path, options={}) {
+      const response = await fetch(path, {headers:{'Content-Type':'application/json'}, ...options});
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
+      return data;
+    }
+
+    function renderState(state) {
+      const x = state.experiment;
+      $('modelId').textContent = x.model_id;
+      $('exampleIn').textContent = x.example.sentence;
+      $('exampleOut').textContent = JSON.stringify(x.example.record, null, 2);
+      $('trainRows').textContent = x.data.train.toLocaleString();
+      $('heldRows').textContent = x.data.heldout.toLocaleString();
+      $('gpuName').textContent = x.train?.gpu || '미실행';
+      $('stepTime').textContent = x.train ? `${num(x.train.t_step_median_s, 3)}s` : '—';
+      $('peakVram').textContent = x.train ? `${num(x.train.peak_vram_gb, 1)}G` : '—';
+      const before = x.before, after = x.after;
+      for (const [id, value] of [['parseBefore',before?.json_parse_rate],['parseAfter',after?.json_parse_rate],['exactBefore',before?.exact_match_rate],['exactAfter',after?.exact_match_rate]]) $(id).textContent = pct(value);
+      $('parseCompact').textContent = pct(after?.json_parse_rate);
+      $('exactCompact').textContent = pct(after?.exact_match_rate);
+      if (before && after) {
+        $('parseDelta').textContent = `${pct(before.json_parse_rate)} → ${pct(after.json_parse_rate)}`;
+        $('exactDelta').textContent = `${pct(before.exact_match_rate)} → ${pct(after.exact_match_rate)}`;
+        const comparable = before.n === after.n;
+        $('gateCompact').textContent = comparable ? `동일 ${after.n}개 샘플로 비교됨` : `주의: before ${before.n}개 / after ${after.n}개`;
+        $('gateCompact').className = `validation ${comparable ? 'ok' : 'warn'}`;
+        $('sampleCount').textContent = `before ${before.n} · after ${after.n}`;
+      }
+      const samples = after?.samples || [];
+      $('samples').innerHTML = samples.slice(0, 6).map(s => `<article class="sample"><div class="in">${e(s.sentence)}</div><div class="out">${e(s.raw_output)}</div><div class="${s.wrong_fields?.length ? 'warn' : 'ok'}" style="margin-top:8px">${s.wrong_fields?.length ? `오류: ${e(s.wrong_fields.join(', '))}` : '✓ exact match'}</div></article>`).join('');
+    }
+
+    function podOptions(filter=()=>true) {
+      const found = pods.filter(p => p.status === 'running' && filter(p));
+      return found.length ? found.map(p => `<option value="${e(p.id)}">${e(p.gpu)} · ${e(p.name)} · $${e(p.cost_per_hour)}/h</option>`).join('') : '<option value="">사용 가능한 Pod 없음</option>';
+    }
+
+    function renderPods() {
+      $('trainPod').innerHTML = podOptions();
+      $('trainingOptPod').innerHTML = podOptions();
+      $('inferenceOptPod').innerHTML = podOptions();
+      $('amdSource').innerHTML = podOptions(p => p.vendor === 'amd');
+      $('amdTarget').innerHTML = podOptions(p => p.vendor === 'nvidia');
+      $('nextSource').innerHTML = podOptions(p => p.vendor === 'nvidia');
+      $('nextTarget').innerHTML = podOptions(p => p.vendor === 'nvidia');
+      $('trainBtn').disabled = !$('trainPod').value;
+      $('optTrainBtn').disabled = !$('trainingOptPod').value;
+      $('optInferBtn').disabled = !$('inferenceOptPod').value;
+      $('migrateAmdBtn').disabled = !$('amdSource').value || !$('amdTarget').value;
+      const nvidia = pods.filter(p => p.status === 'running' && p.vendor === 'nvidia');
+      $('migrateNextBtn').disabled = nvidia.length < 2;
+    }
+
+    async function load() {
+      try {
+        const [state, podData, jobData] = await Promise.all([api('/api/state'), api('/api/pods'), api('/api/jobs')]);
+        renderState(state); pods = podData.pods; renderPods();
+        $('healthText').textContent = `${pods.filter(p=>p.status==='running').length}개 RunPod 연결`;
+        $('healthDot').className = 'dot';
+        const live = jobData.jobs.find(j => ['running','queued','cancelling'].includes(j.status));
+        if (live) { activeJob = live.id; renderJob(live); pollJob(); }
+      } catch (err) {
+        $('healthText').textContent = '연결 오류'; $('healthDot').className = 'dot off'; toast(err.message, true);
+      }
+    }
+
+    function renderJob(job) {
+      $('jobTitle').textContent = `${job.kind} · ${job.status}`;
+      $('progressBar').style.width = `${job.progress || 0}%`;
+      $('jobMeta').textContent = `${job.stage} · job ${job.id.slice(0,8)}`;
+      $('log').textContent = (job.logs || []).join('\n') || 'Waiting for output…';
+      $('log').scrollTop = $('log').scrollHeight;
+      $('cancelBtn').disabled = !['queued','running','cancelling'].includes(job.status);
+      if (job.status === 'complete' && job.result?.chosen) {
+        $('microBatch').value = job.result.chosen.micro_batch;
+      }
+      if (job.error) $('jobMeta').textContent += ` · ${job.error}`;
+    }
+
+    async function pollJob() {
+      if (!activeJob) return;
+      try {
+        const job = await api(`/api/jobs/${activeJob}`); renderJob(job);
+        if (['complete','failed','cancelled','interrupted'].includes(job.status)) {
+          toast(job.status === 'complete' ? '작업과 자동 검증이 완료됐습니다.' : `작업 종료: ${job.error || job.status}`, job.status !== 'complete');
+          activeJob = null; await load(); return;
+        }
+      } catch (err) { toast(err.message, true); activeJob = null; return; }
+      setTimeout(pollJob, 1800);
+    }
+
+    async function start(path, body) {
+      if (activeJob) return toast('이미 실행 중인 작업이 있습니다.', true);
+      try {
+        const job = await api(path, {method:'POST', body:JSON.stringify(body)});
+        activeJob = job.id; renderJob(job); pollJob();
+      } catch (err) { toast(err.message, true); }
+    }
+
+    $('generateBtn').onclick = () => start('/api/jobs/data', {total:+$('dataTotal').value, heldout:+$('dataHeld').value, workers:8});
+    $('trainBtn').onclick = () => start('/api/jobs/train', {pod_id:$('trainPod').value, steps:+$('trainSteps').value, dtype:'bf16', attention:'sdpa', micro_batch:+$('microBatch').value, grad_accum:Math.max(1, Math.round(16 / +$('microBatch').value))});
+    $('optTrainBtn').onclick = () => start('/api/jobs/action/optimize-training', {pod_id:$('trainingOptPod').value});
+    $('optInferBtn').onclick = () => start('/api/jobs/action/optimize-inference', {pod_id:$('inferenceOptPod').value});
+    $('migrateAmdBtn').onclick = () => start('/api/jobs/action/migrate-amd-nvidia', {source_pod_id:$('amdSource').value, target_pod_id:$('amdTarget').value});
+    $('migrateNextBtn').onclick = () => start('/api/jobs/action/migrate-nextgen', {source_pod_id:$('nextSource').value, target_pod_id:$('nextTarget').value});
+    $('resultsBtn').onclick = () => $('results').scrollIntoView({behavior:'smooth'});
+    $('cancelBtn').onclick = async () => { if (activeJob) await api(`/api/jobs/${activeJob}/cancel`, {method:'POST'}); };
+    load();
+  </script>
+</body>
+</html>

@@ -25,6 +25,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from pydantic import BaseModel, Field
+
 from gpushare.agent import calibrate
 from gpushare.agent.llm import choose
 from gpushare.agent.simulate import (
@@ -35,6 +37,17 @@ from gpushare.agent.simulate import (
 from gpushare.agent.specs import CHIPS, MODELS, NETS, ChipSpec
 from gpushare.agent.task import MODEL_ID, PROMPT, REQUIRED_FIELDS
 from gpushare.contracts import JobConfig
+from gpushare.dashboard.runner import (
+    JOBS,
+    JobError,
+    latest_run,
+    list_pods,
+    start_data_generation,
+    start_inference_optimization,
+    start_migration,
+    start_training,
+    start_training_optimization,
+)
 
 ROOT = Path(__file__).resolve().parents[3]
 STATIC = Path(__file__).parent / "static"
@@ -53,8 +66,14 @@ def _read(path: Path) -> dict | None:
 
 def experiment() -> dict[str, Any]:
     """The recorded run. Returns None-valued fields rather than invented ones."""
-    before, after = _read(ROOT / "eval/base.json"), _read(ROOT / "eval/after.json")
-    meta = _read(ROOT / "ckpt/run/meta.json")
+    latest = latest_run()
+    latest_dir = Path(latest["local_dir"]) if latest and latest.get("local_dir") else None
+    before_path = latest_dir / "eval/base.json" if latest_dir else ROOT / "eval/base.json"
+    after_path = latest_dir / "eval/after.json" if latest_dir else ROOT / "eval/after.json"
+    meta_path = latest_dir / "ckpt/meta.json" if latest_dir else ROOT / "ckpt/run/meta.json"
+    before = _read(before_path) or _read(ROOT / "eval/base.json")
+    after = _read(after_path) or _read(ROOT / "eval/after.json")
+    meta = _read(meta_path) or _read(ROOT / "ckpt/run/meta.json")
 
     out: dict[str, Any] = {
         "model_id": MODEL_ID,
@@ -74,6 +93,7 @@ def experiment() -> dict[str, Any]:
             "train": _count(ROOT / "data/train.jsonl"),
             "heldout": _count(ROOT / "data/heldout.jsonl"),
         },
+        "latest_run": latest,
     }
     out["cost_model"] = _cost_model_check(meta)
     return out
@@ -326,6 +346,30 @@ def _validation_for(chip: ChipSpec) -> dict[str, Any]:
 # ─────────────────────────────────────────────────────────────────────────────
 # Server
 # ─────────────────────────────────────────────────────────────────────────────
+class DataRequest(BaseModel):
+    total: int = Field(default=2000, ge=100, le=10_000)
+    heldout: int = Field(default=200, ge=20, le=2000)
+    workers: int = Field(default=8, ge=1, le=16)
+
+
+class TrainRequest(BaseModel):
+    pod_id: str
+    steps: int = Field(default=500, ge=10, le=10_000)
+    dtype: str = "bf16"
+    attention: str = "sdpa"
+    micro_batch: int = Field(default=16, ge=1, le=128)
+    grad_accum: int = Field(default=1, ge=1, le=128)
+
+
+class PodRequest(BaseModel):
+    pod_id: str
+
+
+class MigrationRequest(BaseModel):
+    source_pod_id: str
+    target_pod_id: str
+
+
 def build_app():
     from fastapi import FastAPI, HTTPException
     from fastapi.responses import FileResponse
@@ -335,6 +379,10 @@ def build_app():
     @app.get("/")
     def index():
         return FileResponse(STATIC / "index.html")
+
+    @app.get("/api/health")
+    def health():
+        return {"ok": True}
 
     @app.get("/api/state")
     def state():
@@ -357,13 +405,81 @@ def build_app():
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
 
+    @app.get("/api/pods")
+    def pods(refresh: bool = False):
+        try:
+            return {"pods": list_pods(refresh=refresh)}
+        except JobError as e:
+            raise HTTPException(503, str(e)) from e
+
+    @app.get("/api/jobs")
+    def jobs():
+        return {"jobs": JOBS.list()}
+
+    @app.get("/api/jobs/{job_id}")
+    def job(job_id: str):
+        try:
+            return JOBS.get(job_id).public()
+        except JobError as e:
+            raise HTTPException(404, str(e)) from e
+
+    @app.post("/api/jobs/{job_id}/cancel")
+    def cancel_job(job_id: str):
+        try:
+            return JOBS.cancel(job_id).public()
+        except JobError as e:
+            raise HTTPException(404, str(e)) from e
+
+    @app.post("/api/jobs/data")
+    def generate_data(req: DataRequest):
+        try:
+            return start_data_generation(
+                total=req.total, heldout=req.heldout, workers=req.workers
+            ).public()
+        except JobError as e:
+            raise HTTPException(400, str(e)) from e
+
+    @app.post("/api/jobs/train")
+    def train(req: TrainRequest):
+        try:
+            return start_training(**req.model_dump()).public()
+        except JobError as e:
+            raise HTTPException(400, str(e)) from e
+
+    @app.post("/api/jobs/action/optimize-training")
+    def optimize_training(req: PodRequest):
+        try:
+            return start_training_optimization(pod_id=req.pod_id).public()
+        except JobError as e:
+            raise HTTPException(400, str(e)) from e
+
+    @app.post("/api/jobs/action/optimize-inference")
+    def optimize_inference(req: PodRequest):
+        try:
+            return start_inference_optimization(pod_id=req.pod_id).public()
+        except JobError as e:
+            raise HTTPException(400, str(e)) from e
+
+    @app.post("/api/jobs/action/{name}")
+    def migrate(name: str, req: MigrationRequest):
+        try:
+            return start_migration(
+                kind=name,
+                source_pod_id=req.source_pod_id,
+                target_pod_id=req.target_pod_id,
+            ).public()
+        except JobError as e:
+            raise HTTPException(400, str(e)) from e
+
     return app
 
 
 def main() -> None:
     import uvicorn
 
-    print("dashboard -> http://127.0.0.1:8080")
+    if not (STATIC / "index.html").exists():
+        raise SystemExit("dashboard static/index.html is missing")
+    print("research console -> http://127.0.0.1:8080")
     uvicorn.run(build_app(), host="127.0.0.1", port=8080, log_level="warning")
 
 

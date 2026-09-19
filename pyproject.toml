@@ -69,6 +69,7 @@ gpushare-worker  = "gpushare.worker.daemon:main"
 gpushare-cli     = "gpushare.worker.cli:main"
 gpushare-trainer = "gpushare.trainer.loop:main"
 gpushare-mock    = "gpushare.agent.mock:main"
+gpushare-ui      = "gpushare.dashboard.app:main"
 
 # ── uv ────────────────────────────────────────────────────────────────────────
 # cuda and rocm can never be installed together. uv will refuse to resolve a
