@@ -75,6 +75,9 @@
     .latency b { color: var(--ink); font: 700 15px/1 ui-monospace, Menlo, monospace; display: block; margin-top: 3px; }
     .caveat { border-left: 2px solid var(--amber); padding: 8px 0 8px 12px; color: var(--muted); font-size: 12.5px; margin-top: 12px; }
     .caveat b { color: var(--amber); }
+    .streaming::after { content: '▋'; color: var(--mint); animation: blink 1s step-end infinite; }
+    @keyframes blink { 50% { opacity: 0; } }
+    .latency b.hero { color: var(--mint); font-size: 18px; }
 
     .step { position: relative; overflow: hidden; min-height: 336px; display: flex; flex-direction: column; }
     .step-no { color: var(--mint); font: 800 12px ui-monospace, monospace; margin-bottom: 14px; }
@@ -486,14 +489,69 @@
       if (!sentence) return toast('문장을 입력하세요', true);
       const btn = $('runGenerate');
       btn.disabled = true; btn.textContent = '생성 중...';
+      $('genRaw').textContent = ''; $('genRaw').classList.add('streaming');
+      $('genParsed').textContent = '—'; $('genVerdict').innerHTML = ''; $('genLatency').innerHTML = '';
+
+      const t0 = performance.now();
+      let firstPaint = null;
       try {
-        renderGenerate(await api('/api/generate', {method:'POST', body:JSON.stringify({sentence})}));
+        const res = await fetch('/api/generate/stream', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({sentence}),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+        // Read incrementally. res.json() or res.text() would wait for the whole
+        // body and rebuild exactly the blocking behaviour this replaces.
+        const reader = res.body.getReader();
+        const dec = new TextDecoder();
+        let buf = '';
+        for (;;) {
+          const {value, done} = await reader.read();
+          if (done) break;
+          buf += dec.decode(value, {stream: true});
+          // SSE frames are separated by a blank line; a partial frame stays in
+          // the buffer until its terminator arrives.
+          const frames = buf.split('\n\n');
+          buf = frames.pop();
+          for (const f of frames) {
+            if (!f.startsWith('data: ')) continue;
+            const ev = JSON.parse(f.slice(6));
+            if (ev.token !== undefined) {
+              if (firstPaint === null) firstPaint = performance.now() - t0;
+              $('genRaw').textContent += ev.token;
+            } else if (ev.done) {
+              $('genRaw').classList.remove('streaming');
+              if (ev.error) { toast(ev.error, true); break; }
+              renderStreamDone(ev, firstPaint, performance.now() - t0);
+            }
+          }
+        }
       } catch (err) {
         toast(err.message, true);
       } finally {
+        $('genRaw').classList.remove('streaming');
         btn.disabled = false; btn.textContent = '추출 실행';
       }
     };
+
+    function renderStreamDone(ev, firstPaintMs, totalMs) {
+      $('genParsed').textContent = ev.parsed ? JSON.stringify(ev.parsed, null, 2) : '파싱 실패';
+      $('genVerdict').innerHTML = ev.parsed_ok
+        ? '<span class="verdict ok">&#10003; 유효한 JSON · 필수 키 전부</span>'
+        : '<span class="verdict bad">&#10007; 스키마 불일치</span>';
+      // TTFT first and emphasised: it is what makes this feel fast, and it is
+      // a different number from total latency. Server-side and browser-side
+      // are both shown — the gap between them is the SSH hop, and collapsing
+      // them would hide it.
+      $('genLatency').innerHTML = `
+        <div>첫 토큰까지 (서버)<b class="hero">${ev.ttft_s ? ev.ttft_s.toFixed(2) + 's' : '—'}</b></div>
+        <div>첫 토큰까지 (화면)<b>${firstPaintMs ? (firstPaintMs/1000).toFixed(2) + 's' : '—'}</b></div>
+        <div>생성 완료 (서버)<b>${ev.latency_s.toFixed(2)}s</b></div>
+        <div>전체 (화면)<b>${(totalMs/1000).toFixed(2)}s</b></div>
+        <div>모델<b>${e(ev.model || '')}</b></div>`;
+    }
 
     $('sentence').addEventListener('keydown', ev => {
       if ((ev.metaKey || ev.ctrlKey) && ev.key === 'Enter') $('runGenerate').click();

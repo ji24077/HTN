@@ -42,6 +42,7 @@ from gpushare.dashboard.runner import (
     JobError,
     available_models,
     generate,
+    generate_stream,
     latest_run,
     list_pods,
     serving,
@@ -451,6 +452,24 @@ def build_app():
     @app.post("/api/serve/stop")
     def serve_stop():
         return stop_inference_server()
+
+    @app.post("/api/generate/stream")
+    def generate_streaming(req: GenerateRequest):
+        from fastapi.responses import StreamingResponse
+
+        def frames():
+            for payload in generate_stream(**req.model_dump()):
+                yield f"data: {payload}\n\n"
+
+        # A JobError here would already have been raised by the generator's
+        # first next(), which FastAPI turns into a 500. Streaming responses
+        # cannot change status mid-flight, so the no-model case is reported as
+        # a done-frame carrying `error` rather than as an HTTP code.
+        return StreamingResponse(
+            frames(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     @app.post("/api/generate")
     def generate_one(req: GenerateRequest):

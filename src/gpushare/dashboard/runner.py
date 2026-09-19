@@ -1224,6 +1224,40 @@ def start_inference_server(*, pod_id: str, model_id: str, dtype: str = "bf16") -
     return JOBS.create("serve-model", {"pod_id": pod_id, "model_id": model_id}, work)
 
 
+def generate_stream(*, sentence: str, max_new_tokens: int = 64, greedy: bool = True):
+    """Proxy the pod's SSE stream through, one frame at a time.
+
+    Every hop has to stay unbuffered or the feature is cosmetic: the pod sends
+    no Content-Length, the SSH forward is raw TCP and transparent, and the
+    caller must hand each line onward rather than collecting them. Reading the
+    whole response here — the obvious `r.read()` — would rebuild exactly the
+    blocking behaviour this exists to remove.
+    """
+    import urllib.error
+    import urllib.request
+
+    with _serve_lock:
+        state = dict(_serve)
+    if not state.get("model_id"):
+        raise JobError("no model is loaded — start one from the model picker first")
+
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{SERVE_PORT}/generate/stream",
+        data=json.dumps(
+            {"sentence": sentence, "max_new_tokens": max_new_tokens, "greedy": greedy}
+        ).encode(),
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=180) as r:
+            for raw in r:
+                line = raw.decode("utf-8", "replace").strip()
+                if line.startswith("data: "):
+                    yield line[6:]
+    except (urllib.error.URLError, OSError, TimeoutError) as e:
+        yield json.dumps({"done": True, "error": f"the model server is unreachable ({e})"})
+
+
 def generate(*, sentence: str, max_new_tokens: int = 64, greedy: bool = True) -> dict[str, Any]:
     """One interactive request against the resident model.
 
