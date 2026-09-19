@@ -1139,12 +1139,31 @@ def start_inference_server(*, pod_id: str, model_id: str, dtype: str = "bf16") -
         _setup_pod(job, info, pod["vendor"])
 
         remote_ref = ref if ref.startswith("/") else ref
+        # The kill runs in its OWN ssh call, and that separation is the whole
+        # point. Folded into the launch command, `pkill -f` matches against the
+        # full command line — which contains "scripts/serve.py" in the launch
+        # half — so the wrapper shell kills itself and ssh returns 255 with no
+        # output. The usual `[s]cripts` bracket trick does NOT save it here,
+        # because the un-bracketed spelling is still present further along the
+        # same line. Both were observed; this is the only shape that works.
+        JOBS.update(job, "stopping any previous server", 40)
+        _run(
+            job,
+            # The bracket stops this command's OWN argv from matching its own
+            # pattern — which only works because the launch, which spells it
+            # unbracketed, is a separate call. Verified against a live server:
+            # 2 processes before, 0 after.
+            _ssh_args(info, 'pkill -f "serve[.]py" || true'),
+            allow_failure=True,
+        )
+
+        # setsid detaches so ssh can return; stdin must go to /dev/null as well
+        # as stdout and stderr, or ssh waits on the inherited descriptor forever.
         cmd = (
             f'export PATH="$HOME/.local/bin:$PATH"; cd {shlex.quote(REMOTE_ROOT)}; '
-            f"pkill -f 'scripts/serve.py' 2>/dev/null; "
-            f"nohup uv run python scripts/serve.py --model {shlex.quote(remote_ref)} "
+            f"setsid nohup uv run python scripts/serve.py --model {shlex.quote(remote_ref)} "
             f"--dtype {shlex.quote(dtype)} --port {SERVE_PORT} "
-            f"> /tmp/serve.log 2>&1 & echo started"
+            f"< /dev/null > /tmp/serve.log 2>&1 & echo started"
         )
         JOBS.update(job, f"loading {model_id} on the GPU", 45)
         _run(job, _ssh_args(info, cmd))
