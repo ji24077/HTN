@@ -20,6 +20,7 @@ orchestrator-server = "orchestrator.server.app:main"
 orchestrator-public = "orchestrator.server.app:public_main"
 orchestrator-worker-gateway = "orchestrator.server.app:worker_main"
 orchestrator-worker = "orchestrator.worker.agent:main"
+orchestrator-worker-setup = "orchestrator.worker.setup:main"
 orchestrator-demo = "orchestrator.demo:main"
 orchestrator = "orchestrator.client.cli:main"
 

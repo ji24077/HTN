@@ -36,6 +36,19 @@ CREATE TABLE IF NOT EXISTS events (
     details jsonb NOT NULL
 );
 
+-- Only credential digests are retained. Auth keys are returned once, never stored.
+CREATE TABLE IF NOT EXISTS worker_enrollments (
+    worker_id text PRIMARY KEY,
+    request_id uuid UNIQUE NOT NULL,
+    user_id uuid NOT NULL,
+    display_name text NOT NULL,
+    token_hash text NOT NULL,
+    state text NOT NULL CHECK (state IN ('pending', 'active', 'failed')),
+    tailscale_key_id text,
+    created_at timestamptz NOT NULL DEFAULT clock_timestamp()
+);
+CREATE INDEX IF NOT EXISTS worker_enrollments_user_time ON worker_enrollments(user_id, created_at);
+
 -- NOTIFY is delivered only after commit. Identical notifications within one
 -- transaction coalesce. Row triggers keep no-op reconciliation scans quiet.
 CREATE OR REPLACE FUNCTION notify_orchestrator_change() RETURNS trigger AS $$

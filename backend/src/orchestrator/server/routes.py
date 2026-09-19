@@ -92,6 +92,7 @@ async def submit(request: Request):
         if (
             task.target_worker_id
             and task.target_worker_id not in request.app.state.config.worker_tokens
+            and not await request.app.state.store.enrolled_worker(task.target_worker_id)
         ):
             raise HTTPException(status_code=400, detail="unknown target worker")
     return await request.app.state.store.submit(submission.tasks)

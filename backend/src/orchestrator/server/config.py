@@ -25,6 +25,10 @@ class ServerConfig:
     supabase_admin_ids: frozenset[str] = frozenset()
     database_schema: str = "public"
     supabase_admin_emails: frozenset[str] = frozenset()
+    tailscale_oauth_client_id: str = ""
+    tailscale_oauth_client_secret: str = ""
+    tailscale_enrollment_tag: str = "tag:htn-worker"
+    worker_gateway_url: str = ""
 
     @classmethod
     def from_env(cls) -> "ServerConfig":
@@ -35,10 +39,8 @@ class ServerConfig:
         if admin:
             credential(admin)
         tokens = TypeAdapter(dict[Identifier, str]).validate_python(
-            json.loads(os.environ["WORKER_TOKENS"]), strict=True
+            json.loads(os.getenv("WORKER_TOKENS", "{}")), strict=True
         )
-        if not tokens:
-            raise ValueError("WORKER_TOKENS must enroll at least one worker")
         for token in tokens.values():
             credential(token)
         if admin in tokens.values() or len(set(tokens.values())) != len(tokens):
@@ -100,6 +102,25 @@ class ServerConfig:
                 )
             if "sslmode=verify-full" not in database.query.split("&"):
                 raise ValueError("Supabase DATABASE_URL must include sslmode=verify-full")
+        gateway = os.getenv("WORKER_GATEWAY_URL", "")
+        if gateway:
+            parsed = urlsplit(gateway)
+            if (
+                parsed.scheme != "wss"
+                or not parsed.hostname
+                or not parsed.hostname.endswith(".ts.net")
+                or parsed.username
+                or parsed.password
+                or parsed.path != "/v1/worker"
+                or parsed.query
+                or parsed.fragment
+            ):
+                raise ValueError("WORKER_GATEWAY_URL must be the private wss:// .ts.net worker URL")
+            if parsed.port is not None and not 1 <= parsed.port <= 65535:
+                raise ValueError("invalid worker gateway port")
+        tag = os.getenv("TAILSCALE_ENROLLMENT_TAG", "tag:htn-worker")
+        if not re.fullmatch(r"tag:[a-z][a-z0-9-]{0,62}", tag):
+            raise ValueError("invalid TAILSCALE_ENROLLMENT_TAG")
         return cls(
             database_url,
             os.getenv("REDIS_URL") or None,
@@ -111,4 +132,8 @@ class ServerConfig:
             admins,
             schema,
             admin_emails,
+            os.getenv("TAILSCALE_OAUTH_CLIENT_ID", ""),
+            os.getenv("TAILSCALE_OAUTH_CLIENT_SECRET", ""),
+            tag,
+            gateway,
         )

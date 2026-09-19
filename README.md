@@ -64,6 +64,8 @@ Hosted entry points are `orchestrator-public` and
 
 ## Guides
 
+- [Automatic worker enrollment](docs/worker-enrollment.md): Supabase sign-in,
+  backend-issued Tailscale keys, and the worker setup command.
 - [Bundled backend](docs/bundled-backend.md): website API and private gateway on one host,
   with Tailscale included; supports local development.
 - [Bundled worker](docs/bundled-worker.md): embedded Tailscale, enrollment, and worker image.

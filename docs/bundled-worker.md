@@ -19,6 +19,10 @@ processes can reach the loopback socket, but still need gateway credentials.
 
 ## Server prerequisite
 
+For automatic sign-in and configuration, use the
+[worker enrollment command](worker-enrollment.md). Manual enrollment below
+remains available for existing development workers.
+
 The private gateway must already have a reachable Tailscale HTTPS address.
 Run the [bundled backend](bundled-backend.md) on the same machine as the website
 API; it includes Tailscale and exposes the worker-only listener privately on

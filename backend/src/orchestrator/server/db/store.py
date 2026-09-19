@@ -1,11 +1,14 @@
 """PostgreSQL owns task state, capacity, leases, and transactional audit events."""
 
 import asyncio
+import hashlib
+import hmac
 import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from importlib.resources import files
+from uuid import UUID
 
 import asyncpg
 from pydantic import JsonValue
@@ -41,6 +44,10 @@ class StaleSession(Exception):
 
 
 class NotFound(Exception):
+    pass
+
+
+class EnrollmentLimit(Exception):
     pass
 
 
@@ -116,7 +123,7 @@ class Store:
                                 f"REVOKE ALL ON {kind} FROM {role}"
                             )
                         await conn.execute(f'REVOKE ALL ON SCHEMA "{schema}" FROM {role}')
-                    for table in ("workers", "tasks", "events"):
+                    for table in ("workers", "tasks", "events", "worker_enrollments"):
                         await conn.execute(
                             f'ALTER TABLE "{schema}".{table} ENABLE ROW LEVEL SECURITY'
                         )
@@ -133,7 +140,9 @@ class Store:
             self.pool.terminate()
 
     @asynccontextmanager
-    async def change(self, *, timeout: float = 5) -> AsyncIterator[tuple[asyncpg.Connection, datetime]]:
+    async def change(
+        self, *, timeout: float = 5
+    ) -> AsyncIterator[tuple[asyncpg.Connection, datetime]]:
         # A coarse database lock deliberately serializes prototype mutations,
         # including across processes. Move to finer row locks before scaling.
         async with asyncio.timeout(timeout):
@@ -156,6 +165,60 @@ class Store:
     async def workers(self) -> list[Worker]:
         rows = await self.pool.fetch("SELECT * FROM workers ORDER BY id LIMIT 500")
         return [Worker.model_validate(dict(row)) for row in rows]
+
+    async def enrolled_worker(self, worker_id: str) -> bool:
+        return await self.pool.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM worker_enrollments WHERE worker_id=$1 AND state='active')",
+            worker_id,
+        )
+
+    async def worker_authorized(self, worker_id: str, header: str | None) -> bool:
+        if not header or not header.startswith("Bearer ") or len(header) > 512:
+            return False
+        digest = await self.pool.fetchval(
+            "SELECT token_hash FROM worker_enrollments WHERE worker_id=$1 AND state='active'",
+            worker_id,
+        )
+        return bool(digest) and hmac.compare_digest(
+            digest, hashlib.sha256(header[7:].encode()).hexdigest()
+        )
+
+    async def reserve_enrollment(self, worker_id, request_id, user_id, name, token):
+        async with self.change() as (conn, _):
+            if await conn.fetchval(
+                "SELECT 1 FROM worker_enrollments WHERE request_id=$1", UUID(request_id)
+            ):
+                raise Conflict("Enrollment request already used; credentials cannot be replayed")
+            recent = await conn.fetchval(
+                "SELECT count(*) FROM worker_enrollments WHERE user_id=$1 AND created_at > clock_timestamp()-interval '1 hour'",
+                UUID(user_id),
+            )
+            active = await conn.fetchval(
+                "SELECT count(*) FROM worker_enrollments WHERE user_id=$1 AND state IN ('pending','active')",
+                UUID(user_id),
+            )
+            if recent >= 10 or active >= 100:
+                raise EnrollmentLimit
+            await conn.execute(
+                """INSERT INTO worker_enrollments
+                   (worker_id,request_id,user_id,display_name,token_hash,state)
+                   VALUES($1,$2,$3,$4,$5,'pending')""",
+                worker_id,
+                UUID(request_id),
+                UUID(user_id),
+                name,
+                hashlib.sha256(token.encode()).hexdigest(),
+            )
+
+    async def finish_enrollment(self, worker_id: str, key_id: str | None):
+        async with self.change() as (conn, _):
+            await conn.execute(
+                "UPDATE worker_enrollments SET state=$2,tailscale_key_id=$3 WHERE worker_id=$1 AND state='pending'",
+                worker_id,
+                "active" if key_id else "failed",
+                key_id,
+            )
+            await event(conn, "enrollment", worker_id, "pending", "active" if key_id else "failed")
 
     async def events(self, after: int) -> list[dict]:
         rows = await self.pool.fetch(

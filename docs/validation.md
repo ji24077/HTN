@@ -6,7 +6,8 @@ and relative documentation links were verified from the repository root. Release
 archives contain the compiled UI and SQL without local credentials or runtime
 data. The relocated demo reopened its preserved PostgreSQL data and returned 200
 for health and the dashboard; the smoke-test server was stopped afterward.
-Docker execution and live public/Tailscale hosting remain unvalidated.
+Docker execution and public hosting remain unvalidated. Later local Tailscale
+validation is recorded below.
 
 ## Earlier prototype validation
 
@@ -104,6 +105,25 @@ sent. The backend regression suite passes (35 passing tests, one opt-in database
 test skipped). The local bundled backend's public and private health endpoints
 return 200; the private management API returns 404.
 
-The macOS helper is built and the local backend is awaiting Tailscale browser
-authorization. Remote enrollment, certificates, and dispatch over the tailnet
-are not yet verified. Docker build/runtime remain untested on this host.
+The macOS helper and bundled backend are authorized in the development tailnet.
+Two manually authorized local CPU workers connected through the private TLS
+gateway and reconnected after a backend restart. Docker build/runtime and
+dispatch from a separate machine remain untested on this host.
+
+## Automatic worker enrollment
+
+A user signed in through the setup CLI with their approved Supabase account.
+The public API issued a single-use Tailscale auth key, saved only the worker
+credential digest in PostgreSQL, and the worker joined without an interactive
+Tailscale approval link. The CPU worker connected to the private gateway and
+maintained fresh heartbeats. Its initial connection failed once and recovered
+automatically within three seconds; the same session remained alive afterward.
+The setup CLI now enables connection-status logging so a successful recovery is
+visible after a warning.
+
+The provider smoke test created and revoked an unused enrollment key. The
+enrollment endpoint rejected unauthenticated requests with 401. Unit and isolated
+PostgreSQL integration checks cover approval, private credential storage,
+cross-process authorization, request replay, quotas, failure cleanup, and route
+isolation. Desktop packaging and a separate-machine onboarding trial remain
+outstanding.

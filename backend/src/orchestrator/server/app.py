@@ -19,6 +19,8 @@ from ..shared.security import authorized
 from .config import ServerConfig
 from .dashboard import router as dashboard_router
 from .db.store import Conflict, NotFound, Store
+from .enrollment import TailscaleEnrollment
+from .enrollment import router as enrollment_router
 from .routes import router as api_router
 from .scheduler import reconcile_loop
 from .supabase_auth import SupabaseAuth
@@ -38,7 +40,8 @@ def create_app(surface: str = "combined") -> FastAPI:
         if surface == "public" and not config.public_origin:
             raise ValueError("PUBLIC_ORIGIN is required for the public server")
         if surface == "public" and not (
-            config.supabase_url and config.supabase_publishable_key
+            config.supabase_url
+            and config.supabase_publishable_key
             and (config.supabase_admin_ids or config.supabase_admin_emails)
         ):
             raise ValueError(
@@ -53,6 +56,14 @@ def create_app(surface: str = "combined") -> FastAPI:
         reconciler = None
         updates = ChangeFeed(config.database_url)
         auth = SupabaseAuth(config.supabase_url) if config.supabase_url else None
+        enrollment = (
+            TailscaleEnrollment(config)
+            if surface == "public"
+            and config.tailscale_oauth_client_id
+            and config.tailscale_oauth_client_secret
+            and config.worker_gateway_url
+            else None
+        )
         try:
             if config.redis_url:
                 cache = Redis.from_url(
@@ -64,6 +75,7 @@ def create_app(surface: str = "combined") -> FastAPI:
                 )
             app.state.config, app.state.store, app.state.cache = config, store, cache
             app.state.supabase_auth = auth
+            app.state.enrollment = enrollment
             # Keep the local demo cookie valid across server restarts so the
             # browser can reconnect its stream. Rotating the admin token revokes it.
             app.state.ui_session = hmac.new(
@@ -81,6 +93,8 @@ def create_app(surface: str = "combined") -> FastAPI:
             try:
                 if auth is not None:
                     await auth.close()
+                if enrollment is not None:
+                    await enrollment.close()
                 if cache is not None:
                     await cache.aclose()
             finally:
@@ -121,7 +135,11 @@ def create_app(surface: str = "combined") -> FastAPI:
     async def worker(socket: WebSocket):
         config = socket.app.state.config
         worker_id = socket.headers.get("x-worker-id", "")
-        if not authorized(socket.headers.get("authorization"), config.worker_tokens.get(worker_id)):
+        header = socket.headers.get("authorization")
+        allowed = authorized(header, config.worker_tokens.get(worker_id))
+        if not allowed and worker_id and header and worker_id not in config.worker_tokens:
+            allowed = await socket.app.state.store.worker_authorized(worker_id, header)
+        if not allowed:
             await socket.close(code=1008)
             return
         await serve_worker(socket, socket.app.state.store, socket.app.state.cache, worker_id)
@@ -131,6 +149,8 @@ def create_app(surface: str = "combined") -> FastAPI:
     if surface in {"combined", "public"}:
         app.include_router(api_router)
         app.include_router(dashboard_router)
+    if surface == "public":
+        app.include_router(enrollment_router)
     return app
 
 
