@@ -12,7 +12,7 @@ from sentry_sdk.scrubber import DEFAULT_DENYLIST, EventScrubber
 REDACTED = "[redacted]"
 SENSITIVE_KEY = re.compile(
     r"authorization|cookie|token|secret|passw|pwd|credential|authkey|api[-_]?key|publishable"
-    r"|signature|database_url|redis_url|dsn",
+    r"|signature|database_url|redis_url|dsn|private[-_]?key|^code$",
     re.IGNORECASE,
 )
 # Credential shapes that appear inside free text: bearer headers, JWTs, Tailscale
@@ -23,6 +23,9 @@ SENSITIVE_VALUE = re.compile(
     r"|tskey-[A-Za-z0-9-]+"
     r"|sb_(?:secret|publishable)_[A-Za-z0-9_-]+"
     r"|(?<=://)[^/\s:@]+:[^/\s@]+(?=@)"
+    r"|-----BEGIN (?:[A-Z ]*PRIVATE KEY)-----[\s\S]*?-----END (?:[A-Z ]*PRIVATE KEY)-----"
+    r"|(?i:[?&#]code=)[^&#\s]+"
+    r"|(?i:\bcode[\"']?\s*[:=]\s*[\"']?)[0-9a-fA-F]{32}"
 )
 
 
@@ -62,7 +65,7 @@ class Scrubber:
 
     def scrub(self, value: Any, depth: int = 0) -> Any:
         if depth > 12:
-            return value
+            return REDACTED
         if isinstance(value, str):
             return self.text(value)
         if isinstance(value, dict):

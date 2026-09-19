@@ -970,6 +970,44 @@ dialog pre {
   font-weight: 400;
   margin-left: 5px;
 }
+.device-invite {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 24px;
+  margin-bottom: 24px;
+  border: 1px solid #dce0d6;
+  border-radius: 12px;
+  background: #f8f9f5;
+}
+.device-invite h2 {
+  font-size: 16px;
+  margin: 0 0 4px;
+}
+.device-invite p {
+  font-size: 13px;
+  color: #626b5c;
+  margin: 4px 0;
+}
+.invite-result {
+  width: 100%;
+}
+.invite-result input {
+  display: block;
+  width: 100%;
+  padding: 12px;
+  margin: 8px 0 12px;
+  border: 1px solid #c7cfc0;
+  border-radius: 6px;
+  font: inherit;
+}
+.attestation-status {
+  padding: 0 24px;
+  color: #435638;
+  font-size: 13px;
+}
 .composer-arrow {
   color: #93a27d;
 }

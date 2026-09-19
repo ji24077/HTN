@@ -4,9 +4,11 @@ Python control plane for dispatching independent tasks to unreliable worker
 machines. Workers connect outbound over WebSockets; the dashboard receives
 server-pushed updates. PostgreSQL owns leases and accepted results.
 
-**Status:** working local prototype with two CPU stub workers, a dashboard,
-a Python client, JSON CLI, and callable agent tools. Real GPU workloads, job
-splitting, machine scoring, and remote fleet validation remain separate work.
+**Status:** one Python/Supabase control plane with a React dashboard, Python workers,
+and paired desktop/iOS workers ported from Jack's PR. Desktop workers execute signed
+echo tests, deterministic walker simulations, and optional ONNX inference. Real GPU
+execution, job splitting, machine scoring, and validation of the combined system on
+remote hardware remain separate work.
 
 ## Run the app
 
@@ -64,6 +66,8 @@ Hosted entry points are `orchestrator-public` and
 
 ## Guides
 
+- [Desktop and iOS integration](docs/jack-integration.md): device invites, real workloads,
+  signed results, releases, Sentry, and validation.
 - [Automatic worker enrollment](docs/worker-enrollment.md): Supabase sign-in,
   backend-issued Tailscale keys, and the worker setup command.
 - [Bundled backend](docs/bundled-backend.md): website API and private gateway on one host,
@@ -82,6 +86,9 @@ Hosted entry points are `orchestrator-public` and
 ```sh
 npm --prefix frontend test
 npm --prefix frontend run build
+pnpm install --frozen-lockfile
+pnpm typecheck
+pnpm test
 uv run --project backend python -m unittest discover -s backend/tests -v
 uvx ruff check --config backend/pyproject.toml backend/src backend/tests examples/agent_task.py --select F,I
 uv build --project backend

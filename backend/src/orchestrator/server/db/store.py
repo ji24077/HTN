@@ -3,16 +3,19 @@
 import asyncio
 import hashlib
 import hmac
+import math
 import re
+import secrets
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from importlib.resources import files
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import asyncpg
 from pydantic import JsonValue
 
+from ...shared.dwp import validate_public_key
 from ...shared.protocol import (
     ACK_SECONDS,
     LEASE_SECONDS,
@@ -123,7 +126,15 @@ class Store:
                                 f"REVOKE ALL ON {kind} FROM {role}"
                             )
                         await conn.execute(f'REVOKE ALL ON SCHEMA "{schema}" FROM {role}')
-                    for table in ("workers", "tasks", "events", "worker_enrollments"):
+                    for table in (
+                        "workers",
+                        "tasks",
+                        "events",
+                        "worker_enrollments",
+                        "dwp_pair_codes",
+                        "dwp_devices",
+                        "dwp_assertions",
+                    ):
                         await conn.execute(
                             f'ALTER TABLE "{schema}".{table} ENABLE ROW LEVEL SECURITY'
                         )
@@ -168,9 +179,113 @@ class Store:
 
     async def enrolled_worker(self, worker_id: str) -> bool:
         return await self.pool.fetchval(
-            "SELECT EXISTS(SELECT 1 FROM worker_enrollments WHERE worker_id=$1 AND state='active')",
+            """SELECT EXISTS(
+                SELECT 1 FROM worker_enrollments WHERE worker_id=$1 AND state='active'
+                UNION ALL
+                SELECT 1 FROM dwp_devices WHERE worker_id=$1 AND revoked_at IS NULL
+            )""",
             worker_id,
         )
+
+    async def create_pair_code(self, owner_id: str | None) -> str:
+        owner = UUID(owner_id) if owner_id and owner_id != "local-admin" else None
+        code = secrets.token_hex(16)
+        async with self.change() as (conn, now):
+            # Keep used/expired codes for one hour to enforce the issuance quota.
+            await conn.execute(
+                "DELETE FROM dwp_pair_codes WHERE created_at < $1", now - timedelta(hours=1)
+            )
+            recent = await conn.fetchval(
+                "SELECT count(*) FROM dwp_pair_codes WHERE owner_id IS NOT DISTINCT FROM $1::uuid",
+                owner,
+            )
+            active = await conn.fetchval(
+                """SELECT count(*) FROM dwp_devices
+                   WHERE owner_id IS NOT DISTINCT FROM $1::uuid AND revoked_at IS NULL""",
+                owner,
+            )
+            if recent >= 10 or active >= 100:
+                raise EnrollmentLimit
+            await conn.execute(
+                """INSERT INTO dwp_pair_codes(code_hash,owner_id,created_at,expires_at)
+                   VALUES($1,$2,$3,$4)""",
+                hashlib.sha256(code.encode()).hexdigest(),
+                owner,
+                now,
+                now + timedelta(minutes=10),
+            )
+        return code
+
+    async def pair_device(self, code: str, public_key: str, label: str) -> str:
+        if not isinstance(code, str) or not re.fullmatch(r"[0-9a-fA-F]{32}", code.strip()):
+            raise Conflict("Invalid or expired pairing code")
+        public_key = validate_public_key(public_key)
+        if not isinstance(label, str) or not 1 <= len(label.strip()) <= 128:
+            raise ValueError("Device label must contain 1 to 128 characters")
+        worker_id = str(uuid4())
+        async with self.change() as (conn, now):
+            invite = await conn.fetchrow(
+                """SELECT owner_id FROM dwp_pair_codes
+                   WHERE code_hash=$1 AND used_at IS NULL AND expires_at>$2 FOR UPDATE""",
+                hashlib.sha256(code.strip().lower().encode()).hexdigest(),
+                now,
+            )
+            if invite is None:
+                raise Conflict("Invalid or expired pairing code")
+            if await conn.fetchval("SELECT 1 FROM dwp_devices WHERE public_key=$1", public_key):
+                raise Conflict("Device key is already paired")
+            active = await conn.fetchval(
+                """SELECT count(*) FROM dwp_devices
+                   WHERE owner_id IS NOT DISTINCT FROM $1::uuid AND revoked_at IS NULL""",
+                invite["owner_id"],
+            )
+            if active >= 100:
+                raise EnrollmentLimit
+            await conn.execute(
+                """INSERT INTO dwp_devices(worker_id,owner_id,public_key,display_name)
+                   VALUES($1,$2,$3,$4)""",
+                worker_id,
+                invite["owner_id"],
+                public_key,
+                label.strip(),
+            )
+            await conn.execute(
+                "UPDATE dwp_pair_codes SET used_at=$2 WHERE code_hash=$1",
+                hashlib.sha256(code.strip().lower().encode()).hexdigest(),
+                now,
+            )
+            await event(conn, "enrollment", worker_id, "", "active", protocol="dwp")
+        return worker_id
+
+    async def device_key(self, worker_id: str) -> str | None:
+        return await self.pool.fetchval(
+            "SELECT public_key FROM dwp_devices WHERE worker_id=$1 AND revoked_at IS NULL",
+            worker_id,
+        )
+
+    async def use_assertion_jti(self, worker_id: str, jti: str, expires_at: float) -> bool:
+        try:
+            nonce = UUID(jti)
+            if type(expires_at) not in (int, float) or not math.isfinite(expires_at):
+                return False
+            expiry = datetime.fromtimestamp(expires_at, UTC)
+        except (ValueError, TypeError, OverflowError, OSError):
+            return False
+        async with self.change() as (conn, now):
+            if not now < expiry <= now + timedelta(minutes=4):
+                return False
+            await conn.execute("DELETE FROM dwp_assertions WHERE expires_at<=$1", now)
+            return bool(
+                await conn.fetchval(
+                    """INSERT INTO dwp_assertions(worker_id,jti,expires_at)
+                   SELECT worker_id,$2,$3 FROM dwp_devices
+                   WHERE worker_id=$1 AND revoked_at IS NULL
+                   ON CONFLICT(worker_id,jti) DO NOTHING RETURNING true""",
+                    worker_id,
+                    nonce,
+                    expiry,
+                )
+            )
 
     async def worker_authorized(self, worker_id: str, header: str | None) -> bool:
         if not header or not header.startswith("Bearer ") or len(header) > 512:
@@ -393,7 +508,8 @@ class Store:
             lease = min(now + timedelta(seconds=ACK_SECONDS), deadline)
             row = await conn.fetchrow(
                 """UPDATE tasks SET state='assigned',generation=generation+1,worker_id=$2,
-                   session_id=$3,lease_until=$4,deadline=$5,result=NULL,failure='',progress=0,started_at=NULL
+                   session_id=$3,lease_until=$4,deadline=$5,result=NULL,attestation=NULL,
+                   failure='',progress=0,started_at=NULL
                    WHERE id=$1 RETURNING *""",
                 task.spec.id,
                 worker_id,
@@ -473,6 +589,8 @@ class Store:
         result: JsonValue,
         failure: str = "",
         retryable: bool = False,
+        *,
+        attestation: dict[str, JsonValue] | None = None,
     ) -> None:
         bounded_json(result)
         async with self.change() as (conn, now):
@@ -491,9 +609,11 @@ class Store:
                 await self._fail(conn, task, failure, retryable)
                 return
             await conn.execute(
-                "UPDATE tasks SET state='succeeded',result=$2,lease_until=NULL,deadline=NULL,progress=100 WHERE id=$1",
+                """UPDATE tasks SET state='succeeded',result=$2,attestation=$3,
+                   lease_until=NULL,deadline=NULL,progress=100 WHERE id=$1""",
                 ref.task_id,
                 result,
+                attestation,
             )
             await event(
                 conn,

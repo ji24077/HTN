@@ -34,6 +34,26 @@ class TelemetryTests(unittest.TestCase):
         for value in (ADMIN, WORKER, "db-password-123", ENV["TAILSCALE_OAUTH_CLIENT_SECRET"]):
             self.assertIn(value, secrets)
 
+    def test_device_invites_and_signing_keys_are_redacted(self):
+        cleaned = self.scrubber.event(
+            {
+                "code": "SINGLE-USE-INVITE",
+                "privateKey": "private-material",
+                "message": "-----BEGIN PRIVATE KEY-----\nprivate-material\n-----END PRIVATE KEY-----",
+                "url": "https://fleet.example/join?code=SINGLE-USE-INVITE",
+            }
+        )
+        self.assertNotIn("SINGLE-USE-INVITE", json.dumps(cleaned))
+        self.assertNotIn("private-material", json.dumps(cleaned))
+
+    def test_invite_code_in_serialized_frame_locals_is_redacted(self):
+        code = "0123456789abcdef0123456789abcdef"
+        for value in (
+            f"PairRequest(code='{code}')",
+            repr(bytearray(json.dumps({"code": code}).encode())),
+        ):
+            self.assertNotIn(code, self.scrubber.text(value))
+
     def test_event_is_scrubbed_but_keeps_debugging_context(self):
         event = {
             "request": {

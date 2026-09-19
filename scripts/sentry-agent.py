@@ -81,6 +81,9 @@ AGENT_TOOLS = [
     "Bash(npm --prefix frontend ci)",
     "Bash(npm --prefix frontend run test:*)",
     "Bash(npm --prefix frontend run typecheck)",
+    "Bash(pnpm test)",
+    "Bash(pnpm typecheck)",
+    "Bash(pnpm install --frozen-lockfile --ignore-scripts)",
 ]
 
 

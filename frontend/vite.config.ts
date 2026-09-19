@@ -36,6 +36,12 @@ export default defineConfig(({ mode }) => {
         "/demo/session": proxy,
         "/auth": proxy,
         "/telemetry": proxy,
+        "/hosts": proxy,
+        "/agent": { ...proxy, ws: true },
+        "/release": proxy,
+        "/artifacts": proxy,
+        "/download": proxy,
+        "/join": proxy,
       },
     },
     build: {

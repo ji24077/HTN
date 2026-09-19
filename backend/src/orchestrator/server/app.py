@@ -21,6 +21,8 @@ from ..shared.telemetry import init_sentry
 from .config import ServerConfig
 from .dashboard import router as dashboard_router
 from .db.store import Conflict, NotFound, Store
+from .dwp import router as dwp_router
+from .dwp_assets import router as dwp_assets_router
 from .enrollment import TailscaleEnrollment
 from .enrollment import router as enrollment_router
 from .routes import router as api_router
@@ -153,6 +155,8 @@ def create_app(surface: str = "combined") -> FastAPI:
     if surface in {"combined", "public"}:
         app.include_router(api_router)
         app.include_router(dashboard_router)
+        app.include_router(dwp_router)
+        app.include_router(dwp_assets_router)
     if surface == "public":
         app.include_router(enrollment_router)
     return app

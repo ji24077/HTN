@@ -16,3 +16,15 @@ build/
 frontend/node_modules/
 frontend/coverage/
 backend/src/orchestrator/server/web/
+node_modules/
+*.tsbuildinfo
+releases/
+.dwp/
+*.log
+.build/
+*.xcodeproj/
+DerivedData/
+ios/.build-ios/
+ios/.build-device/
+ios/Local.xcconfig
+ios/DWPAgentKit/.swiftpm/

@@ -33,6 +33,11 @@ export function TaskDetails({
           ×
         </button>
       </header>
+      {task?.attestation && (
+        <p className="attestation-status">
+          Device signature verified when this result was accepted.
+        </p>
+      )}
       <pre id="result-json">{task ? JSON.stringify(task, null, 2) : ""}</pre>
     </dialog>
   );

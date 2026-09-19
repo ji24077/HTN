@@ -317,14 +317,14 @@ describe("dashboard interactions over pushed updates", () => {
   it("recovers from stream disconnects without losing edits or fetching snapshots", async () => {
     const user = userEvent.setup();
     const { stream } = await mount();
-    await user.selectOptions(screen.getByRole("combobox"), "worker-b");
+    await user.selectOptions(screen.getByRole("combobox", { name: "Send to" }), "worker-b");
     act(() => stream.disconnect());
     expect(screen.getByRole("alert")).toHaveTextContent(
       "reconnecting automatically",
     );
     act(() => stream.snapshot(fleet()));
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    expect(screen.getByRole("combobox")).toHaveValue("worker-b");
+    expect(screen.getByRole("combobox", { name: "Send to" })).toHaveValue("worker-b");
     expect(
       fetchMock.mock.calls.every(([path]) => path === "/auth/session"),
     ).toBe(true);

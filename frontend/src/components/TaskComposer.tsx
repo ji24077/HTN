@@ -1,6 +1,6 @@
 import { useState, type SubmitEvent } from "react";
 import type { TaskSpec, Worker } from "../api/types";
-import { stubTask } from "../api/client";
+import { workloadTask, type WorkloadKind } from "../api/client";
 import { workerName } from "../lib/format";
 
 export function TaskComposer({
@@ -19,16 +19,36 @@ export function TaskComposer({
   const [name, setName] = useState("Render preview");
   const [duration, setDuration] = useState(30);
   const [failover, setFailover] = useState(true);
+  const [kind, setKind] = useState<WorkloadKind>("stub");
+  const [preparing, setPreparing] = useState(false);
+  const [error, setError] = useState("");
   const ids = [
     ...new Set([
-      ...workers.map((worker) => worker.id),
+      ...workers
+        .filter((worker) => worker.capabilities.kinds.includes(kind))
+        .map((worker) => worker.id),
       ...(selected ? [selected] : []),
     ]),
   ];
-  function submit(event: SubmitEvent<HTMLFormElement>) {
+  async function submit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (name.trim())
-      void onSubmit([stubTask(name.trim(), selected, duration, failover)]);
+    if (!name.trim() || preparing || busy) return;
+    setPreparing(true);
+    setError("");
+    try {
+      const worker = workers.find((worker) => worker.id === selected);
+      if (worker && !worker.capabilities.kinds.includes(kind))
+        throw new Error("Choose a worker that supports this workload.");
+      await onSubmit([
+        await workloadTask(kind, name.trim(), selected, duration, failover),
+      ]);
+    } catch (cause) {
+      setError(
+        cause instanceof Error ? cause.message : "Could not prepare the task.",
+      );
+    } finally {
+      setPreparing(false);
+    }
   }
   return (
     <section className="composer">
@@ -38,6 +58,34 @@ export function TaskComposer({
       </div>
       <p>A small piece of work. Your destination.</p>
       <form id="task-form" onSubmit={submit}>
+        <label className="field-label" htmlFor="workload">
+          Workload
+        </label>
+        <select
+          id="workload"
+          value={kind}
+          onChange={(event) => {
+            const next = event.target.value as WorkloadKind;
+            setKind(next);
+            setError("");
+            if (
+              selected &&
+              !workers
+                .find((worker) => worker.id === selected)
+                ?.capabilities.kinds.includes(next)
+            )
+              onSelect("");
+          }}
+        >
+          <option value="stub">Connection test (Python worker)</option>
+          <option value="echo">Signed connection test</option>
+          <option value="walker_evolution">
+            Walker evolution · 8 candidates
+          </option>
+          <option value="cpu_inference_batch">
+            MNIST inference · 100 digits
+          </option>
+        </select>
         <label className="field-label" htmlFor="task-name">
           Task name
         </label>
@@ -65,27 +113,31 @@ export function TaskComposer({
             </option>
           ))}
         </select>
-        <div className="field-label" id="duration-label">
-          Simulated duration
-        </div>
-        <div
-          className="duration-group"
-          role="group"
-          aria-labelledby="duration-label"
-        >
-          {[15, 30, 60].map((seconds) => (
-            <button
-              key={seconds}
-              type="button"
-              className={`duration ${duration === seconds ? "active" : ""}`}
-              data-seconds={seconds}
-              aria-pressed={duration === seconds}
-              onClick={() => setDuration(seconds)}
+        {kind === "stub" && (
+          <>
+            <div className="field-label" id="duration-label">
+              Simulated duration
+            </div>
+            <div
+              className="duration-group"
+              role="group"
+              aria-labelledby="duration-label"
             >
-              {seconds} sec
-            </button>
-          ))}
-        </div>
+              {[15, 30, 60].map((seconds) => (
+                <button
+                  key={seconds}
+                  type="button"
+                  className={`duration ${duration === seconds ? "active" : ""}`}
+                  data-seconds={seconds}
+                  aria-pressed={duration === seconds}
+                  onClick={() => setDuration(seconds)}
+                >
+                  {seconds} sec
+                </button>
+              ))}
+            </div>
+          </>
+        )}
         <label className="toggle-row" htmlFor="failover">
           <span>Retry on another worker</span>
           <input
@@ -103,14 +155,17 @@ export function TaskComposer({
           type="submit"
           className="submit"
           id="send-button"
-          disabled={busy}
+          disabled={busy || preparing}
         >
-          <span>{busy ? "Sending…" : "Send task"}</span>
+          <span>{busy || preparing ? "Sending…" : "Send task"}</span>
           <span aria-hidden="true">↗</span>
         </button>
         <p className="composer-foot">
-          Simulated workload · Real connections &amp; leases
+          {kind === "stub"
+            ? "Simulated workload · Real connections & leases"
+            : "Runs on paired devices · Signed results"}
         </p>
+        {error && <p role="alert">{error}</p>}
       </form>
     </section>
   );

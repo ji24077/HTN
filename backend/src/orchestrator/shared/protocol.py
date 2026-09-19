@@ -81,6 +81,7 @@ class Task(Model):
     lease_until: datetime | None = None
     deadline: datetime | None = None
     result: JsonValue = None
+    attestation: dict[str, JsonValue] | None = None
     failure: str = ""
     created_at: datetime
     progress: float = 0

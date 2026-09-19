@@ -1,13 +1,17 @@
 import * as Sentry from "@sentry/react";
 
 const SENSITIVE =
-  /authorization|cookie|token|secret|passw|credential|api[-_]?key/i;
+  /authorization|cookie|token|secret|passw|credential|api[-_]?key|private[-_]?key|^code$/i;
 const CREDENTIAL =
   /Bearer\s+[\w.~+/=-]+|eyJ[\w-]{8,}\.[\w-]{8,}\.[\w-]+|sb_(?:secret|publishable)_[\w-]+/g;
 
 // Supabase puts access tokens and one-time codes in redirect URLs.
 function scrubText(value: string): string {
   return value
+    .replace(
+      /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
+      "[redacted]",
+    )
     .replace(CREDENTIAL, "[redacted]")
     .replace(
       /([?#&](?:access_token|refresh_token|code|token)=)[^&#\s]+/gi,
@@ -16,7 +20,7 @@ function scrubText(value: string): string {
 }
 
 export function scrub<T>(value: T, depth = 0): T {
-  if (depth > 12) return value;
+  if (depth > 12) return "[redacted]" as T;
   if (typeof value === "string") return scrubText(value) as T;
   if (Array.isArray(value))
     return value.map((item) => scrub(item, depth + 1)) as T;
