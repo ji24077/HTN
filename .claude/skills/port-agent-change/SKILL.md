@@ -41,6 +41,22 @@ Most desktop changes must **not** be ported. Work out which bucket the change is
   `0.3.0`. So it has drifted again, on the other side. A desktop version bump does **not**
   propagate; bump the Swift constant in the same change or the server's view of what an
   iPhone is running will be wrong.
+
+  **Derive on desktop, assert on iOS** — they answer different questions. Derivation
+  records *what this binary was built from*, and works on desktop because the build and
+  the repo are the same moment. On iOS they are not: an installed build legitimately lags
+  the repo by days, so a device reporting an older version than `package.json` is correct
+  behaviour, not a bug. What is a bug is the constant being wrong *for the build it
+  shipped in* — which a build-time test catches while leaving field behaviour honest.
+  (Derivation is also structurally awkward here: SwiftPM prebuild plugins are sandboxed
+  to roughly the package directory, and the file needed sits two levels above the package
+  root at `../../packages/agent/package.json`. Verify that before pursuing codegen.)
+
+  If you add that test, compare `prefix(while: { $0.isNumber || $0 == "." })` on both
+  sides rather than the whole string. The iOS constant deliberately carries a `-ios`
+  suffix, so a plain equality assertion can never pass, and the obvious "fix" is to delete
+  the suffix that distinguishes the platform in handshakes. Resolve the repo root from
+  `#filePath`, not an absolute path.
 - `packages/agent/src/adapters/*.ts` — if the adapter exists on iOS
   (`inference`, `walker`; `echo` is trivial; `browser` is desktop-only)
 
