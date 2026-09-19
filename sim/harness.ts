@@ -13,7 +13,24 @@ import { startNetSim, type NetSim } from './netsim.ts'
  * cannot otherwise produce on one desk.
  */
 
-const DB_NAME = 'dwp_sim'
+/**
+ * Port and database are per-run, not fixed.
+ *
+ * Both were hardcoded, so two people — or two sessions — running the suite at once
+ * fought over the same port and the same database. The port guard then reported every
+ * scenario failing at exactly 10s, which is indistinguishable from a genuinely broken
+ * tree and is precisely what sends someone bisecting. A suite that cannot be run twice
+ * at once is a suite people avoid running.
+ */
+function pickPort(): number {
+  if (process.env.DWP_SIM_PORT) return Number(process.env.DWP_SIM_PORT)
+  // Derived from the process id, so concurrent runs land on different ports without
+  // coordinating, and a single run is still reproducible within itself.
+  return 8890 + (process.pid % 900)
+}
+
+const SIM_PORT = pickPort()
+const DB_NAME = process.env.DWP_SIM_DB ?? `dwp_sim_${SIM_PORT}`
 /** Built by `cd ios/DWPAgentKit && swift build`; absent on a machine without Xcode. */
 const SWIFT_AGENT = 'ios/DWPAgentKit/.build/debug/dwpagent'
 const OPERATOR = { email: 'sim@local', password: 'simulator-password-1' }
@@ -98,7 +115,7 @@ export async function startHarness(options: { logDir: string; controlPort?: numb
    * from the cause, which cost a long time to track down once already.
    */
   const { createServer } = await import('node:net')
-  const port = options.controlPort ?? 8890
+  const port = options.controlPort ?? SIM_PORT
 
   const probePort = (): Promise<boolean> => new Promise(resolve => {
     const probe = createServer()
@@ -123,7 +140,7 @@ export async function startHarness(options: { logDir: string; controlPort?: numb
 
   resetDatabase()
 
-  const controlPort = options.controlPort ?? 8890
+  const controlPort = options.controlPort ?? SIM_PORT
   const net = await startNetSim(controlPort)
   const directOrigin = `http://127.0.0.1:${controlPort}`
   const origin = `http://127.0.0.1:${net.port}`
@@ -301,12 +318,23 @@ export async function startHarness(options: { logDir: string; controlPort?: numb
     },
 
     async teardown(): Promise<void> {
+      // Drop the per-run database. Without this every suite run leaves one behind.
+      const dropDatabase = (): void => {
+        try {
+          execFileSync('docker', [
+            'exec', 'dwp-db', 'psql', '-U', 'dwp', '-d', 'postgres',
+            '-c', `drop database if exists ${DB_NAME} with (force)`,
+          ], { stdio: 'pipe' })
+        } catch {}
+      }
+
       for (const agent of spawned) {
         if (agent.proc) { try { agent.proc.kill('SIGKILL') } catch {} ; agent.proc = null }
       }
       control.kill('SIGKILL')
       await net.close()
       for (const home of homes) { try { rmSync(home, { recursive: true, force: true }) } catch {} }
+      dropDatabase()
     },
   }
 

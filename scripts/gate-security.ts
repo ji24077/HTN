@@ -45,12 +45,18 @@ const isInconclusive = (r: string): boolean => r === 'timeout' || r === 'network
 /**
  * Being rate limited is not a security finding.
  *
- * This gate pairs several hosts per run, and pairing is deliberately limited to 20
- * attempts per five minutes. Run it a few times in a row and it exhausts its own budget:
- * pairing returns 429, no host is created, and every check that needs one then fails on a
- * malformed assertion. That reads as five security failures when the boundary was never
- * exercised at all — and it is unreproducible ten minutes later, which is the worst way
- * for a security gate to behave.
+ * Pairing is limited to 20 attempts per five minutes, keyed on client address — so every
+ * terminal, script and session pairing from this machine draws on **one shared budget**,
+ * and none of them can see the others' consumption. This gate spends 4 of the 20 per run.
+ *
+ * When that budget runs out, pairing returns 429, no host is created, and every check
+ * that needs one fails on a malformed assertion — reading as several broken security
+ * boundaries when not one of them was exercised, and passing again ten minutes later.
+ *
+ * The first explanation for this was "consecutive runs exhaust it", which the arithmetic
+ * disproves: 4 per run against 20 is five runs per window. It was two sessions sharing
+ * the bucket. Worth recording, because the wrong lesson — space your runs out — would
+ * have people avoiding something that was never the cause.
  */
 let rateLimited = false
 function noteRateLimit(res: Response): boolean {
@@ -254,9 +260,10 @@ const verdict = failed > 0 ? 'FAIL' : inconclusive > 0 ? 'UNVERIFIED' : 'PASS'
 console.log(`\n  gate:security ${verdict}  (${passed} passed, ${failed} failed` +
   `${inconclusive > 0 ? `, ${inconclusive} could not be checked` : ''})\n`)
 if (rateLimited) {
-  console.log(`  Pairing was rate limited. This gate enrols several hosts per run and the`)
-  console.log(`  limit is 20 per five minutes, so consecutive runs exhaust it.`)
-  console.log(`  Wait five minutes and run it once.\n`)
+  console.log(`  Pairing was rate limited — 4 attempts per run against a budget of 20 per`)
+  console.log(`  five minutes, shared by everything that pairs from this machine: other`)
+  console.log(`  terminals, other sessions, anything else enrolling hosts right now.`)
+  console.log(`  Nothing here failed. Wait for the window and run it once.\n`)
 } else if (inconclusive > 0 && failed === 0) {
   console.log(`  Nothing failed, but ${inconclusive} check(s) could not run — usually load.`)
   console.log(`  Re-run on a quiet machine before treating this as green.\n`)
