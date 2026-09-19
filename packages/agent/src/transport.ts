@@ -45,10 +45,71 @@ const MAX_BACKOFF_MS = 30_000
 const HANDSHAKE_TIMEOUT_MS = 15_000
 /** How often a connected agent asks whether a newer release exists. */
 const UPDATE_CHECK_MS = 10 * 60 * 1000
+/**
+ * How long to wait before looking again after standing down for another agent.
+ *
+ * Long enough that two agents doing this do not trade the connection at speed, short
+ * enough that a machine recovers by itself within a couple of minutes of the other copy
+ * being stopped — which is the common case, since the usual reason to stop it is to let
+ * this one take over.
+ */
+const SUPERSEDED_RETRY_MS = 60_000
+/**
+ * Give up after this many consecutive supersessions.
+ *
+ * Retrying forever against an agent that is also retrying is a ping-pong, just a slow
+ * one. Three rounds distinguishes "the other copy was closed a moment ago" from "the
+ * other copy is here to stay", and the second deserves silence rather than a fight.
+ */
+const MAX_SUPERSESSIONS = 3
 
-type Running = { controller: AbortController; leaseId: string; renew: NodeJS.Timeout }
+type Running = {
+  controller: AbortController
+  leaseId: string
+  renew: NodeJS.Timeout
+  /** Carried so a window can say "running walker_evolution" rather than a bare task id. */
+  adapter: string
+  startedAt: number
+}
 
-export function connect(cfg: AgentConfig, privateKey: KeyObject): void {
+/**
+ * Everything a window needs to describe this agent, and nothing it does not.
+ *
+ * The desktop app is the same process as the agent, so this is passed by reference
+ * rather than scraped from a log — there is no second source of truth to drift. It is a
+ * plain snapshot on purpose: the window polls, so a missed notification costs one second
+ * of staleness rather than a wrong display that never corrects itself.
+ */
+export type AgentState = {
+  connection: 'offline' | 'connecting' | 'online'
+  attempt: number
+  connectedSince: number | null
+  running: { taskId: string; adapter: string; startedAt: number }[]
+  lastLostReason: string | null
+  /**
+   * The plain-language diagnosis produced after repeated failures.
+   *
+   * This is the single most useful thing a non-technical owner can be shown — usually
+   * "the address changed, ask for a new invite" — and until now it only ever reached a
+   * console that an app user never sees.
+   */
+  advice: string | null
+  /** Another agent holds this host's identity, so this one has stood down. */
+  stoodDown: boolean
+  updating: boolean
+}
+
+/** Enough of a handle for a window to ask for another attempt. */
+export type AgentHandle = {
+  /** Try now rather than waiting out the stand-down delay. */
+  retryNow(): void
+}
+
+export function connect(
+  cfg: AgentConfig,
+  privateKey: KeyObject,
+  observe?: (state: AgentState) => void,
+): AgentHandle {
   installDnsFallback()
   let backoffMs = 1_000
   let stopped = false
@@ -65,12 +126,27 @@ export function connect(cfg: AgentConfig, privateKey: KeyObject): void {
    */
   let lastTick = Date.now()
   let sleptForMs = 0
+  /** Consecutive times another agent has taken this host's identity from us. */
+  let supersededCount = 0
   const hostLog = log.child({ hostId: cfg.hostId, label: cfg.label })
   const running = new Map<string, Running>()
+
+  const state: AgentState = {
+    connection: 'offline', attempt: 0, connectedSince: null, running: [],
+    lastLostReason: null, advice: null, stoodDown: false, updating: false,
+  }
+  /** Derive the task list from the live map rather than maintaining a second copy. */
+  const notify = (patch: Partial<AgentState> = {}): void => {
+    Object.assign(state, patch)
+    state.running = [...running].map(([taskId, r]) =>
+      ({ taskId, adapter: r.adapter, startedAt: r.startedAt }))
+    observe?.({ ...state, running: [...state.running] })
+  }
 
   const open = (): void => {
     if (stopped) return
     attempt += 1
+    notify({ connection: 'connecting', attempt })
     hostLog.info('connect.attempt', { attempt, url: cfg.wsUrl })
     // Resolve before dialling when this machine's own resolver cannot. The `lookup` hook
     // below covers Node, but a compiled binary uses its own WebSocket and ignores it —
@@ -135,6 +211,9 @@ export function connect(cfg: AgentConfig, privateKey: KeyObject): void {
       lastInbound = Date.now()
       everConnected = true
       explained = false
+      // A connection that holds is the proof that whatever took the identity is gone.
+      supersededCount = 0
+      notify({ connection: 'online', connectedSince, lastLostReason: null, advice: null, stoodDown: false })
       hostLog.info('connect.established', {
         attempt,
         dialMs: Date.now() - dialStartedAt,
@@ -174,6 +253,7 @@ export function connect(cfg: AgentConfig, privateKey: KeyObject): void {
       if (isCompiledBinary()) {
         if (updating || running.size > 0) return
         updating = true
+        notify({ updating: true })
         void applyUpdate(cfg, privateKey).then(onUpdateResult).catch((err: unknown) => {
           hostLog.warn('update.failed', { err })
           updating = false
@@ -187,6 +267,7 @@ export function connect(cfg: AgentConfig, privateKey: KeyObject): void {
       if (updating) return
       updating = true
 
+      notify({ updating: true })
       hostLog.info('update.available', { have: cfg.installedRelease ?? null, offered })
       void applyUpdate(cfg, privateKey).then(onUpdateResult).catch((err: unknown) => {
         hostLog.warn('update.failed', { err })
@@ -210,6 +291,7 @@ export function connect(cfg: AgentConfig, privateKey: KeyObject): void {
       }
       // 'current' is the ordinary outcome for a binary: nothing to say about it.
       updating = false
+      notify({ updating: false })
     }
 
     const startHeartbeat = (): void => {
@@ -347,7 +429,10 @@ export function connect(cfg: AgentConfig, privateKey: KeyObject): void {
         const controller = new AbortController()
         const renewMs = Math.max(1_000, Math.floor((offer.leaseSeconds * 1000) / 3))
         const renew = setInterval(() => send('lease.renew', { taskId: offer.taskId, leaseId: offer.leaseId }), renewMs)
-        running.set(offer.taskId, { controller, leaseId: offer.leaseId, renew })
+        running.set(offer.taskId, {
+          controller, leaseId: offer.leaseId, renew, adapter: offer.adapter, startedAt: Date.now(),
+        })
+        notify()
 
         const startedAt = new Date().toISOString()
         const t0 = performance.now()
@@ -395,6 +480,7 @@ export function connect(cfg: AgentConfig, privateKey: KeyObject): void {
             clearTimeout(wallClock)
             clearInterval(renew)
             running.delete(offer.taskId)
+            notify()
           })
       }
     })
@@ -416,6 +502,7 @@ export function connect(cfg: AgentConfig, privateKey: KeyObject): void {
         abandonedTasks: abandoned.length,
       })
       connectedSince = 0
+      notify({ connection: 'offline', connectedSince: null, lastLostReason: why })
       if (stopped) return
 
       // Reset the backoff only for a connection that actually held. Resetting on every
@@ -441,6 +528,7 @@ export function connect(cfg: AgentConfig, privateKey: KeyObject): void {
         explained = true
         void diagnoseOrigin(cfg.server).then(d => {
           hostLog.error('connect.giving_advice', { cause: d.cause, attempts: attempt })
+          notify({ advice: d.message })
           console.error(`\n  Cannot reach ${cfg.server} after ${attempt} attempts.\n\n  ${d.message}\n`)
           // 'not-a-server' covers the common case where a stale tunnel hostname still
           // resolves but has nothing behind it any more.
@@ -463,6 +551,48 @@ export function connect(cfg: AgentConfig, privateKey: KeyObject): void {
     }
 
     ws.on('close', (code: number, reason: Buffer) => {
+      /**
+       * 4000 means the server handed this host's identity to a newer connection.
+       *
+       * Retrying would take it straight back and supersede the other one, which would
+       * retry in turn — two agents on one machine trading the connection forever, each
+       * abandoning the other's work. Stand down and say so instead. This is the case the
+       * desktop app makes easy to hit: launching the window while a login-started agent
+       * is already running.
+       */
+      if (code === 4000) {
+        supersededCount += 1
+        const giveUp = supersededCount >= MAX_SUPERSESSIONS
+        hostLog.warn('host.superseded', { count: supersededCount, giveUp })
+
+        // Stop teardown from scheduling the ordinary retry; this case has its own pace.
+        stopped = true
+        teardown('superseded by another agent on this host', code)
+        notify({ stoodDown: true })
+
+        console.error(
+          `\n  Another copy of the agent is already connected as "${cfg.label}".\n` +
+          `  This one has stood down rather than fight it for the connection.\n\n` +
+          `  That is usually an agent installed from a terminal and started at login.\n` +
+          `  Stop that one if you want this one to take over.\n`)
+
+        if (giveUp) {
+          console.error(`  Tried ${supersededCount} times; not trying again.\n`)
+          return
+        }
+        /**
+         * Look again shortly. Standing down must not be permanent.
+         *
+         * The first version set `stopped` and never retried, so an app that lost the
+         * race sat showing "stopped" forever — including after the other copy had been
+         * stopped, which is exactly when its owner expects it to come back. Nothing was
+         * connected, and nothing would be until someone relaunched it by hand.
+         */
+        const wait = SUPERSEDED_RETRY_MS + Math.random() * SUPERSEDED_RETRY_MS
+        hostLog.info('host.superseded_retry_scheduled', { inMs: Math.round(wait) })
+        setTimeout(() => { stopped = false; open() }, wait)
+        return
+      }
       teardown(reason.toString('utf8') || `close ${code}`, code)
     })
     ws.on('error', (err: Error) => {
@@ -480,5 +610,15 @@ export function connect(cfg: AgentConfig, privateKey: KeyObject): void {
   open()
   for (const sig of ['SIGINT', 'SIGTERM'] as const) {
     process.on(sig, () => { stopped = true; process.exit(0) })
+  }
+
+  return {
+    retryNow: () => {
+      supersededCount = 0
+      if (!stopped) return
+      stopped = false
+      notify({ stoodDown: false })
+      open()
+    },
   }
 }

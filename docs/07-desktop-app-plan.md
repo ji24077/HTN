@@ -1,135 +1,173 @@
 # A desktop app for Mac and Windows, without paying
 
-**Status:** plan only. Nothing here is built.
-**Audience:** the agent who picks this up next.
-**Written:** 2026-09-19
+**Status:** built, and running on both. Verified end to end on macOS **and on real
+Windows hardware** — the first time anything in this project has.
+**Built:** 2026-09-19
+**Command:** `pnpm build:binaries` — produces the binaries *and* both apps, signed together.
 
-## What the user asked for
+## What exists
 
-A downloadable app for macOS and Windows so non-technical friends can join the network
-without a terminal, **built and distributed without paying for anything**.
+| | |
+|---|---|
+| `DWP-Agent-macOS.zip` | 45 MB. One `.app` for Apple Silicon and Intel. |
+| `DWP-Agent-Windows-x64.zip` | 79 MB. `DWP Agent.exe`, plus a console build as a fallback. |
+| Served from | `GET /download/<file>`, listed on `/join` with hashes and the warning walkthrough |
+| Updates | over the connection, signed, automatic — the same mechanism as the CLI install |
 
-## The constraint that decides everything: signing
+Open it, paste the invite link, done. The window shows connection state, what it is
+running, and three controls: pause/resume, run at login, quit.
 
-Read this before choosing a framework, because it changes what "done" means.
+## The decision, and the measurements behind it
 
-**You can build and ship unsigned for free. Users will see a scary warning.** That is the
-entire trade, and no framework choice avoids it.
+The plan called for a Tauri shell spawning the agent binary. That was tested and
+rejected, on two facts found by running things rather than reading about them:
 
-| Platform | Unsigned experience | Cost to remove it |
-|---|---|---|
-| macOS | "cannot be opened because the developer cannot be verified" — quarantine flag on anything downloaded | **$99/yr** Apple Developer Program, for notarization. No free path. |
-| Windows | "Windows protected your PC" (SmartScreen) → *More info* → *Run anyway* | Free via **SignPath Foundation** if the project is open source; otherwise ~$10/mo Azure Artifact Signing |
+1. **Rust is not installed, and Tauri cannot cross-compile to Windows from macOS.** The
+   entire distribution story here is "build on the Mac, hand someone a zip". A shell that
+   needs a Windows machine or a CI matrix to produce the Windows half defeats it.
+2. **Electron would have cost more than the payload.** ~100 MB of runtime per platform on
+   top of a 111 MB agent, a large new dependency tree, and — the part that actually
+   decides it — a second artefact with its own version, which has to be kept in step with
+   the agent by hand. `Capability.swift:6` is what that drift looks like in this repo
+   already.
 
-Three facts worth knowing before anyone spends money:
+**So the app is the agent.** `dwp-agent gui` starts the same process that holds the
+connection and adds a loopback HTTP server and a window onto it. The window is a browser
+window, opened chromeless via `--app=` where a Chromium exists — Edge ships with Windows,
+so that is the common case there; a Mac without Chrome or Edge falls back to an ordinary
+tab.
 
-1. **Paying does not buy an instant clean install on Windows.** Since a 2024 policy
-   change, even an EV certificate goes through the same SmartScreen reputation-building
-   as a standard one. A new signed app is still warned about until it accrues downloads.
-2. **SignPath Foundation is genuinely free** for qualifying open-source projects and
-   signs with an OV certificate on their HSM — but the publisher shown is *SignPath
-   Foundation*, not this project.
-3. **macOS has no free equivalent.** A free Apple ID signs for local development only.
-   Notarization — the thing that actually removes the warning — requires the paid
-   programme.
+What that buys: no toolchain, no runtime, one file to ship, and **an app and an agent
+that cannot disagree about their version, because they are the same bytes.** What it
+costs, stated plainly: no tray icon, and on some Macs the UI is a browser tab rather than
+a window.
 
-**Therefore the honest goal is not "no warning". It is "the warning is expected, explained,
-and survivable".** A one-time right-click → Open on macOS, and *More info* → *Run anyway*
-on Windows. Plan the onboarding copy around that rather than pretending it away, and keep
-the existing one-line installer as the path for anyone who would rather not see it.
+## What Bun will and will not do when cross-compiling
 
-Escalate to the user before spending any money. The $99/yr Apple fee is the only way to a
-clean macOS experience, and that is their call, not the implementing agent's.
+Measured on bun 1.3.11, building from macOS:
 
-## The architectural shortcut
+| Flag | Result |
+|---|---|
+| `--target=bun-windows-x64` | works |
+| `--windows-hide-console` | **rejected** — "only available when compiling on Windows" |
+| `--windows-icon`, `--windows-title`, `--windows-publisher`, `--windows-version` | **rejected**, same reason |
 
-**Do not write a second agent.** The agent already cross-compiles to a single binary for
-five targets from one Mac (`scripts/build-binaries.ts`), and already knows how to pair,
-reconnect, run adapters, update itself, and install as a login service.
+The console window is not cosmetic: a command prompt opens behind the app, and closing it
+kills the agent. So it is fixed afterwards, by editing the PE header directly —
+`toWindowsGuiSubsystem()` in `scripts/lib/apps.ts` flips the Subsystem field from 3
+(console) to 2 (GUI), two bytes at offset 68 of the Optional Header. The stale checksum is
+left alone deliberately: Windows verifies it for drivers, not for user-mode programs.
 
-The app is a **thin shell** around that binary:
+The **icon is not fixed**, and that is a deliberate stop. Embedding one means rewriting
+the resource directory of a 116 MB executable, which is real risk for pure decoration, on
+a platform this machine cannot run to check the result. The Windows app therefore has a
+generic executable icon. macOS has a proper one (`assets/icon.icns`, drawn by
+`scripts/make-icons.ts` — generated rather than committed as an opaque blob, so it has a
+source anyone can edit).
 
-- spawn the existing `dwp-agent` as a child process
-- show pairing (a code box), connection state, and what it is currently running
-- start/stop, pause, and a "run at login" toggle that calls the existing `service.ts` paths
+**There are two Windows binaries, and that is load-bearing.** `dwp-agent-win32-x64.exe`
+keeps its console, because `install.ps1` installs it for terminal use and a GUI-subsystem
+process has no output. `dwp-agent-win32-x64-gui.exe` is the app. An agent updating itself
+reads its own PE header (`windowsSubsystem()` in `paths.ts`) and asks for the same kind it
+already is — otherwise the app's first update would silently give it a command prompt it
+never had.
 
-Everything hard is already done and already tested. A shell that reimplements protocol,
-identity or scheduling is a bug farm and a second thing to keep in sync — the repo already
-carries that cost once for iOS, and `.claude/skills/port-agent-change/SKILL.md` exists
-because of it. Do not add a third.
+## Two bugs this found, both older than the app
 
-## Framework
+Neither was introduced here; both were found by running the thing end to end.
 
-**Tauri**, unless the spike says otherwise.
+**Binary self-update never restarted.** `restartIntoNewVersion()` respawned with
+`process.argv.slice(1)`. That is correct for Node, whose argv is `[node, script, ...args]`
+— but a Bun standalone's argv is `["bun", "/$bunfs/root/<name>", ...args]`, where argv[0]
+is the literal string `bun` and argv[1] a path inside a virtual filesystem. The
+replacement therefore received that virtual path as its command, did not recognise it,
+printed the help, and exited **0**. So every binary update installed correctly and then
+failed to come back — and because the exit was clean, launchd and systemd both declined to
+restart it. A machine would simply go offline around the time a release went out, with
+nothing in the log that looked like a failure. `docs/06`'s claim that the binary update
+path was confirmed end to end was checking the hash and the reported version, which both
+pass while this is broken.
 
-| | Tauri | Electron |
-|---|---|---|
-| Installer size | ~5–10 MB | ~100 MB+ |
-| Prerequisite | **Rust (not installed here)** | Node (already present) |
-| Fit with an 11 MB agent | good | the shell would dwarf the payload |
+**Two agents on one host fought for the identity.** The server hands the connection to
+whoever connected last and closes the loser with code 4000. The agent treated that like
+any other disconnect and retried, taking it straight back — two agents on one machine
+trading the connection forever, each abandoning the other's work. It now stands down on
+4000 and says why. The desktop app makes this easy to reach, which is how it surfaced.
 
-Electron is the fallback if Rust proves a problem, and its size cost is real but not
-disqualifying. Decide in Phase 0, with a measurement, not a preference.
+## How the two never collide
 
-## Phases
+Run-at-login installs `gui --hidden`, not `run`: one process, started at login with no
+window. Opening the app again does not start a second agent — it finds the running one
+through `~/.dwp/gui.json`, opens a window onto it, and exits. Verified: launchd started a
+second copy while one was running, it handed off and exited 0, and launchd left it alone.
 
-Each phase ends with something demonstrable. Do not start the next until the gate passes.
+`gui.json` is **not** deleted on exit, and that matters more than it looks. It holds the
+port and the window's token, so an open window survives the process restarting into a new
+version. The first attempt did delete it, and the replacement minted a fresh token — every
+open window broke on every update, which is exactly what an update should not do.
 
-**Phase 0 — Decide (half a day).**
-Install Rust. Build the Tauri hello-world for macOS *and* cross-compile or VM-build for
-Windows. Measure both installer sizes.
-*Gate:* an empty window opens on both platforms, with real numbers recorded. If Windows
-cross-compilation from the Mac turns out to need a Windows machine, say so here — it
-changes the whole release story, and the agent binary's `bun build --compile` does not
-have that problem.
+## What is verified, and on what
 
-**Phase 1 — Wrap the binary (1–2 days).**
-Spawn `dwp-agent`, stream its output, surface connection state. No custom protocol code.
-*Gate:* the app pairs with a code and appears as an online host in the dashboard, with the
-same host identity as a CLI pairing — no second implementation of enrollment.
+Run against a live control service, with a packaged app unzipped the way a friend would:
 
-**Phase 2 — The three controls (1 day).**
-Pause/resume, run-at-login toggle, quit. Each calls the existing agent paths.
-*Gate:* toggling run-at-login produces exactly the same launchd/Scheduled Task state as
-`dwp-agent service install`, verified by inspecting it, not by trusting the UI.
+- Pairs from the window by pasting an invite link; appears online in the fleet.
+- Runs real work; the window names the adapter and how long it has been going.
+- Pause, resume, run-at-login and quit all do what they say — the LaunchAgent was
+  inspected, not trusted.
+- **Updated itself 0.3.0 → 0.4.0 while running**: downloaded, verified against the pinned
+  key, replaced its own executable, restarted, reconnected, and kept the same window
+  address. The binary's hash on disk changed; the window never broke.
+- Launched through LaunchServices (a real double-click), not just by exec'ing the binary.
 
-**Phase 3 — Unsigned distribution (1 day).**
-Produce `.dmg` and `.exe`. Write the onboarding copy for both warnings. Serve them from
-the control service beside the existing installers, hashes included.
-*Gate:* a machine that has never seen this project installs from the download, gets past
-the warning by following only the written instructions, and runs a task. Test with someone
-who did not build it.
+### Windows — no longer a guess
 
-**Phase 4 — Signing, only if the user funds it.**
-macOS notarization ($99/yr) and/or SignPath Foundation for Windows. Do not begin without
-an explicit decision.
+Run on a real machine (`LAPTOP-9CG858LS`, win32 x64, 12 cores):
 
-## What to test, beyond "it launches"
+- **The windowless build starts.** The PE subsystem patch works — the app opened, drew its
+  window, and needed no console. The `DWP Agent (with console).exe` fallback went unused.
+- **It connects and does work.** Sent an `echo` task pinned to that host: accepted, ran
+  3,027 ms for a 3,000 ms sleep, and returned a result signed on the machine and verified
+  by the server, reporting `os: win32, arch: x64`.
+- **The stand-down message did its job**, and in doing so exposed that standing down was
+  permanent — see above. That is the bug real hardware was always going to find.
 
-- **Quit vs close.** Closing the window must not silently stop the agent, and if it does
-  stop it, the user must be told. A worker that quietly disappeared is worse than one that
-  never started — the eduroam Mac dropped out of a live run in exactly this way, and only
-  the server log showed it was a clean exit rather than a network fault.
-- **Sleep and wake.** The agent already handles suspension; confirm the shell does not
-  interfere. `sim/` covers the agent side.
-- **Two instances.** Launching the app while a CLI agent is running: same identity, or a
-  refusal with a clear reason. Never two agents on one host id.
-- **Update path.** The binary updates itself over the connection. Decide whether the shell
-  updates with it or separately, and write down which — a shell pinned to an old binary is
-  a version-drift bug waiting to happen (see `Capability.swift:6`, which drifted exactly
-  this way on iOS).
-- **The warning copy itself.** The riskiest text in the product. Watch someone read it.
+Still unproven on Windows, and worth saying rather than implying otherwise: pairing from
+the window on a machine that has never joined (the one tested was already enrolled from
+the CLI install), self-update through the move-aside-then-rename path, and the run-at-login
+toggle driving `schtasks`.
 
-## Open questions for the user
+## Getting past the macOS warning — the instructions were wrong once
 
-1. Fund macOS notarization ($99/yr)? Without it the Mac warning stays.
-2. Is this repo going open source? That is the gate for free Windows signing via SignPath.
-3. Tray app or ordinary window? Tray suits something that runs all day; a window is simpler
-   and easier to explain.
+`Right-click &rarr; Open` has been the standard advice for a decade and **Apple removed it
+in macOS 15**. On anything current the route is: let it be blocked, then System Settings
+&rarr; Privacy &amp; Security &rarr; Security &rarr; **Open Anyway**. The download page
+said the old thing and had to be corrected on first contact with a real Mac (26.3.1).
 
-## Sources
+The bundle is also **ad-hoc signed** now, which it was not at first. Bun linker-signs the
+executables it produces but nothing signed the bundle, so `spctl` reported "no usable
+signature" — and on Apple Silicon a quarantined bundle with no signature at all can fail
+as *"is damaged and can't be opened. You should move it to the Trash"*, which offers no
+way past it. Ad-hoc signing costs nothing and turns that into the ordinary "unidentified
+developer" block, which Privacy &amp; Security can release. It is not notarization and
+does not remove the warning; it makes the warning survivable.
 
-- Microsoft: code signing options, SmartScreen reputation
-- SignPath Foundation: free signing for open-source projects
-- Azure Artifact Signing: from $9.99/month, GA April 2026, US/CA/EU/UK, self-employed
-  individuals now eligible
+## Signing — unchanged, and still not bought
+
+Everything above works unsigned, with a warning on both platforms that the download page
+now names and walks through in advance. macOS notarization is $99/yr and the only way to
+remove the Mac warning; Windows has SignPath Foundation, free for open-source projects,
+which signs under *their* publisher name. Paying does not buy a clean Windows install
+anyway — since a 2024 policy change even an EV certificate builds SmartScreen reputation
+from zero. **The goal remains a warning that is expected and explained, not absent.**
+
+## Still open
+
+1. **The rest of Windows.** It runs and does work; pairing from the window, self-update,
+   and the run-at-login toggle have still only been exercised on macOS.
+2. **A Windows icon**, if the generic one grates enough to be worth PE resource surgery.
+3. **The server address.** Updates and work both ride the connection, so a machine that
+   cannot reach the control service gets neither. `dwp-agent set-server` re-points without
+   re-pairing, but a friend cannot run it — a tunnel URL that changes on restart is still
+   the weakest link in handing this to someone else.
+4. **The iOS agent has not been given the 4000 stand-down**, so two iOS agents on one host
+   id would still fight. See `.claude/skills/port-agent-change/SKILL.md`.

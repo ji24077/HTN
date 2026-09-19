@@ -17,8 +17,11 @@ import { createPrivateKey } from 'node:crypto'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { hashBytes, signRelease, generateReleaseKey, type ReleaseManifest } from '@dwp/protocol'
+import { packageApps, buildWindowsGuiVariant, type AppEntry } from './lib/apps.ts'
 
 const OUT = join('releases', 'binaries')
+/** Skip the five compiles and repackage from what is already in releases/binaries. */
+const SKIP_COMPILE = process.argv.includes('--skip-compile')
 const KEY_DIR = process.env.DWP_HOME ?? join(homedir(), '.dwp')
 const KEY_PATH = join(KEY_DIR, 'release.key')
 
@@ -42,14 +45,16 @@ function loadKey(): ReturnType<typeof createPrivateKey> {
 }
 
 const privateKey = loadKey()
-rmSync(OUT, { recursive: true, force: true })
+if (!SKIP_COMPILE) rmSync(OUT, { recursive: true, force: true })
 mkdirSync(OUT, { recursive: true })
 
 const agentPkg = JSON.parse(readFileSync('packages/agent/package.json', 'utf8')) as { version: string }
 type Built = { target: string; os: string; arch: string; file: string; sha256: string; bytes: number }
 const built: Built[] = []
 
-console.log(`\n  Building the agent for ${TARGETS.length} platforms…\n`)
+console.log(SKIP_COMPILE
+  ? `\n  Repackaging from ${OUT}/ without recompiling…\n`
+  : `\n  Building the agent for ${TARGETS.length} platforms…\n`)
 
 for (const t of TARGETS) {
   const suffix = t.os === 'win32' ? '.exe' : ''
@@ -57,6 +62,15 @@ for (const t of TARGETS) {
   const outfile = join(OUT, name)
   process.stdout.write(`    ${t.os}/${t.arch}`.padEnd(22))
   try {
+    if (SKIP_COMPILE) {
+      const bytes = readFileSync(outfile)
+      built.push({
+        target: `${t.os}-${t.arch}`, os: t.os, arch: t.arch, file: name,
+        sha256: hashBytes(bytes), bytes: bytes.length,
+      })
+      console.log(`${(bytes.length / 1024 / 1024).toFixed(0)} MB (kept)`)
+      continue
+    }
     execFileSync('bun', [
       'build', '--compile', `--target=${t.bun}`,
       // The optional runtimes are not bundled: they cannot work inside a single file,
@@ -90,17 +104,49 @@ if (built.length === 0) {
  * signed payload is then trustworthy — so a swapped binary for one platform is caught
  * even though only one signature was checked.
  */
-const payload = JSON.stringify(built.map(b => `${b.target}:${b.sha256}`).sort())
+/**
+ * The Windows app variant, made here rather than by the compiler.
+ *
+ * Measured, not assumed: bun 1.3.11 rejects every `--windows-*` flag when the host is
+ * not Windows — `--windows-hide-console`, `--windows-icon` and the version metadata all
+ * fail with "only available when compiling on Windows". Since building on a Mac is the
+ * entire distribution story, the one that matters is done afterwards by editing the PE
+ * header directly. The icon is not: embedding one means rewriting the resource directory
+ * of a 116 MB executable, which is a lot of risk for decoration, on a platform this
+ * machine cannot run to check the result.
+ */
+const guiExe = buildWindowsGuiVariant(built)
+if (guiExe) built.push(guiExe)
+
+let apps: AppEntry[] = []
+try {
+  apps = packageApps(built, agentPkg.version)
+} catch (err) {
+  console.error(`\n  Could not package the apps: ${err instanceof Error ? err.message : String(err)}\n`)
+}
+
+/**
+ * The apps are inside the signed payload, not merely listed beside it.
+ *
+ * They are what a person actually downloads, so a hash nobody signed would leave the
+ * one artefact that matters unprotected while the binaries it wraps were covered.
+ */
+const payload = JSON.stringify([
+  ...built.map(b => `${b.target}:${b.sha256}`),
+  ...apps.map(a => `app:${a.target}:${a.sha256}`),
+].sort())
 const manifest: ReleaseManifest = {
   version: `${agentPkg.version}+bin.${hashBytes(Buffer.from(payload)).slice(0, 8)}`,
   sha256: hashBytes(Buffer.from(payload)),
   bytes: built.reduce((n, b) => n + b.bytes, 0),
   createdAt: new Date().toISOString(),
-  notes: `standalone binaries for ${built.map(b => b.target).join(', ')}`,
+  notes: `standalone binaries for ${built.map(b => b.target).join(', ')}`
+    + (apps.length > 0 ? `; desktop apps for ${apps.map(a => a.target).join(', ')}` : ''),
 }
-const signed = { ...signRelease(privateKey, manifest), binaries: built }
+const signed = { ...signRelease(privateKey, manifest), binaries: built, apps }
 writeFileSync(join(OUT, 'index.json'), JSON.stringify(signed, null, 2) + '\n')
 
 console.log(`\n  ${manifest.version}`)
 console.log(`  ${built.length} binaries, ${(manifest.bytes / 1024 / 1024).toFixed(0)} MB total`)
+for (const a of apps) console.log(`  ${a.file.padEnd(28)} ${(a.bytes / 1024 / 1024).toFixed(0)} MB`)
 console.log(`  signed and written to ${OUT}/\n`)

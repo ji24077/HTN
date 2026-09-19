@@ -12,7 +12,7 @@ import { joinPage } from './joinpage.ts'
 import { snapshot } from './diagnostics.ts'
 import { readArtifact, manifest } from './artifacts.ts'
 import { latestRelease, releaseBundle } from './releases.ts'
-import { binaryIndex, binaryFile, installShell, installPowerShell } from './installer.ts'
+import { binaryIndex, binaryFile, appDownloads, installShell, installPowerShell } from './installer.ts'
 import { dashboardHtml } from './dashboard.ts'
 import { loginHtml } from './loginpage.ts'
 import { walkerHtml } from './walkerpage.ts'
@@ -288,7 +288,7 @@ export function buildServer(): FastifyInstance {
   app.get('/join', async (req, reply) => {
     const { code } = z.object({ code: z.string().max(32).optional() }).parse(req.query ?? {})
     return reply.type('text/html; charset=utf-8')
-      .send(joinPage(config.publicOrigin, code))
+      .send(joinPage(config.publicOrigin, code, appDownloads()))
   })
 
   /**

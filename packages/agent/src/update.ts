@@ -2,14 +2,17 @@ import { execFile, spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { promisify } from 'node:util'
 import type { KeyObject } from 'node:crypto'
 import { SignedRelease, verifyRelease, hashBytes, mintAssertion, createLogger } from '@dwp/protocol'
 import { chmodSync, renameSync, unlinkSync } from 'node:fs'
 import { platform, arch } from 'node:os'
+import { request as httpRequest } from 'node:http'
+import { request as httpsRequest } from 'node:https'
 import { loadConfig, saveConfig, type AgentConfig } from './config.ts'
-import { installRoot, isCompiledBinary } from './paths.ts'
+import { dnsFallbackEnabled, resolvePublicly, systemCanResolve } from './resolver.ts'
+import { installRoot, isCompiledBinary, windowsSubsystem } from './paths.ts'
 import { WORKLOADS, installWorkload, isInstalled } from './workloads.ts'
 
 const exec = promisify(execFile)
@@ -77,6 +80,63 @@ const pnpmInstall = (root: string): Promise<unknown> =>
   exec('pnpm', ['install', '--silent', ...installFlags(root)],
     { cwd: root, timeout: 600_000, shell: IS_WINDOWS })
 
+
+/**
+ * The same public-resolver fallback the connection already has, for the update path.
+ *
+ * The agent installs a DNS fallback for Node's `fetch` at startup, but a Bun-compiled
+ * binary ignores it — so a machine whose resolver cannot see a freshly created hostname
+ * would connect and work, having dialled the address directly, and then be permanently
+ * unable to fetch a release. That is the phone-tethering case this project keeps meeting,
+ * and it is exactly the machine least likely to get a fix by hand.
+ *
+ * Only the address is supplied by a different resolver: SNI and Host stay the real
+ * hostname, so certificate verification is unchanged.
+ */
+async function updateFetch(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  try {
+    return await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) })
+  } catch (err) {
+    if (!dnsFallbackEnabled()) throw err
+    const { hostname } = new URL(url)
+    // If the name resolves, the failure was something else and is the caller's to see.
+    if (await systemCanResolve(hostname)) throw err
+    log.info('update.direct_address', { host: hostname })
+    return directRequest(url, init, timeoutMs)
+  }
+}
+
+async function directRequest(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  const target = new URL(url)
+  const addresses = await resolvePublicly(target.hostname)
+  if (addresses.length === 0) throw new Error(`no A record for ${target.hostname} from a public resolver`)
+
+  const isHttps = target.protocol === 'https:'
+  return new Promise<Response>((resolve, reject) => {
+    const req = (isHttps ? httpsRequest : httpRequest)({
+      host: addresses[0],
+      port: target.port ? Number(target.port) : (isHttps ? 443 : 80),
+      path: target.pathname + target.search,
+      method: init.method ?? 'GET',
+      servername: target.hostname,
+      headers: { ...(init.headers as Record<string, string> | undefined), host: target.hostname },
+      timeout: timeoutMs,
+    }, res => {
+      const chunks: Buffer[] = []
+      res.on('data', (c: Buffer) => chunks.push(c))
+      res.on('end', () => {
+        const status = res.statusCode ?? 502
+        // 204 and 304 may not carry a body; Response rejects one.
+        const body = status === 204 || status === 304 ? null : Buffer.concat(chunks)
+        resolve(new Response(body, { status }))
+      })
+    })
+    req.on('timeout', () => req.destroy(new Error(`timed out after ${timeoutMs}ms`)))
+    req.on('error', reject)
+    req.end()
+  })
+}
+
 export type UpdateResult =
   | { status: 'current'; version: string }
   | { status: 'updated'; from: string | null; to: string }
@@ -108,7 +168,7 @@ async function updateBinary(cfg: AgentConfig, opts: { force?: boolean }): Promis
 
   let index: Index
   try {
-    const res = await fetch(`${cfg.server}/release/binaries`, { signal: AbortSignal.timeout(20_000) })
+    const res = await updateFetch(`${cfg.server}/release/binaries`, {}, 20_000)
     if (res.status === 404) return { status: 'unavailable', reason: 'this server is not offering binaries' }
     if (!res.ok) return { status: 'unavailable', reason: `HTTP ${res.status}` }
     index = await res.json() as Index
@@ -126,11 +186,23 @@ async function updateBinary(cfg: AgentConfig, opts: { force?: boolean }): Promis
     return { status: 'current', version: index.manifest.version }
   }
 
-  const want = `${platform()}-${arch() === 'arm64' ? 'arm64' : 'x64'}`
+  /**
+   * Ask for the same kind of build we already are.
+   *
+   * On Windows there are two: one with a console, which the command-line install uses
+   * and needs for its output, and one without, which is the desktop app. They differ by
+   * two bytes in the PE header and nothing else, so an update that fetched the wrong one
+   * would still run — it would just silently gain or lose a command prompt.
+   */
+  const base = `${platform()}-${arch() === 'arm64' ? 'arm64' : 'x64'}`
+  const want = windowsSubsystem() === 2 ? `${base}-gui` : base
   const entry = index.binaries.find(b => b.target === want)
+  // A server that publishes no windowless build has nothing this app can take: the
+  // console build would run, but it would sprout a command prompt the owner never had.
+  // Staying put and saying so is the honest outcome.
   if (!entry) return { status: 'unavailable', reason: `no binary published for ${want}` }
 
-  const res = await fetch(`${cfg.server}/download/${entry.file}`, { signal: AbortSignal.timeout(600_000) })
+  const res = await updateFetch(`${cfg.server}/download/${entry.file}`, {}, 600_000)
   if (!res.ok) return { status: 'unavailable', reason: `downloading the binary failed: HTTP ${res.status}` }
   const bytes = Buffer.from(await res.arrayBuffer())
   if (hashBytes(bytes) !== entry.sha256) {
@@ -138,7 +210,18 @@ async function updateBinary(cfg: AgentConfig, opts: { force?: boolean }): Promis
   }
 
   const target = process.execPath
-  const staged = join(tmpdir(), `dwp-agent-${entry.sha256.slice(0, 8)}`)
+  /**
+   * Stage beside the target, not in the temp directory.
+   *
+   * The last step is a rename, and rename cannot cross filesystems. `/tmp` frequently is
+   * a different one — tmpfs on most Linux distributions — so staging there fails with
+   * EXDEV at the very end, after the entire download and hash check. It cannot reproduce
+   * on macOS, where the temp directory and the home directory share a volume.
+   *
+   * Staging in the install directory also means the rename is atomic, so there is no
+   * moment where the agent's own executable is a half-written file.
+   */
+  const staged = join(dirname(target), `.dwp-agent-${entry.sha256.slice(0, 8)}`)
   try {
     writeFileSync(staged, bytes, { mode: 0o755 })
     chmodSync(staged, 0o755)
@@ -189,7 +272,7 @@ export async function applyUpdate(
 
   let signed: SignedRelease
   try {
-    const res = await fetch(`${cfg.server}/release/latest`, { signal: AbortSignal.timeout(20_000) })
+    const res = await updateFetch(`${cfg.server}/release/latest`, {}, 20_000)
     if (res.status === 404) return { status: 'unavailable', reason: 'the server is not offering a release' }
     if (!res.ok) return { status: 'unavailable', reason: `HTTP ${res.status}` }
     signed = SignedRelease.parse(await res.json())
@@ -212,10 +295,9 @@ export async function applyUpdate(
     return { status: 'current', version: signed.manifest.version }
   }
 
-  const res = await fetch(`${cfg.server}/release/${signed.manifest.sha256}`, {
+  const res = await updateFetch(`${cfg.server}/release/${signed.manifest.sha256}`, {
     headers: { authorization: `Bearer ${mintAssertion(cfg.hostId, privateKey)}` },
-    signal: AbortSignal.timeout(180_000),
-  })
+  }, 180_000)
   if (!res.ok) return { status: 'unavailable', reason: `downloading the bundle failed: HTTP ${res.status}` }
 
   const bytes = Buffer.from(await res.arrayBuffer())
@@ -399,7 +481,22 @@ export function restartIntoNewVersion(): never {
   // detaching additionally means DETACHED_PROCESS — no console — so an agent restarted
   // that way would keep running with its output going nowhere, in the one window its
   // owner is watching.
-  const child = spawn(process.execPath, process.argv.slice(1), {
+  /**
+   * What counts as "the arguments" is not the same for a script and for a binary.
+   *
+   * Node's argv is [node, script, ...args], so slice(1) is right there. A Bun standalone
+   * executable's is ["bun", "/$bunfs/root/<name>", ...args]: argv[0] is the literal
+   * string "bun" and argv[1] a path inside a virtual filesystem — neither exists on disk.
+   * slice(1) therefore handed the replacement that virtual path as its first argument,
+   * which it read as a command it did not recognise, printed the help for, and exited 0.
+   *
+   * The effect was that every binary update installed correctly and then failed to come
+   * back, leaving the machine on the new version and not running — and exiting 0 meant
+   * launchd and systemd both saw a clean shutdown and did not restart it either. Silent,
+   * and visible only as a host that went offline around the time a release went out.
+   */
+  const args = isCompiledBinary() ? process.argv.slice(2) : process.argv.slice(1)
+  const child = spawn(process.execPath, args, {
     detached: !IS_WINDOWS,
     stdio: 'inherit',
     cwd: process.cwd(),

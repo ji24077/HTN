@@ -11,9 +11,17 @@ import { createHash } from 'node:crypto'
  * does not match. This is the model rustup and Homebrew use.
  */
 const DIR = process.env.DWP_BINARIES_DIR ?? join('releases', 'binaries')
+const APPS_DIR = process.env.DWP_APPS_DIR ?? join('releases', 'apps')
 
 export type BinaryEntry = { target: string; os: string; arch: string; file: string; sha256: string; bytes: number }
-export type BinaryIndex = { manifest: { version: string }; signature: string; publicKey: string; binaries: BinaryEntry[] }
+/** A downloadable desktop app, as packaged by scripts/lib/apps.ts. */
+export type AppEntry = { target: 'macos' | 'windows-x64'; file: string; sha256: string; bytes: number; opens: string }
+export type BinaryIndex = {
+  manifest: { version: string }; signature: string; publicKey: string
+  binaries: BinaryEntry[]
+  /** Absent on an index built before the apps existed, so every reader must allow for it. */
+  apps?: AppEntry[]
+}
 
 export function binaryIndex(): BinaryIndex | null {
   const path = join(DIR, 'index.json')
@@ -21,15 +29,33 @@ export function binaryIndex(): BinaryIndex | null {
   try { return JSON.parse(readFileSync(path, 'utf8')) as BinaryIndex } catch { return null }
 }
 
-export function binaryFile(file: string): Buffer | null {
-  // Name must match exactly what the index lists — no path, no traversal.
+/** The desktop apps this server is offering, newest build only. */
+export function appDownloads(): { version: string; apps: AppEntry[] } | null {
   const index = binaryIndex()
-  if (!index?.binaries.some(b => b.file === file)) return null
-  const path = join(DIR, file)
+  if (!index?.apps?.length) return null
+  return { version: index.manifest.version, apps: index.apps }
+}
+
+/**
+ * Serve a file the signed index lists, and nothing else.
+ *
+ * Apps live in a different directory from the binaries they wrap, so the lookup has to
+ * know which list matched. Everything else is unchanged: the name must appear in the
+ * index exactly, which rules out traversal, and the bytes are re-hashed before they are
+ * sent, so a corrupted or swapped file on this disk is refused here rather than being
+ * distributed and rejected on every machine that downloads it.
+ */
+export function binaryFile(file: string): Buffer | null {
+  const index = binaryIndex()
+  const binary = index?.binaries.find(b => b.file === file)
+  const app = index?.apps?.find(a => a.file === file)
+  const entry = binary ?? app
+  if (!entry) return null
+
+  const path = join(binary ? DIR : APPS_DIR, file)
   if (!existsSync(path) || !statSync(path).isFile()) return null
   const bytes = readFileSync(path)
-  const expected = index.binaries.find(b => b.file === file)!.sha256
-  if (createHash('sha256').update(bytes).digest('hex') !== expected) return null
+  if (createHash('sha256').update(bytes).digest('hex') !== entry.sha256) return null
   return bytes
 }
 

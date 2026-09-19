@@ -8,9 +8,22 @@ import { applyUpdate, completePendingInstall, currentVersion } from './update.ts
 import { WORKLOADS, enableWorkload, isInstalled, availableAdapters, type WorkloadId } from './workloads.ts'
 import { invocation } from './paths.ts'
 import { installService, uninstallService, serviceStatus } from './service.ts'
+import { runGui, guiAddress } from './gui.ts'
 import { AGENT_HOME, AGENT_VERSION } from './paths.ts'
 
-const [command, ...rest] = process.argv.slice(2)
+const [given, ...rest] = process.argv.slice(2)
+
+/**
+ * No arguments means "open the app"; `--help` means "tell me about yourself".
+ *
+ * This is the app convention rather than the command-line one, and it is chosen because
+ * a double-clicked icon cannot pass arguments and cannot be told apart from a bare
+ * invocation in a terminal. Deciding by whether stdout is a terminal looks like it would
+ * work and does not: double-clicking a console executable on Windows allocates a console,
+ * so the packaged app would print help into a box and exit, which is precisely the case
+ * that has to work.
+ */
+const command = given ?? 'gui'
 
 function flag(name: string): string | undefined {
   const i = rest.indexOf(`--${name}`)
@@ -197,15 +210,41 @@ switch (command) {
    * Gate 1.7: launch a real Chromium on this host and report what a team-operated
    * endpoint observed. If that address is this machine's egress, the browser ran here.
    */
+  /**
+   * The desktop app: a window onto this same process.
+   *
+   * `--hidden` starts it without opening a window, which is what the login service
+   * registers — the window is then opened on demand by launching the app again, which
+   * hands off to the process already running rather than starting a second agent.
+   */
+  case 'gui': {
+    await runGui({ hidden: rest.includes('--hidden') })
+    break
+  }
+
+  /** For anyone who closed the window and wants it back from a terminal. */
+  case 'gui-address': {
+    const address = guiAddress()
+    console.log(address
+      ? `\n  ${address}\n`
+      : `\n  Not running. Start it with:  ${invocation()} gui\n`)
+    break
+  }
+
   case 'browser-probe': {
     const cfg = requireConfig()
     await browserProbe(flag('url') ?? `${cfg.server}/whoami`)
     break
   }
 
+  case 'help':
+  case '--help':
+  case '-h':
   default:
     console.log(`dwp-agent v${AGENT_VERSION}
 
+  (no arguments)                                        open the desktop window
+  gui [--hidden]                                        the same, named explicitly
   pair --server <url> --code <CODE> [--label <name>]   enroll this computer
   run [--allow-browser]                                 connect and accept work
   set-server --server <url>                             point at a new server address

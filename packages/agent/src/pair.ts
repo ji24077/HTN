@@ -5,7 +5,19 @@ import { invocation } from './paths.ts'
 import { ensureKeypair } from './keys.ts'
 import { saveConfig } from './config.ts'
 
-export async function pair(server: string, code: string, label?: string): Promise<void> {
+export type PairOutcome =
+  | { ok: true; hostId: string; label: string; server: string; pinnedKey: boolean }
+  | { ok: false; message: string; hint?: string }
+
+/**
+ * Enroll this computer, and *return* what happened.
+ *
+ * Split from the CLI wrapper below because the desktop window needs the failure as a
+ * string it can render. The original printed to the console and called `process.exit`,
+ * which from a window would have killed the app with the explanation going nowhere
+ * anybody could read it.
+ */
+export async function pairHost(server: string, code: string, label?: string): Promise<PairOutcome> {
   installDnsFallback()
   const { publicKeySpki } = ensureKeypair()
   const origin = server.replace(/\/+$/, '')
@@ -27,25 +39,26 @@ export async function pair(server: string, code: string, label?: string): Promis
     const retry = process.platform === 'win32'
       ? `$env:DWP_DNS_FALLBACK='1'; pnpm agent pair --server ${origin} --code ${code}`
       : `DWP_DNS_FALLBACK=1 pnpm agent pair --server ${origin} --code ${code}`
-    const hint = diagnosis.cause === 'dns-local-only' && !dnsFallbackEnabled()
-      ? `\n  Or retry with the built-in workaround:\n      ${retry}\n`
-      : ''
-    console.error(`\nCould not reach the server.\n\n  ${diagnosis.message}\n${hint}`)
-    process.exit(1)
+    return {
+      ok: false,
+      message: `Could not reach the server. ${diagnosis.message}`,
+      hint: diagnosis.cause === 'dns-local-only' && !dnsFallbackEnabled()
+        ? `Or retry with the built-in workaround:\n    ${retry}`
+        : undefined,
+    }
   }
 
   if (!res.ok) {
     const body = await res.text().catch(() => '')
     if (res.status === 400) {
-      console.error(`\nThat pairing code was not accepted.\n\n` +
-        `  Codes expire ten minutes after they are created and work only once.\n` +
-        `  Ask for a fresh link.\n`)
-    } else if (res.status === 429) {
-      console.error(`\nToo many attempts. Wait a few minutes and try again.\n`)
-    } else {
-      console.error(`\nPairing failed (HTTP ${res.status}). ${body.slice(0, 200)}\n`)
+      return {
+        ok: false,
+        message: 'That invite was not accepted.',
+        hint: 'Invites expire ten minutes after they are created and work only once. Ask for a fresh one.',
+      }
     }
-    process.exit(1)
+    if (res.status === 429) return { ok: false, message: 'Too many attempts. Wait a few minutes and try again.' }
+    return { ok: false, message: `Pairing failed (HTTP ${res.status}). ${body.slice(0, 200)}` }
   }
 
   const { hostId, label: assigned, wsUrl, releaseKey, releaseVersion } = await res.json() as {
@@ -60,11 +73,18 @@ export async function pair(server: string, code: string, label?: string): Promis
     installedRelease: releaseVersion ?? null,
     autoUpdate: true,
   })
-  console.log(`Paired as "${assigned}"\n  host id : ${hostId}\n  control : ${origin}`)
-  if (releaseKey) {
-    console.log(`  updates : signed by ${releaseKey.slice(0, 20)}… (pinned)`)
-  } else {
-    console.log(`  updates : this server offers no signed releases, so updates stay manual`)
+  return { ok: true, hostId, label: assigned, server: origin, pinnedKey: Boolean(releaseKey) }
+}
+
+export async function pair(server: string, code: string, label?: string): Promise<void> {
+  const result = await pairHost(server, code, label)
+  if (!result.ok) {
+    console.error(`\n${result.message}\n${result.hint ? `\n  ${result.hint}\n` : ''}`)
+    process.exit(1)
   }
+  console.log(`Paired as "${result.label}"\n  host id : ${result.hostId}\n  control : ${result.server}`)
+  console.log(result.pinnedKey
+    ? `  updates : signed releases, key pinned`
+    : `  updates : this server offers no signed releases, so updates stay manual`)
   console.log(`\nStart it with:  ${invocation()} run`)
 }

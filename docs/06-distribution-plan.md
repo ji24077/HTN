@@ -219,8 +219,16 @@ is ever made executable.
 **Binaries update themselves too.** A single-file install has no package manager to run,
 so it downloads the new executable, verifies it against the signed hash, and renames it
 over itself; the running process keeps its own open file, so this is safe. Windows will
-not overwrite a running executable, so the old one is moved aside first. Confirmed by a
-full cycle: hash changed, and the binary reported its new version afterwards.
+not overwrite a running executable, so the old one is moved aside first.
+
+**Correction, 2026-09-19: the restart after that swap never worked, and this paragraph
+used to claim it did.** The check was "hash changed, and the binary reported its new
+version" — both of which pass while the agent is dead. `restartIntoNewVersion()` respawned
+with `process.argv.slice(1)`, which is right for Node and wrong for a Bun standalone,
+whose argv is `["bun", "/$bunfs/root/<name>", ...args]`. The replacement got that virtual
+path as its command, printed the help, and exited 0 — so an updated machine went quietly
+offline, and the clean exit meant launchd and systemd did not restart it either. Fixed,
+and now verified by watching a running agent take a new release and come back connected.
 
 One thing worth doing properly along the way: the version is now baked in at build time
 with `--define` rather than kept in a hand-edited constant. That constant had already
@@ -252,9 +260,14 @@ running, and it appeared online in the fleet.
 **This is the part non-technical friends actually needed.** The complaint before a tray
 icon is *"do I have to leave this window open?"*, and that is now answered.
 
-### Deferred: the tray app
+### The GUI — built, but not as a tray app ✅
 
-Not built, for two reasons that only became clear once the ground was checked:
+*Done 2026-09-19. See `docs/07` for what was built and what it cost.* The two objections
+below still stand, and are the reason the answer turned out not to be a shell at all: the
+app is the agent itself, with a loopback window onto the process that already holds the
+connection. No Rust, no second implementation, no second version to keep in step.
+
+The original objections, unchanged:
 
 1. **Rust is not installed on this machine.** Tauri needs it — a ~1 GB toolchain and a
    new language in the tree, for a shell around an agent that already works.
@@ -268,14 +281,28 @@ So the honest gap is **Windows and Linux GUI**, which nothing covers. Tauri rema
 right answer there, and it is a decision to take deliberately — it costs a toolchain, and
 signing costs money (below) — rather than something to start because a plan said Phase 4.
 
-### Known limitation: updates on a machine with broken DNS
+### Updates on a machine with broken DNS
 
-A compiled binary now dials through a public resolver when the system resolver cannot
-answer (`connect.direct_address`), so it connects. The *update check* still uses plain
-`fetch`, which has no such fallback inside a Bun binary, so on such a machine a binary
-connects and works but cannot fetch a new release — it logs `update.unavailable` and
-carries on. A stable hostname avoids the problem entirely, since it is freshly created
-subdomains that resolvers are slow to see.
+Closed. A compiled binary dials through a public resolver when the system resolver cannot
+answer (`connect.direct_address`), and the update path now does the same
+(`update.direct_address`): every request it makes falls back to 1.1.1.1/8.8.8.8 and
+connects to the address directly, with SNI and the Host header left as the real hostname
+so certificate verification is unchanged. Requires `DWP_DNS_FALLBACK=1`, which `join.sh`
+and `join.ps1` both set.
+
+Two things are worth recording, because both would have shipped as bugs on reasoning alone:
+
+- **The runtimes disagree about what a DNS failure is.** Node raises a `TypeError` whose
+  `cause.code` is `ENOTFOUND`. A Bun binary raises `code: "ConnectionRefused"` with no
+  cause and the message "Unable to connect" — by text, indistinguishable from a server
+  genuinely refusing connections. The first attempt matched on error shape and silently
+  never triggered. It now asks the system resolver whether the name resolves, which is
+  the question that actually decides it and cannot be broken by a reworded error.
+- **It was verified in a compiled binary, not from source.** The gap only exists inside
+  Bun, so testing under Node would have proved nothing. Confirmed against a live
+  `trycloudflare.com` hostname this machine's resolver genuinely cannot see: without the
+  flag the fetch fails; with it, the request reaches the server and returns a correctly
+  signed release index.
 
 ## Phase 4 — Desktop app
 
@@ -321,5 +348,11 @@ hashes, a source bundle over the connection — has no opinion about the operati
 and the agent bundle already carries its own Windows code. What was POSIX-only has been
 given equivalents: file permissions, the `ps` call in the browser probe, and the bash
 installer. What remains is the file-locking difference above, the `irm | iex` installer in
-Phase 3, and **CI on Windows**, without which all of this rots quietly — nothing here has
-run on real Windows hardware yet.
+Phase 3, and **CI on Windows**, without which all of this rots quietly.
+
+**Update 2026-09-19: it has now run on real Windows hardware.** The desktop app connected
+from a win32 x64 machine and completed a task, returning a result signed on that machine
+and verified here. That closes the largest untested assumption in this document. It does
+not close the CI point: one manual run proves the code works once, not that it keeps
+working, and the file-locking path in particular is still only exercised by forcing it on
+macOS.

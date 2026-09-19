@@ -26,18 +26,33 @@ export type ServiceStatus =
   | { installed: false; platform: string }
   | { installed: true; platform: string; running: boolean; path: string }
 
+/**
+ * How the agent should start at login.
+ *
+ * `run` is the headless agent, for a terminal install. `gui` starts the desktop app's
+ * process *without* opening a window — the window is opened on demand by launching the
+ * app again, which hands off to this already-running process.
+ *
+ * The distinction matters because the two must never both be installed: they would be
+ * two agents claiming one host identity, and the server hands the connection to whichever
+ * connected last. Choosing per install rather than running both is what keeps that
+ * impossible instead of merely unlikely.
+ */
+export type ServiceMode = 'run' | 'gui'
+
 /** The command the service should run — the binary, or node plus this source tree. */
-function launchCommand(): string[] {
-  if (isCompiledBinary()) return [process.execPath, 'run']
-  return [process.execPath, join(process.cwd(), 'packages', 'agent', 'src', 'index.ts'), 'run']
+function launchCommand(mode: ServiceMode): string[] {
+  const args = mode === 'gui' ? ['gui', '--hidden'] : ['run']
+  if (isCompiledBinary()) return [process.execPath, ...args]
+  return [process.execPath, join(process.cwd(), 'packages', 'agent', 'src', 'index.ts'), ...args]
 }
 
 // ------------------------------------------------------------------- macOS
 
 const plistPath = (): string => join(homedir(), 'Library', 'LaunchAgents', `${LABEL}.plist`)
 
-function macPlist(): string {
-  const args = launchCommand()
+function macPlist(mode: ServiceMode): string {
+  const args = launchCommand(mode)
   const argXml = args.map(a => `      <string>${a.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</string>`).join('\n')
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -71,8 +86,8 @@ ${argXml}
 
 const unitPath = (): string => join(homedir(), '.config', 'systemd', 'user', 'dwp-agent.service')
 
-function linuxUnit(): string {
-  const args = launchCommand().map(a => `"${a}"`).join(' ')
+function linuxUnit(mode: ServiceMode): string {
+  const args = launchCommand(mode).map(a => `"${a}"`).join(' ')
   return `[Unit]
 Description=Distributed work agent
 After=network-online.target
@@ -96,13 +111,13 @@ const TASK_NAME = 'DWP Agent'
 
 // ------------------------------------------------------------------- public
 
-export async function installService(): Promise<string> {
+export async function installService(mode: ServiceMode = 'run'): Promise<string> {
   const os = platform()
-  const [exe, ...rest] = launchCommand()
+  const [exe, ...rest] = launchCommand(mode)
 
   if (os === 'darwin') {
     mkdirSync(join(homedir(), 'Library', 'LaunchAgents'), { recursive: true })
-    writeFileSync(plistPath(), macPlist())
+    writeFileSync(plistPath(), macPlist(mode))
     // bootout first so a reinstall replaces rather than collides with the old definition.
     await exec('launchctl', ['bootout', `gui/${process.getuid?.() ?? 501}/${LABEL}`]).catch(() => {})
     await exec('launchctl', ['bootstrap', `gui/${process.getuid?.() ?? 501}`, plistPath()])
@@ -111,7 +126,7 @@ export async function installService(): Promise<string> {
 
   if (os === 'linux') {
     mkdirSync(join(homedir(), '.config', 'systemd', 'user'), { recursive: true })
-    writeFileSync(unitPath(), linuxUnit())
+    writeFileSync(unitPath(), linuxUnit(mode))
     await exec('systemctl', ['--user', 'daemon-reload'])
     await exec('systemctl', ['--user', 'enable', '--now', 'dwp-agent.service'])
     // Without lingering the unit stops when the user logs out, which defeats the point.
