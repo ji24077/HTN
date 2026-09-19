@@ -130,6 +130,12 @@ def main() -> None:
     g = torch.Generator().manual_seed(1337)  # same data order across configs
     torch.cuda.reset_peak_memory_stats()
     times: list[float] = []
+    # Persisted into meta.json so the dashboard can draw a real curve. The job
+    # log cannot be that source: it is capped at the last 300 lines, so on a
+    # 500-step run the early drop — the only interesting part — is evicted and
+    # what survives is the flat tail. A curve drawn from that would imply
+    # training did nothing.
+    curve: list[dict[str, float]] = []
 
     log.info(f"training {a.steps} steps, {tokens_per_step:,} tokens/step")
     for step in range(a.steps):
@@ -159,6 +165,7 @@ def main() -> None:
                 worker_id=a.worker_id, step=step, loss=total, step_time_s=dt, tokens=tokens_per_step
             )
         )
+        curve.append({"step": step, "loss": round(total, 5)})
         if step % 25 == 0 or step == a.steps - 1:
             log.info(f"  step {step:>4}  loss {total:.4f}  {dt:.3f}s")
 
@@ -184,6 +191,7 @@ def main() -> None:
         "seq_len": a.seq_len,
         "tokens_per_step": tokens_per_step,
         "final_loss": total,
+        "loss_curve": curve,
         "t_step_median_s": t_step,
         "peak_vram_gb": peak,
         "gpu": torch.cuda.get_device_properties(0).name,

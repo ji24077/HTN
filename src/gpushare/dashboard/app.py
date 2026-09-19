@@ -54,6 +54,9 @@ from gpushare.dashboard.runner import (
     start_training_optimization,
     stop_inference_server,
 )
+from gpushare.dashboard.runner import (
+    set_prefix as runner_set_prefix,
+)
 
 ROOT = Path(__file__).resolve().parents[3]
 STATIC = Path(__file__).parent / "static"
@@ -409,6 +412,13 @@ class ServeRequest(BaseModel):
     dtype: str = "bf16"
 
 
+class PrefixRequest(BaseModel):
+    # Two orders of magnitude above GenerateRequest's cap on purpose: this field
+    # carries the long shared document, and the short dynamic text is what goes
+    # to /api/generate. That split is the optimization, not an accident of limits.
+    prefix: str = Field(default="", max_length=400_000)
+
+
 class GenerateRequest(BaseModel):
     sentence: str = Field(min_length=1, max_length=2000)
     max_new_tokens: int = Field(default=64, ge=8, le=256)
@@ -416,6 +426,9 @@ class GenerateRequest(BaseModel):
     # vary the model and nothing else. Sampling would add a second source of
     # difference and leave the viewer unable to say which one moved.
     greedy: bool = True
+    # Bypasses the prefix cache while building the SAME prompt, so an A/B differs
+    # in one thing only. Clearing the prefix instead would also change the text.
+    no_cache: bool = False
 
 
 class MigrationRequest(BaseModel):
@@ -470,6 +483,13 @@ def build_app():
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
+
+    @app.post("/api/prefix")
+    def set_prefix_route(req: PrefixRequest):
+        try:
+            return runner_set_prefix(prefix=req.prefix)
+        except JobError as e:
+            raise HTTPException(400, str(e)) from e
 
     @app.post("/api/generate")
     def generate_one(req: GenerateRequest):

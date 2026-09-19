@@ -38,18 +38,76 @@ from gpushare.agent.task import MODEL_ID, PROMPT, parse_output
 DTYPES = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}
 STATE: dict = {}
 
+# Tail appended after the dynamic part. Short on purpose: anything after the
+# dynamic text cannot be cached, so every token here is paid on every request.
+SUFFIX = "\nJSON:\n"
+
+
+class PrefixCache:
+    """KV for the static head of the prompt, computed once and reused.
+
+    This is request-level prefix caching, which is a different thing from a
+    static KV cache: a static cache avoids reallocation *within* one generation,
+    while this avoids recomputing the shared prefill *across* generations. Only
+    the second one removes seconds from a long-context workload.
+
+    The prefix must be the HEAD of the prompt. Attention is causal, so a cached
+    key/value is only valid if every token before it is unchanged — put the
+    dynamic text first and nothing is reusable.
+    """
+
+    def __init__(self, model, tok, text: str) -> None:
+        self.text = text
+        ids = tok(text, return_tensors="pt", add_special_tokens=False)["input_ids"]
+        self.ids = ids.cuda()
+        self.n = int(self.ids.shape[1])
+        torch.cuda.synchronize()
+        t0 = time.perf_counter()
+        with torch.no_grad():
+            self.cache = model(input_ids=self.ids, use_cache=True).past_key_values
+        torch.cuda.synchronize()
+        self.build_s = time.perf_counter() - t0
+
+    def matches(self, full_ids) -> bool:
+        """Token-identity, not string prefix.
+
+        BPE can merge across the seam, so `prefix + dynamic` does not always
+        tokenize to `tokens(prefix) + tokens(dynamic)`. When it does not, the
+        cached keys belong to different tokens than the ones the model is about
+        to attend over, and the output silently changes. Checking ids is the
+        only safe test; a str.startswith would pass and be wrong.
+        """
+        return full_ids.shape[1] > self.n and bool(
+            torch.equal(full_ids[:, : self.n], self.ids)
+        )
+
+    def reset(self) -> None:
+        """Drop everything generate() appended, keeping the prefix.
+
+        crop() is why a request does not have to copy the cache. On a 30K
+        prefix the KV is several GB; deep-copying it per request would cost
+        more than the prefill it saves.
+        """
+        self.cache.crop(self.n)
+
 
 def load(model_ref: str, dtype: str):
     """A HF id, or a directory holding model.safetensors from scripts/train.py."""
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     td = DTYPES[dtype]
-    tok = AutoTokenizer.from_pretrained(MODEL_ID, padding_side="left")
+    p = Path(model_ref)
+    ours = (p / "model.safetensors").exists()
+    # The tokenizer has to follow the weights. Our own checkpoints are Qwen2.5-0.5B
+    # weights in a bare directory with no tokenizer files, so they borrow MODEL_ID's;
+    # anything else brings its own. Hardcoding MODEL_ID here silently mistokenised
+    # every other model — with a different vocab that is not an error, just wrong
+    # text, which is the worst way for this to fail.
+    tok = AutoTokenizer.from_pretrained(MODEL_ID if ours else model_ref, padding_side="left")
     if tok.pad_token_id is None:
         tok.pad_token = tok.eos_token
 
-    p = Path(model_ref)
-    if (p / "model.safetensors").exists():
+    if ours:
         from safetensors.torch import load_file
 
         model = AutoModelForCausalLM.from_pretrained(MODEL_ID, dtype=td)
@@ -70,17 +128,49 @@ def load(model_ref: str, dtype: str):
     return model, tok
 
 
+def build_prompt(sentence: str) -> tuple[str, PrefixCache | None]:
+    """Static head first, dynamic text last — the order the cache requires."""
+    pc = STATE.get("prefix")
+    if pc is None:
+        return PROMPT.format(sentence=sentence), None
+    return pc.text + sentence + SUFFIX, pc
+
+
+def encode_for(sentence: str, *, no_cache: bool = False):
+    """Returns (input_ids, prefix_cache_or_None_if_miss, token breakdown).
+
+    `no_cache` bypasses the cache while building the SAME prompt. Without it
+    the only way to get an uncached baseline is to unset the prefix, which
+    changes the prompt too — and then a difference in output cannot be
+    attributed to the cache rather than to the wording. A speed claim needs the
+    two runs to differ in exactly one thing.
+    """
+    tok = STATE["tok"]
+    prompt, pc = build_prompt(sentence)
+    ids = tok(prompt, return_tensors="pt", add_special_tokens=False)["input_ids"].cuda()
+    hit = (not no_cache) and pc is not None and pc.matches(ids)
+    info = {
+        "prompt_tokens": int(ids.shape[1]),
+        "prefix_tokens": pc.n if pc else 0,
+        "dynamic_tokens": int(ids.shape[1]) - (pc.n if pc else 0),
+        "cache": "hit" if hit else ("bypassed" if (pc and no_cache) else ("miss" if pc else "off")),
+    }
+    return ids, (pc if hit else None), info
+
+
 @torch.no_grad()
-def generate(sentence: str, *, max_new: int, greedy: bool) -> dict:
+def generate(sentence: str, *, max_new: int, greedy: bool, no_cache: bool = False) -> dict:
     model, tok = STATE["model"], STATE["tok"]
-    prompt = PROMPT.format(sentence=sentence)
-    enc = tok(prompt, return_tensors="pt", add_special_tokens=False)
-    enc = {k: v.cuda() for k, v in enc.items()}
+    ids, pc, info = encode_for(sentence, no_cache=no_cache)
+    prompt = tok.decode(ids[0], skip_special_tokens=False)
+    enc = {"input_ids": ids}
 
     torch.cuda.synchronize()
     t0 = time.perf_counter()
+    kw = {"past_key_values": pc.cache} if pc else {}
     out = model.generate(
         **enc,
+        **kw,
         max_new_tokens=max_new,
         do_sample=not greedy,
         temperature=0.7 if not greedy else None,
@@ -88,6 +178,8 @@ def generate(sentence: str, *, max_new: int, greedy: bool) -> dict:
     )
     torch.cuda.synchronize()
     dt = time.perf_counter() - t0
+    if pc:
+        pc.reset()
 
     gen = out[0, enc["input_ids"].shape[1] :]
     raw = tok.decode(gen, skip_special_tokens=True)
@@ -95,6 +187,12 @@ def generate(sentence: str, *, max_new: int, greedy: bool) -> dict:
     n_new = int(gen.shape[0])
     return {
         "prompt": prompt,
+        # Reported because prefill cost is driven by this number, not by the
+        # character count a caller can see. Without it, a long-context latency
+        # reading cannot be checked against the chip's FLOP ceiling — and an
+        # impossible reading (more TFLOPS than the GPU has) is the signal that
+        # the input was silently truncated rather than that serving got fast.
+        "prompt_tokens": int(enc["input_ids"].shape[1]),
         "raw_output": raw,
         "parsed": parsed.model_dump() if parsed else None,
         "parsed_ok": parsed is not None,
@@ -106,6 +204,7 @@ def generate(sentence: str, *, max_new: int, greedy: bool) -> dict:
         "model": STATE["model_ref"],
         "dtype": STATE["dtype"],
         "greedy": greedy,
+        **info,
     }
 
 
@@ -158,7 +257,7 @@ class TokenStreamer:
 
 
 @torch.no_grad()
-def generate_stream(sentence: str, *, max_new: int, greedy: bool):
+def generate_stream(sentence: str, *, max_new: int, greedy: bool, no_cache: bool = False):
     """Yield tokens as they are produced, then a final summary frame.
 
     TIME TO FIRST TOKEN IS THE POINT. Total latency is what the GPU cost;
@@ -170,18 +269,18 @@ def generate_stream(sentence: str, *, max_new: int, greedy: bool):
     endpoint returns — streaming is presentation, never a different answer.
     """
     model, tok = STATE["model"], STATE["tok"]
-    prompt = PROMPT.format(sentence=sentence)
-    enc = tok(prompt, return_tensors="pt", add_special_tokens=False)
-    enc = {k: v.cuda() for k, v in enc.items()}
+    ids, pc, info = encode_for(sentence, no_cache=no_cache)
 
     streamer = TokenStreamer(tok)
     kwargs = dict(
-        **enc,
+        input_ids=ids,
         max_new_tokens=max_new,
         do_sample=not greedy,
         pad_token_id=tok.pad_token_id,
         streamer=streamer,
     )
+    if pc:
+        kwargs["past_key_values"] = pc.cache
     if not greedy:
         kwargs["temperature"] = 0.7
 
@@ -204,6 +303,8 @@ def generate_stream(sentence: str, *, max_new: int, greedy: bool):
         yield {"token": text}
 
     thread.join()
+    if pc:
+        pc.reset()
     raw = "".join(pieces)
     dt = time.perf_counter() - t0
     parsed = parse_output(raw)
@@ -212,10 +313,14 @@ def generate_stream(sentence: str, *, max_new: int, greedy: bool):
         "raw_output": raw,
         "parsed": parsed.model_dump() if parsed else None,
         "parsed_ok": parsed is not None,
+        # ttft is prefill plus one decode step, not prefill alone. Naming it
+        # "prefill" would overstate how much prefix caching removes.
         "ttft_s": ttft,
         "latency_s": dt,
+        "decode_s": (dt - ttft) if ttft is not None else None,
         "model": STATE["model_ref"],
         "dtype": STATE["dtype"],
+        **info,
     }
 
 
@@ -230,7 +335,17 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):  # noqa: N802 — BaseHTTPRequestHandler's naming
         if self.path == "/health":
-            self._send(200, {"ok": True, "model": STATE["model_ref"], "dtype": STATE["dtype"]})
+            pc = STATE.get("prefix")
+            self._send(
+                200,
+                {
+                    "ok": True,
+                    "model": STATE["model_ref"],
+                    "dtype": STATE["dtype"],
+                    "prefix_tokens": pc.n if pc else 0,
+                    "prefix_build_s": pc.build_s if pc else None,
+                },
+            )
         else:
             self._send(404, {"error": "not found"})
 
@@ -251,6 +366,7 @@ class Handler(BaseHTTPRequestHandler):
                 sentence,
                 max_new=min(int(req.get("max_new_tokens", 64)), 256),
                 greedy=bool(req.get("greedy", True)),
+                no_cache=bool(req.get("no_cache", False)),
             ):
                 self.wfile.write(f"data: {json.dumps(frame, ensure_ascii=False)}\n\n".encode())
                 self.wfile.flush()
@@ -262,13 +378,29 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.write(f"data: {err}\n\n".encode())
                 self.wfile.flush()
 
+    def _prefix(self, req: dict) -> None:
+        text = req.get("prefix")
+        if not text:
+            STATE.pop("prefix", None)
+            self._send(200, {"prefix_tokens": 0, "cleared": True})
+            return
+        pc = PrefixCache(STATE["model"], STATE["tok"], str(text))
+        STATE["prefix"] = pc
+        # build_s IS the cold-path prefill for this prefix — the number the
+        # cache removes. Reported so the speedup can be stated from a measured
+        # baseline instead of a remembered one.
+        self._send(200, {"prefix_tokens": pc.n, "build_s": pc.build_s, "cleared": False})
+
     def do_POST(self):  # noqa: N802
-        if self.path not in ("/generate", "/generate/stream"):
+        if self.path not in ("/generate", "/generate/stream", "/prefix"):
             self._send(404, {"error": "not found"})
             return
         try:
             n = int(self.headers.get("Content-Length", 0))
             req = json.loads(self.rfile.read(n) or b"{}")
+            if self.path == "/prefix":
+                self._prefix(req)
+                return
             if self.path == "/generate/stream":
                 self._sse(req)
                 return
@@ -282,6 +414,7 @@ class Handler(BaseHTTPRequestHandler):
                     sentence,
                     max_new=min(int(req.get("max_new_tokens", 64)), 256),
                     greedy=bool(req.get("greedy", True)),
+                    no_cache=bool(req.get("no_cache", False)),
                 ),
             )
         except Exception as e:  # noqa: BLE001 — one bad request must not kill the server

@@ -41,6 +41,7 @@ _POD_ID = re.compile(r"^[a-zA-Z0-9_-]{4,64}$")
 
 # Imported lazily-by-value so runner has no import cycle with agent.task.
 MODEL_ID_FOR_SERVE = "Qwen/Qwen2.5-0.5B"
+LONG_CONTEXT_MODEL = "Qwen/Qwen3-4B-Instruct-2507"
 
 
 class JobError(RuntimeError):
@@ -1049,6 +1050,20 @@ def available_models() -> list[dict[str, Any]]:
             "detail": "has never seen the JSON format",
         }
     ]
+    # The long-context serving model. It is NOT the fine-tuned task model and is
+    # not compared against it on accuracy: it is here because prefill cost scales
+    # with parameters x context, and 0.5B cannot produce a prefill worth
+    # optimising — measured, it tops out near 0.5s at its 32K ceiling. Quality
+    # claims stay with the 0.5B run; this one carries latency claims only.
+    out.append(
+        {
+            "id": "longctx",
+            "label": "Qwen3-4B Instruct (long-context serving)",
+            "ref": LONG_CONTEXT_MODEL,
+            "kind": "longctx",
+            "detail": "40K context - for prefill/prefix-cache measurement, not accuracy",
+        }
+    )
     latest = latest_run()
     if latest and latest.get("remote_checkpoint"):
         out.append(
@@ -1258,7 +1273,41 @@ def generate_stream(*, sentence: str, max_new_tokens: int = 64, greedy: bool = T
         yield json.dumps({"done": True, "error": f"the model server is unreachable ({e})"})
 
 
-def generate(*, sentence: str, max_new_tokens: int = 64, greedy: bool = True) -> dict[str, Any]:
+def set_prefix(*, prefix: str) -> dict[str, Any]:
+    """Install (or clear) the cached static head of the prompt.
+
+    Building the cache runs one full prefill, so the call takes as long as a
+    cold request does — that returned `build_s` IS the cold baseline, which is
+    why it is measured here rather than assumed from an earlier run.
+    """
+    import urllib.error
+    import urllib.request
+
+    with _serve_lock:
+        state = dict(_serve)
+    if not state.get("model_id"):
+        raise JobError("no model is loaded — start one from the model picker first")
+
+    body = json.dumps({"prefix": prefix}).encode()
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{SERVE_PORT}/prefix",
+        data=body,
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        # Generous: a 30K-token prefill on a cheap GPU is the slow case this
+        # whole feature exists to remove, so the timeout must outlast it.
+        with urllib.request.urlopen(req, timeout=300) as r:
+            return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        raise JobError(f"prefix failed: {e.read().decode()[:300]}") from e
+    except (urllib.error.URLError, OSError, TimeoutError) as e:
+        raise JobError(f"the model server is unreachable ({e}); restart it") from e
+
+
+def generate(
+    *, sentence: str, max_new_tokens: int = 64, greedy: bool = True, no_cache: bool = False
+) -> dict[str, Any]:
     """One interactive request against the resident model.
 
     `latency_s` is what a person feels at batch 1. It is NOT evidence about the
@@ -1275,7 +1324,12 @@ def generate(*, sentence: str, max_new_tokens: int = 64, greedy: bool = True) ->
         raise JobError("no model is loaded — start one from the model picker first")
 
     body = json.dumps(
-        {"sentence": sentence, "max_new_tokens": max_new_tokens, "greedy": greedy}
+        {
+            "sentence": sentence,
+            "max_new_tokens": max_new_tokens,
+            "greedy": greedy,
+            "no_cache": no_cache,
+        }
     ).encode()
     req = urllib.request.Request(
         f"http://127.0.0.1:{SERVE_PORT}/generate",
@@ -1284,7 +1338,9 @@ def generate(*, sentence: str, max_new_tokens: int = 64, greedy: bool = True) ->
     )
     started = time.perf_counter()
     try:
-        with urllib.request.urlopen(req, timeout=120) as r:
+        # 120s was sized for a short prompt. A cache-bypassed long-context
+        # request re-runs the whole prefill and legitimately takes far longer.
+        with urllib.request.urlopen(req, timeout=300) as r:
             out = json.loads(r.read())
     except urllib.error.HTTPError as e:
         raise JobError(f"generate failed: {e.read().decode()[:300]}") from e
