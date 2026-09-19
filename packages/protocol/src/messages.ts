@@ -21,6 +21,50 @@ export const MobileState = z.object({
 })
 export type MobileState = z.infer<typeof MobileState>
 
+/** What the scheduler matches a task's `requirements.runtime` against. */
+export const Runtime = z.enum(['cpu', 'cuda', 'mps'])
+export type Runtime = z.infer<typeof Runtime>
+
+/**
+ * Whether this machine has a compute device beyond its CPU, and if not, why not.
+ *
+ * The server used to assert `runtime: "cpu", vram_mib: 0` for every machine in the
+ * fleet, which was true but unfalsifiable: a machine with a real GPU and a machine whose
+ * image simply cannot reach one were recorded identically, so the dashboard could never
+ * say which it was looking at. `reason` is the field that makes the claim checkable —
+ * "no inference runtime in this image" and "CUDA provider failed to initialise" are the
+ * same `available: false` and completely different problems.
+ *
+ * `runtime` is what the scheduler may match on, so it reports what this machine will
+ * *actually execute on* under its current preference — not what the hardware could do if
+ * it were configured differently. A machine forced to CPU reports `cpu`, because that is
+ * where its work will run.
+ */
+export const AcceleratorReport = z.object({
+  runtime: Runtime,
+  vramMib: z.number().int().nonnegative(),
+  /** Is a non-CPU device usable right now, whatever the preference says. */
+  available: z.boolean(),
+  /** Plain words for an operator. Empty when a device is available and in use. */
+  reason: z.string().max(200),
+  /** "NVIDIA GeForce RTX 4060", when the platform will say. Null when it will not. */
+  device: z.string().max(120).nullable(),
+  /** Execution providers this machine would try, best first. Diagnostic only. */
+  providers: z.array(z.string().max(32)).max(8),
+})
+export type AcceleratorReport = z.infer<typeof AcceleratorReport>
+
+/**
+ * What an operator may ask of a machine's accelerator.
+ *
+ * Only two settings, because only two are honest. `auto` uses the best device the
+ * machine actually has; `cpu` refuses to leave the CPU even where a device exists. There
+ * is deliberately no `cuda` or `gpu` value: a preference cannot conjure hardware, and a
+ * switch that can be set to something the machine cannot do is a switch that lies.
+ */
+export const RuntimePreference = z.enum(['auto', 'cpu'])
+export type RuntimePreference = z.infer<typeof RuntimePreference>
+
 export const CapabilityRecord = z.object({
   agentVersion: z.string(),
   os: z.enum(['darwin', 'win32', 'linux', 'ios', 'android']),
@@ -31,6 +75,15 @@ export const CapabilityRecord = z.object({
   freeRamMb: z.number().int().nonnegative(),
   adapters: z.array(z.string()),
   mobile: MobileState.optional(),
+  /**
+   * Optional so an agent built before this field still registers. Absent means "this
+   * machine did not say", which the server records as unknown rather than as no GPU —
+   * the two were conflated before and that is the confusion this whole field exists to
+   * end.
+   */
+  accelerator: AcceleratorReport.optional(),
+  /** What this machine is currently set to. Absent from agents that cannot be set. */
+  runtimePreference: RuntimePreference.optional(),
 })
 export type CapabilityRecord = z.infer<typeof CapabilityRecord>
 
@@ -214,10 +267,43 @@ export const WalkerOutput = z.object({
 })
 export type WalkerOutput = z.infer<typeof WalkerOutput>
 
+/**
+ * The control service asking a machine to change how it runs work.
+ *
+ * This is the first frame that travels control → agent carrying an instruction rather
+ * than work: until now the only one was `task.cancel`, and every setting a machine had
+ * was decided on the machine. It is a request, not a command — the agent answers with
+ * `settings.ack` saying what it actually did, because an operator who sets a switch and
+ * is told nothing has no way to tell "applied" from "silently ignored by an older
+ * agent".
+ */
+export const SettingsUpdate = z.object({
+  runtimePreference: RuntimePreference,
+})
+export type SettingsUpdate = z.infer<typeof SettingsUpdate>
+
+/**
+ * What the machine did about it, in its own words.
+ *
+ * `applied` is false, with a reason, when the machine cannot honour the request — asking
+ * for `auto` on a box with no device is the ordinary case, and it must read as "nothing
+ * changed, here is why" rather than as success. `accelerator` is the re-probed truth
+ * afterwards, so the dashboard updates from what the machine reports rather than from
+ * what the operator hoped.
+ */
+export const SettingsAck = z.object({
+  runtimePreference: RuntimePreference,
+  applied: z.boolean(),
+  detail: z.string().max(200),
+  accelerator: AcceleratorReport,
+})
+export type SettingsAck = z.infer<typeof SettingsAck>
+
 export const AGENT_TO_CONTROL = {
   hello: Hello,
   heartbeat: Heartbeat,
   'consent.update': ConsentUpdate,
+  'settings.ack': SettingsAck,
   'task.accept': TaskAccept,
   'task.decline': TaskDecline,
   'lease.renew': LeaseRenew,
@@ -230,5 +316,6 @@ export const CONTROL_TO_AGENT = {
   'hello.ack': HelloAck,
   'task.offer': TaskOffer,
   'task.cancel': TaskCancel,
+  'settings.update': SettingsUpdate,
   revoked: Revoked,
 } as const

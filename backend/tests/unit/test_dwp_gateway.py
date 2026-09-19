@@ -91,6 +91,8 @@ class FakeStore:
         self.disconnected = []
         self.paused = False
         self.execution_batches = []
+        self.preference = "auto"
+        self.runtime_acks = []
 
     async def append_execution_events(self, worker_id, session, batch):
         self.assert_session(session)
@@ -108,6 +110,19 @@ class FakeStore:
         code = uuid4().hex.upper()
         self.codes.add(code)
         return code
+
+    async def runtime_preference(self, worker_id):
+        return self.preference
+
+    async def set_runtime_preference(self, worker_id, preference):
+        self.preference = preference
+        return True
+
+    async def record_runtime_ack(
+        self, worker_id, preference, applied, detail, *, runtime=None, vram_mib=None
+    ):
+        self.runtime_acks.append((preference, applied, detail, runtime))
+        self.preference = preference
 
     async def pair_device(self, code, public_key, label):
         if code not in self.codes:
@@ -208,6 +223,7 @@ class GatewayTests(unittest.TestCase):
             self_serve_max_devices=100,
         )
         self.app.state.store = self.store
+        self.app.state.device_connections = {}
 
         async def verify(token):
             if token != "approved":
@@ -346,6 +362,120 @@ class GatewayTests(unittest.TestCase):
         self.assertEqual(response.status_code, 429)
         self.assertEqual(response.headers["retry-after"], "3600")
         self.assertIn("Try again", response.json()["detail"])
+
+    def test_runtime_toggle_is_stored_then_pushed_and_the_device_answer_wins(self):
+        """Stored first, pushed second, and the machine's answer overwrites the request.
+
+        The order matters more than the push: a machine that is offline when the switch
+        is flipped still has to arrive at the setting, which it does from storage at its
+        next hello. And a machine that refuses -- no device to switch to -- must leave
+        the record saying 'cpu', not the 'auto' that was asked for, or the dashboard
+        shows a GPU setting on a machine that just explained it has no GPU.
+        """
+        with self.connect() as socket:
+            self.start(socket)
+            pushed = self.client.post(
+                f"/v1/machines/{self.store.worker_id}/runtime",
+                json={"runtimePreference": "cpu"},
+                headers={"Authorization": "Bearer " + ADMIN},
+            )
+            self.assertEqual(pushed.status_code, 200)
+            self.assertTrue(pushed.json()["delivered"])
+            self.assertEqual(self.store.preference, "cpu")
+            update = socket.receive_json()
+            self.assertEqual(update["type"], "settings.update")
+            self.assertEqual(update["payload"]["runtimePreference"], "cpu")
+
+            # The device refuses `auto`: it has no device to switch to.
+            socket.send_json(
+                frame(
+                    "settings.ack",
+                    {
+                        "runtimePreference": "cpu",
+                        "applied": False,
+                        "detail": "no inference runtime in this image",
+                        "accelerator": {
+                            "runtime": "cpu",
+                            "vramMib": 0,
+                            "available": False,
+                            "reason": "no inference runtime in this image",
+                            "device": None,
+                            "providers": ["cuda", "cpu"],
+                        },
+                    },
+                )
+            )
+            # Frames are handled in order, so a request that always answers is a
+            # barrier: once task.cancel arrives, settings.ack has already been processed.
+            socket.send_json(frame("lease.renew", {"taskId": "unknown", "leaseId": "wrong"}))
+            self.assertEqual(socket.receive_json()["type"], "task.cancel")
+        self.assertEqual(self.store.runtime_acks[-1][0], "cpu")
+        self.assertFalse(self.store.runtime_acks[-1][1])
+
+    def test_runtime_toggle_survives_a_machine_being_offline(self):
+        """An unreachable machine is still set; it collects the value at its next hello."""
+        response = self.client.post(
+            f"/v1/machines/{self.store.worker_id}/runtime",
+            json={"runtimePreference": "cpu"},
+            headers={"Authorization": "Bearer " + ADMIN},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["delivered"])
+        self.assertEqual(self.store.preference, "cpu")
+        self.assertEqual(
+            self.client.post(
+                f"/v1/machines/{self.store.worker_id}/runtime",
+                json={"runtimePreference": "gpu"},
+                headers={"Authorization": "Bearer " + ADMIN},
+            ).status_code,
+            400,
+        )
+        self.assertEqual(
+            self.client.post(
+                f"/v1/machines/{self.store.worker_id}/runtime",
+                json={"runtimePreference": "cpu"},
+            ).status_code,
+            401,
+        )
+
+    def test_reported_accelerator_is_recorded_rather_than_assumed(self):
+        """A machine that reports a GPU is stored as having one; silence is not a denial."""
+        with self.connect() as socket:
+            socket.send_json(
+                frame(
+                    "hello",
+                    {
+                        "capability": {
+                            "adapters": ["echo"],
+                            "agentVersion": "test",
+                            "os": "linux",
+                            "arch": "x64",
+                            "accelerator": {
+                                "runtime": "cuda",
+                                "vramMib": 8192,
+                                "available": True,
+                                "reason": "",
+                                "device": "NVIDIA GeForce RTX 4060",
+                                "providers": ["cuda", "cpu"],
+                            },
+                            "runtimePreference": "auto",
+                        },
+                        "consent": {
+                            "paused": False,
+                            "allowCompute": True,
+                            "allowBrowser": False,
+                            "maxConcurrency": 8,
+                        },
+                    },
+                )
+            )
+            ack = socket.receive_json()
+            self.assertEqual(ack["type"], "hello.ack")
+        recorded = self.store.registered[-1]
+        self.assertEqual(recorded.runtime, "cuda")
+        self.assertEqual(recorded.vram_mib, 8192)
+        self.assertTrue(recorded.accelerator.available)
+        self.assertEqual(recorded.accelerator.device, "NVIDIA GeForce RTX 4060")
 
     def test_pairing_and_reconnect_deliver_current_public_worker_telemetry(self):
         with patch.dict(

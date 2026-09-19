@@ -103,11 +103,30 @@ class Machine(Model):
     max_concurrency: int | None = Field(default=None, ge=1, le=1024)
 
 
+class Accelerator(Model):
+    """What the machine says about its compute devices, rather than what we assume.
+
+    Every field here is the device's own claim. `reason` is the one that earns its place:
+    the server used to record `runtime="cpu", vram_mib=0` for the entire fleet, which was
+    accurate and useless, because a machine with no GPU and a machine whose image cannot
+    reach one were written identically. Absent means the agent predates this field and
+    said nothing -- which is *not* the same as saying it has no device, and the dashboard
+    renders the two differently.
+    """
+
+    available: bool = False
+    reason: str = Field(default="", max_length=200)
+    device: str | None = Field(default=None, max_length=120)
+    providers: list[str] = Field(default_factory=list, max_length=8)
+
+
 class Capabilities(Requirements):
     kinds: list[Identifier] = Field(min_length=1, max_length=32)
     #: Optional because rows written before this field existed must still load, and
     #: because `extra="forbid"` would otherwise reject them outright.
     machine: Machine | None = None
+    accelerator: Accelerator | None = None
+    runtime_preference: Literal["auto", "cpu"] = "auto"
 
 
 class Task(Model):

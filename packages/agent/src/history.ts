@@ -145,6 +145,31 @@ function rewrite(): void {
   writeFileSync(file, runs.map(r => JSON.stringify(r)).join('\n') + '\n', { mode: 0o600 })
 }
 
+/**
+ * Compute milliseconds spent in the last `windowMs`, for enforcing a duty budget.
+ *
+ * Counts a run by when it *finished*, which is the only timestamp guaranteed to be in
+ * the record, and deliberately counts the whole run even when it started before the
+ * window opened. Apportioning the overlap would be more precise and would let a very
+ * long task slide most of its cost out of every window it touches — the budget exists to
+ * stop a machine working, so erring towards "you have spent more" is the safe direction.
+ *
+ * `durationMs` is wall-clock, not CPU: what the owner is lending is the machine's time.
+ */
+export function busyMsSince(windowMs: number, now: number = Date.now()): number {
+  ensureLoaded()
+  const cutoff = now - windowMs
+  let total = 0
+  // Newest last, so walk backwards and stop at the first run that is out of range.
+  for (let i = runs.length - 1; i >= 0; i -= 1) {
+    const at = Date.parse(runs[i]!.finishedAt)
+    if (!Number.isFinite(at)) continue
+    if (at < cutoff) break
+    total += runs[i]!.durationMs
+  }
+  return total
+}
+
 /** Newest first. */
 export function recent(n: number): RunRecord[] {
   ensureLoaded()

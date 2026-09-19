@@ -36,6 +36,7 @@ from ..shared.protocol import (
     UNHEALTHY_AFTER,
     Capabilities,
     JsonTooLarge,
+    Accelerator,
     Machine,
     Ref,
     bounded_json,
@@ -100,6 +101,25 @@ class Capability(BaseModel):
     logicalCores: int | None = Field(default=None, ge=1, le=4096)
     totalRamMb: int | None = Field(default=None, ge=0)
     freeRamMb: int | None = Field(default=None, ge=0)
+    accelerator: "AcceleratorReport | None" = None
+    runtimePreference: Literal["auto", "cpu"] | None = None
+
+
+class AcceleratorReport(BaseModel):
+    """The device's own account of what it can compute on.
+
+    Mirrors `AcceleratorReport` in packages/protocol, so the field names are the agent's.
+    Every field is optional except the verdict: an agent may know it has no device
+    without being able to name what it looked for.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+    runtime: Literal["cpu", "cuda", "mps"] = "cpu"
+    vramMib: int = Field(default=0, ge=0, le=1_048_576)
+    available: bool = False
+    reason: str = Field(default="", max_length=200)
+    device: str | None = Field(default=None, max_length=120)
+    providers: list[str] = Field(default_factory=list, max_length=8)
 
 
 class Hello(BaseModel):
@@ -115,6 +135,19 @@ class Heartbeat(BaseModel):
 class LeaseRef(BaseModel):
     taskId: str = Field(min_length=1, max_length=128)
     leaseId: str = Field(min_length=1, max_length=128)
+
+
+class SettingsAck(BaseModel):
+    """What a device did about a settings.update, in its own words."""
+
+    model_config = ConfigDict(extra="ignore")
+    runtimePreference: Literal["auto", "cpu"]
+    applied: bool
+    detail: str = Field(default="", max_length=200)
+    #: The device's re-probe after applying. Carried so the stored capability follows the
+    #: switch immediately: without it the dashboard kept showing the runtime from the last
+    #: hello, so a machine moved to CPU still displayed "Metal" until it reconnected.
+    accelerator: AcceleratorReport | None = None
 
 
 class TaskError(LeaseRef):
@@ -208,6 +241,47 @@ async def join_request(request: Request):
     return JSONResponse(
         {"code": code, "expires_in": 600, "server": origin(request)},
         status_code=201,
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@router.post("/v1/machines/{worker_id}/runtime", dependencies=[Depends(require_admin)])
+async def set_runtime(worker_id: str, request: Request):
+    """Set whether a machine may use a device beyond its CPU.
+
+    The value is stored first and pushed second, and that order is the whole design. A
+    machine that is asleep, restarting, or simply not connected still has to arrive at
+    the setting, which it does by the server replaying the stored value at hello. Pushing
+    without storing would make the switch work only for machines that happened to be
+    online, which is the failure mode an operator would discover at the worst moment.
+
+    The response says whether the machine was reachable, not whether it complied --
+    compliance arrives asynchronously as `settings.ack` and lands in `runtime_applied`.
+    Reporting a push as success would mean claiming a machine had switched before it had
+    said anything at all.
+    """
+    try:
+        body = await request.json()
+    except ValueError:
+        raise HTTPException(400, "invalid request body") from None
+    preference = (body or {}).get("runtimePreference")
+    if preference not in {"auto", "cpu"}:
+        raise HTTPException(400, "runtimePreference must be 'auto' or 'cpu'")
+    if not await request.app.state.store.set_runtime_preference(worker_id, preference):
+        raise HTTPException(404, "unknown or revoked machine")
+    connection = request.app.state.device_connections.get(worker_id)
+    delivered = False
+    if connection is not None:
+        try:
+            await connection.push_runtime_preference(preference)
+            delivered = True
+        except Exception:
+            # A socket that died between the lookup and the send. The setting is already
+            # stored, so the machine still picks it up when it reconnects; saying
+            # delivered=false is the honest answer rather than an error.
+            log.info("runtime preference stored but not delivered to %s", worker_id)
+    return JSONResponse(
+        {"runtimePreference": preference, "delivered": delivered},
         headers={"Cache-Control": "no-store"},
     )
 
@@ -307,6 +381,7 @@ class Connection:
     def __init__(self, socket: WebSocket, store: Store, worker_id: str, public_key: str):
         self.socket, self.store = socket, store
         self.worker_id, self.public_key = worker_id, public_key
+        self.runtime_preference = "auto"
         self.session = secrets.token_hex(16)
         self.registered = False
         self.paused = True
@@ -403,17 +478,38 @@ class Connection:
         kinds = sorted(set(hello.capability.adapters) & ADAPTERS)
         if not kinds:
             raise ValueError("no supported adapters")
+        report = hello.capability.accelerator
+        accelerator = (
+            Accelerator(
+                available=report.available,
+                reason=report.reason,
+                device=report.device,
+                providers=report.providers,
+            )
+            if report
+            else None
+        )
+        # The stored preference wins over whatever the machine arrived believing: the
+        # operator may have set it while this machine was asleep, and the machine has no
+        # other way to learn that. Sent after the ack below, once the socket is live.
+        preference = await self.store.runtime_preference(self.worker_id)
+        self.runtime_preference = preference
         await self.store.register(
             self.worker_id,
             self.session,
             Capabilities(
-                # Still "cpu" with no VRAM, and deliberately so: these adapters are pure
-                # JavaScript and no device path here dispatches to a GPU. Reporting
-                # otherwise would let the scheduler match work against hardware that is
-                # never used. Measured, it would also be wrong to prefer: the GPU backends
-                # ran slower than the CPU for models this size.
-                runtime="cpu",
-                vram_mib=0,
+                # What the machine says, not what we assume.
+                #
+                # This was hard-coded to cpu/0 for every device that ever connected. That
+                # was true of the whole fleet and unfalsifiable: a machine with a real GPU
+                # and one whose image cannot reach a GPU produced identical rows, so no
+                # dashboard could tell them apart. An agent that says nothing -- every
+                # agent built before this field -- still lands on cpu/0, but now as a
+                # recorded absence of a claim rather than as an assertion of ours.
+                runtime=report.runtime if report else "cpu",
+                vram_mib=report.vramMib if report else 0,
+                accelerator=accelerator,
+                runtime_preference=preference,
                 kinds=kinds,
                 machine=Machine(
                     os=hello.capability.os,
@@ -430,6 +526,10 @@ class Connection:
             expected_device_key=self.public_key,
         )
         self.registered = True
+        # Reachable by an operator for as long as this socket lives. Registered after
+        # hello rather than at accept, so a half-open connection that never identified
+        # itself is never a push target.
+        self.socket.app.state.device_connections[self.worker_id] = self
         self.paused = hello.consent.paused or not hello.consent.allowCompute
         await send(
             self.socket,
@@ -444,7 +544,17 @@ class Connection:
             },
             frame["id"],
         )
+        # Replay the operator's setting to a machine that disagrees with it. A machine
+        # that already matches is left alone: re-sending on every reconnect would rewrite
+        # the stored ack each time and make the dashboard flicker for no change.
+        if hello.capability.runtimePreference not in (None, preference):
+            await self.push_runtime_preference(preference)
         await self.refresh()
+
+    async def push_runtime_preference(self, preference: str) -> None:
+        """Ask this machine to change how it runs work. It answers with settings.ack."""
+        self.runtime_preference = preference
+        await send(self.socket, "settings.update", {"runtimePreference": preference})
 
     async def message(self, frame: dict, raw_output: str | None):
         kind, payload = frame["type"], frame["payload"]
@@ -458,6 +568,23 @@ class Connection:
         elif kind == "consent.update":
             consent = Consent.model_validate(payload)
             self.paused = consent.paused or not consent.allowCompute
+        elif kind == "settings.ack":
+            # The device's answer is the record, including when it refused. Writing what
+            # was asked instead would let the dashboard show "GPU" on a machine that had
+            # just finished explaining it has no GPU.
+            ack = SettingsAck.model_validate(payload)
+            self.runtime_preference = ack.runtimePreference
+            await self.store.record_runtime_ack(
+                self.worker_id,
+                ack.runtimePreference,
+                ack.applied,
+                ack.detail,
+                runtime=ack.accelerator.runtime if ack.accelerator else None,
+                vram_mib=ack.accelerator.vramMib if ack.accelerator else None,
+            )
+            log.info(
+                "device runtime preference %s (applied=%s)", ack.runtimePreference, ack.applied
+            )
         elif kind in {"task.accept", "task.decline", "lease.renew", "task.result", "task.error"}:
             ref = LeaseRef.model_validate(payload)
             active = self.active
@@ -612,6 +739,12 @@ async def connect(socket: WebSocket):
             pending.cancel()
             await asyncio.gather(pending, return_exceptions=True)
         if connection is not None and connection.registered:
+            # Only if this connection is still the registered one: a supersession puts the
+            # newer connection in the map under the same id, and the loser's cleanup must
+            # not evict the winner.
+            live = socket.app.state.device_connections
+            if live.get(connection.worker_id) is connection:
+                live.pop(connection.worker_id, None)
             try:
                 await connection.store.disconnect(connection.worker_id, connection.session)
             except Exception as exc:

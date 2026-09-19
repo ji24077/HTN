@@ -1,38 +1,15 @@
-import { arch, cpus, freemem, hostname, platform, totalmem } from 'node:os'
-import type { CapabilityRecord } from '@dwp/protocol'
+import { arch, cpus, hostname, platform } from 'node:os'
+import type { CapabilityRecord, RuntimePreference } from '@dwp/protocol'
+import { detectAccelerator } from './accelerator.ts'
 import { AGENT_VERSION } from './paths.ts'
-import { containerFreeBytes, containerLimits, imageReference, isContainer } from './runtime.ts'
-
-const MB = 1024 * 1024
+import { freeRamMb, imageReference, isContainer, logicalCores, totalRamMb } from './runtime.ts'
 
 /**
- * What this machine can offer, which in a container is not what the host has.
- *
- * Docker does not virtualise /proc, so `cpus()` and `totalmem()` report the whole host
- * from inside a container capped at a fraction of it. Reporting those made every agent
- * in a four-container fleet claim 15 cores and 12 GB while each was limited to two and
- * one — figures a scheduler would use to decide who gets the big slices.
+ * Re-exported rather than moved outright: these are what this machine can offer, which
+ * is a capability question, and callers have always asked capability.ts for it. The
+ * implementations live next to the cgroup reading they depend on.
  */
-export function logicalCores(): number {
-  const { cpus: quota } = containerLimits()
-  if (quota === null) return cpus().length
-  /**
-   * A fractional quota has to become an integer, because that is what the protocol
-   * carries. Rounded rather than floored: `--cpus 1.5` is meaningfully more than one
-   * core's worth of work, and flooring every fractional limit to 1 would make a machine
-   * look like the smallest possible worker whatever it was given.
-   */
-  return Math.max(1, Math.round(quota))
-}
-
-export function totalRamMb(): number {
-  const { memoryBytes } = containerLimits()
-  return Math.round((memoryBytes ?? totalmem()) / MB)
-}
-
-export function freeRamMb(): number {
-  return Math.round((containerFreeBytes() ?? freemem()) / MB)
-}
+export { freeRamMb, logicalCores, totalRamMb }
 
 /**
  * `release` is what this machine is actually running, not what it was compiled as.
@@ -43,7 +20,11 @@ export function freeRamMb(): number {
  * way to check was to open each window in turn. Falling back to the stamp keeps a
  * machine that has never updated reporting something rather than nothing.
  */
-export function probe(adapters: string[], release?: string | null): CapabilityRecord {
+export function probe(
+  adapters: string[],
+  release?: string | null,
+  preference: RuntimePreference = 'auto',
+): CapabilityRecord {
   const p = platform()
   return {
     agentVersion: version(release),
@@ -54,6 +35,11 @@ export function probe(adapters: string[], release?: string | null): CapabilityRe
     totalRamMb: totalRamMb(),
     freeRamMb: freeRamMb(),
     adapters,
+    // Probed on every hello rather than cached at start: a container can be recreated
+    // with `--gpus` added, and a machine that only re-reports its devices on a fresh
+    // install would go on claiming none until someone noticed.
+    accelerator: detectAccelerator(preference),
+    runtimePreference: preference,
   }
 }
 

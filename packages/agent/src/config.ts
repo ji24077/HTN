@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs'
 import { AGENT_HOME, CONFIG_PATH, PAUSE_PATH } from './paths.ts'
 import type { WorkerTelemetry } from '@dwp/protocol'
+import type { Limits } from './limits.ts'
 
 export type AgentConfig = {
   server: string
@@ -10,6 +11,25 @@ export type AgentConfig = {
   allowCompute: boolean
   allowBrowser: boolean
   maxConcurrency: number
+  /**
+   * Whether this machine may use a device beyond its CPU, as the operator last set it.
+   *
+   * Stored rather than held in memory because the control service sets it and the
+   * container runtime restarts the process: a preference that lived only in RAM would
+   * silently revert to `auto` on every `docker restart`, and the dashboard would go on
+   * showing the value the operator chose while the machine had already forgotten it.
+   * Absent means `auto`, which is what every machine did before this setting existed.
+   */
+  runtimePreference?: 'auto' | 'cpu'
+  /**
+   * What this machine is willing to do, and how much of itself it will give.
+   *
+   * Kept in the config rather than on the server because it is the owner's decision
+   * about their own hardware: it has to survive the control service being unreachable,
+   * and it must not be something the network can quietly widen. Absent means no limits,
+   * which is how every machine behaved before this existed.
+   */
+  limits?: Limits
   /** Delivered by the paired platform; persists across GUI/service/binary restarts. */
   telemetry?: WorkerTelemetry
   /**

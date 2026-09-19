@@ -64,6 +64,11 @@ def create_app(surface: str = "combined") -> FastAPI:
                 "Use orchestrator-public and orchestrator-worker-gateway with PUBLIC_ORIGIN"
             )
         store = await Store.open(config.database_url, schema=config.database_schema)
+        # Live agent sockets, so an operator action can reach a machine now rather than
+        # at its next reconnect. Process-local by nature: with more than one server
+        # process a push only finds agents on this one, which is why every setting is
+        # stored first and replayed at hello rather than relying on the push.
+        app.state.device_connections = {}
         cache = None
         reconciler = None
         model_client = None

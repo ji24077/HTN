@@ -4,6 +4,19 @@ export interface Requirements {
 }
 /** What a worker *is*, as opposed to what it can run. Every field is optional: a
  *  client that predates this, or a platform that cannot answer, still registers. */
+export type RuntimePreference = "auto" | "cpu";
+
+/** What a machine says about its compute devices.
+ *
+ *  Absent means the agent predates this field and said nothing, which is deliberately
+ *  not the same as `available: false`. One is "we did not ask"; the other is "it looked
+ *  and there is nothing there", and `reason` says what it looked for. */
+export interface Accelerator {
+  available: boolean;
+  reason: string;
+  device?: string | null;
+  providers?: string[];
+}
 export interface Machine {
   os?: string | null;
   arch?: string | null;
@@ -18,7 +31,12 @@ export interface Machine {
 export interface Worker {
   id: string;
   session_id: string;
-  capabilities: Requirements & { kinds: string[]; machine?: Machine | null };
+  capabilities: Requirements & {
+    kinds: string[];
+    machine?: Machine | null;
+    accelerator?: Accelerator | null;
+    runtime_preference?: RuntimePreference;
+  };
   state: "alive" | "unhealthy" | "offline";
   last_seen: string;
   paused: boolean;

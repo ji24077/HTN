@@ -2,7 +2,7 @@ import { setTimeout as sleep } from 'node:timers/promises'
 import WebSocket from 'ws'
 import {
   decode, envelope, mintAssertion, signAttestation, hashOutput, resultTooLarge, JSON_LIMIT,
-  TaskOffer, HelloAck, Revoked,
+  TaskOffer, HelloAck, Revoked, SettingsUpdate,
 } from '@dwp/protocol'
 import type { KeyObject } from 'node:crypto'
 import { createLogger } from '@dwp/protocol'
@@ -11,8 +11,10 @@ import { fallbackLookup, dnsFallbackEnabled, installDnsFallback, directDial } fr
 import { applyUpdate, restartIntoNewVersion } from './update.ts'
 import { AGENT_VERSION, isCompiledBinary } from './paths.ts'
 import { isContainer } from './runtime.ts'
+import { allowedWorkloads, decide, liveConditions } from './limits.ts'
 import { freeRamMb, probe } from './capability.ts'
-import { isPaused, type AgentConfig } from './config.ts'
+import { detectAccelerator } from './accelerator.ts'
+import { isPaused, loadConfig, saveConfig, type AgentConfig } from './config.ts'
 import { runEcho } from './adapters/echo.ts'
 import { runInference } from './adapters/inference.ts'
 import { runWalker } from './adapters/walker.ts'
@@ -87,6 +89,14 @@ export type AgentState = {
   advice: string | null
   /** Another agent holds this host's identity, so this one has stood down. */
   stoodDown: boolean
+  /**
+   * The last offer this machine turned down, and why.
+   *
+   * Without this, a machine sitting idle because of its own limits looks exactly like a
+   * machine nobody is sending work to, and the owner has no way to tell whether the rule
+   * they set is doing something or whether the network is quiet.
+   */
+  lastDeclined: { at: number; adapter: string; reason: string; detail: string } | null
   updating: boolean
   /**
    * When this machine last finished a task, so a window can say "last run 4 min ago"
@@ -102,6 +112,8 @@ export type AgentHandle = {
   retryNow(): void
   /** Stop for good: no more work, no reconnection. Used when leaving a network. */
   stop(): void
+  /** Reconnect so the server learns a changed capability set. Cheap and idempotent. */
+  refresh(): void
   /**
    * Give back any work in flight, then close the connection — for a process that is
    * about to disappear. Resolves once the server has been told or the attempt has run
@@ -165,15 +177,18 @@ export function connect(
   const running = new Map<string, Running>()
   const journal = new ExecutionJournal(cfg.server, cfg.hostId)
 
+  let lastDeclined: AgentState['lastDeclined'] = null
   const state: AgentState = {
     connection: 'offline', attempt: 0, connectedSince: null, running: [],
     lastLostReason: null, advice: null, stoodDown: false, updating: false, lastRunAt: null,
+    lastDeclined: null,
   }
   /** Derive the task list from the live map rather than maintaining a second copy. */
   const notify = (patch: Partial<AgentState> = {}): void => {
     Object.assign(state, patch)
     state.running = [...running].map(([taskId, r]) =>
       ({ taskId, adapter: r.adapter, startedAt: r.startedAt }))
+    state.lastDeclined = lastDeclined
     observe?.({ ...state, running: [...state.running] })
   }
 
@@ -264,7 +279,19 @@ export function connect(
         ...(sleptForMs > 0 ? { afterSuspensionMs: Math.round(sleptForMs) } : {}),
       })
       send('hello', {
-        capability: probe(availableAdapters(), cfg.installedRelease),
+        /**
+         * Advertise what this machine is *willing* to run, not merely what it can.
+         *
+         * The scheduler filters offers on this list (`spec->>'kind'=ANY(caps.kinds)`),
+         * so a workload the owner turned off is never offered at all rather than being
+         * offered and declined every time — which would churn the queue and make the
+         * machine look like it was failing work it had simply been told not to do.
+         */
+        capability: probe(
+          allowedWorkloads(cfg.limits, availableAdapters()),
+          cfg.installedRelease,
+          cfg.runtimePreference ?? 'auto',
+        ),
         consent: consent(),
         ...(sleptForMs > 0 ? { afterSuspensionMs: Math.round(sleptForMs) } : {}),
       })
@@ -469,6 +496,42 @@ export function connect(
         return
       }
 
+      /**
+       * The operator changed how this machine should run work.
+       *
+       * Answered always, including when nothing changed and when the request cannot be
+       * honoured. An operator who flips a switch and gets silence cannot tell a machine
+       * that applied it from one too old to understand the frame, and that ambiguity is
+       * the whole reason this acknowledgement exists.
+       *
+       * Persisted before acknowledging: the container runtime may restart this process
+       * at any moment, and a setting that was acknowledged but not written would come
+       * back as `auto` while the dashboard still showed what the operator chose.
+       */
+      if (msg.type === 'settings.update') {
+        const parsed = SettingsUpdate.safeParse(msg.payload)
+        if (!parsed.success) return
+        const wanted = parsed.data.runtimePreference
+        const probed = detectAccelerator(wanted)
+        // Asking for a device on a machine that has none changes nothing, and says so.
+        const applied = wanted === 'cpu' || probed.available
+        if (applied) {
+          const cfg2 = loadConfig()
+          if (cfg2) saveConfig({ ...cfg2, runtimePreference: wanted })
+          cfg.runtimePreference = wanted
+        }
+        hostLog.info('settings.applied', { runtimePreference: wanted, applied, runtime: probed.runtime })
+        send('settings.ack', {
+          runtimePreference: applied ? wanted : (cfg.runtimePreference ?? 'auto'),
+          applied,
+          detail: applied
+            ? (wanted === 'cpu' ? 'work will stay on the CPU' : 'using the best available device')
+            : probed.reason,
+          accelerator: probed,
+        })
+        return
+      }
+
       if (msg.type === 'task.cancel') {
         const taskId = (msg.payload as { taskId?: string }).taskId
         const r = taskId ? running.get(taskId) : undefined
@@ -481,8 +544,27 @@ export function connect(
         if (!parsed.success) return
         const offer = parsed.data
 
-        if (isPaused() || !cfg.allowCompute || !availableAdapters().includes(offer.adapter)) {
+        /**
+         * The owner's rules are applied here, and only here.
+         *
+         * This is the one point in the agent where refusing costs nothing: the lease is
+         * not held, no work has started, and the server requeues the task for someone
+         * else immediately. It is also the only point where the decision is genuinely
+         * local — it works with the control service unreachable and cannot be overridden
+         * by it. A limit enforced anywhere else is a request.
+         */
+        const verdict = isPaused()
+          ? { ok: false as const, reason: 'paused' as const, detail: 'paused' }
+          : !cfg.allowCompute
+            ? { ok: false as const, reason: 'consent' as const, detail: 'not accepting compute' }
+            : decide(cfg.limits, liveConditions(offer.adapter, availableAdapters()))
+        if (!verdict.ok) {
+          // Kept in the window so it can say *why* nothing is running, which was
+          // previously indistinguishable from the network being quiet.
+          lastDeclined = { at: Date.now(), adapter: offer.adapter, reason: verdict.reason, detail: verdict.detail }
+          hostLog.info('task.declined', { taskId: offer.taskId, adapter: offer.adapter, reason: verdict.reason })
           send('task.decline', { taskId: offer.taskId, leaseId: offer.leaseId, reason: 'not-eligible' })
+          notify()
           return
         }
 
@@ -843,6 +925,18 @@ export function connect(
 
   return {
     handOff,
+    /**
+     * Re-announce what this machine will accept.
+     *
+     * `kinds` is only sent at handshake, so a workload the owner just turned off would
+     * go on being offered until the next reconnect -- which for a stable machine means
+     * never. Closing cleanly lets the ordinary retry path redial within a second or two
+     * and republish, rather than adding a second way to establish a connection.
+     */
+    refresh: () => {
+      if (stopped) return
+      try { current?.close(1000, 'limits changed') } catch { /* already gone */ }
+    },
     stop: () => {
       stopped = true
       notify({ connection: 'offline', connectedSince: null })

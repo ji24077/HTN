@@ -20,8 +20,9 @@
  * explicit about the override. DWP_CONTAINER settles it either way, because the one
  * thing worse than guessing wrong is guessing wrong with no way to say so.
  */
+import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
-import { hostname, totalmem } from 'node:os'
+import { cpus, freemem, hostname, totalmem } from 'node:os'
 
 /** Loopback names a browser on the host can legitimately use to reach a published port. */
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '::1', '[::1]'])
@@ -242,6 +243,94 @@ export function imageReference(): string | null {
 export function guiPublicOrigin(): string | null {
   const origin = process.env.DWP_GUI_PUBLIC_ORIGIN?.trim().replace(/\/+$/, '')
   return origin && origin !== '' ? origin : null
+}
+
+const MB = 1024 * 1024
+
+/**
+ * What this machine can offer, which in a container is not what the host has.
+ *
+ * Docker does not virtualise /proc, so `cpus()` and `totalmem()` report the whole host
+ * from inside a container capped at a fraction of it. Reporting those made every agent
+ * in a four-container fleet claim 15 cores and 12 GB while each was limited to two and
+ * one — figures a scheduler would use to decide who gets the big slices.
+ */
+export function logicalCores(): number {
+  const { cpus: quota } = containerLimits()
+  if (quota === null) return cpus().length
+  /**
+   * A fractional quota has to become an integer, because that is what the protocol
+   * carries. Rounded rather than floored: `--cpus 1.5` is meaningfully more than one
+   * core's worth of work, and flooring every fractional limit to 1 would make a machine
+   * look like the smallest possible worker whatever it was given.
+   */
+  return Math.max(1, Math.round(quota))
+}
+
+export function totalRamMb(): number {
+  const { memoryBytes } = containerLimits()
+  return Math.round((memoryBytes ?? totalmem()) / MB)
+}
+
+/**
+ * Memory that could actually be given to a new task, in bytes, or null if unknowable.
+ *
+ * `os.freemem()` is the obvious answer and is badly wrong on two of the three platforms
+ * this runs on. On macOS it counts only wholly untouched pages: measured on a 24 GB
+ * MacBook with nothing much running, it reports 125 MB, because everything else is
+ * cache the kernel would hand over the instant anyone asked. A guard reading that would
+ * refuse every task forever while appearing switched on, which is worse than not
+ * offering the guard. Linux has the same shape of problem — MemFree excludes the page
+ * cache — and answers it with MemAvailable, which is the kernel's own estimate of what a
+ * new allocation could get.
+ */
+export function availableBytes(): number | null {
+  const inContainer = containerFreeBytes()
+  if (inContainer !== null) return inContainer
+  try {
+    if (process.platform === 'linux') {
+      const meminfo = readFileSync('/proc/meminfo', 'utf8')
+      const kb = /^MemAvailable:\s+(\d+) kB$/m.exec(meminfo)?.[1]
+      if (kb) return Number(kb) * 1024
+      return freemem()
+    }
+    if (process.platform === 'darwin') return darwinAvailable()
+  } catch {
+    return freemem()
+  }
+  // Windows' freemem() is the commit-limit figure and means roughly the right thing.
+  return freemem()
+}
+
+/**
+ * macOS, via vm_stat. Cached: it is a subprocess, and this is read on every offer.
+ *
+ * Free plus inactive plus speculative plus purgeable is what Activity Monitor calls
+ * available, and what the kernel will surrender without swapping.
+ */
+let darwinMemory: { at: number; bytes: number | null } | null = null
+
+function darwinAvailable(): number | null {
+  const now = Date.now()
+  if (darwinMemory && now - darwinMemory.at < 5_000) return darwinMemory.bytes
+  let bytes: number | null = null
+  try {
+    const out = execFileSync('vm_stat', [], { encoding: 'utf8', timeout: 2_000 })
+    const pageSize = Number(/page size of (\d+) bytes/.exec(out)?.[1] ?? 4096)
+    const pages = (label: string): number =>
+      Number(new RegExp(`^${label}:\\s+(\\d+)\\.`, 'm').exec(out)?.[1] ?? 0)
+    const free = pages('Pages free') + pages('Pages inactive')
+      + pages('Pages speculative') + pages('Pages purgeable')
+    bytes = free > 0 ? free * pageSize : null
+  } catch {
+    bytes = null
+  }
+  darwinMemory = { at: now, bytes }
+  return bytes
+}
+
+export function freeRamMb(): number {
+  return Math.round((availableBytes() ?? freemem()) / MB)
 }
 
 /** Identity of the container, for a window that has to say which one it is showing. */
