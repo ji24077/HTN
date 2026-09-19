@@ -15,9 +15,10 @@ uv run --project backend python scripts/sentry-agent.py heal --issue HTN-BACKEND
 
 For every unresolved issue it has not handled before, the loop:
 
-1. downloads the issue, its latest event (stack trace and frame variables),
+1. downloads the issue, its latest event (including its stack trace),
    recent events, and the logs from the same trace;
-2. creates a branch `self-heal/<issue>` in a separate git worktree under
+2. fetches the latest remote `--base` commit and creates a branch
+   `self-heal/<issue>` in a separate git worktree under
    `.local/self-heal/`, so your working tree is never touched;
 3. runs a headless Claude Code agent there, which finds the root cause, makes
    the smallest fix, and adds a test;
@@ -30,6 +31,19 @@ remembered in `.local/self-heal/state.json` and shown to later runs, and no
 branch or PR is created.
 
 `--dry-run` stops after the local commit and keeps the worktree for review.
+It uses the local `--base` branch intentionally; live runs fetch the remote
+branch before each investigation and never include unpushed local commits.
+Dry-run fixes remain eligible for a later live run; repeated dry-run passes keep
+the existing worktree for review. Older `fix` state records without a PR are
+treated the same way. Agent errors retry up to three attempts, then automatic
+polling skips them; use `--issue` to explicitly retry after addressing the cause.
+Issues with an opened PR or a `no_fix` verdict are also skipped.
+Publication failures retain the committed branch and PR text locally, and retry
+publication up to three times without running the agent again or force-pushing.
+Retries check for an existing PR with the same commit first in case its creation
+succeeded but the response was lost. `--issue` can also resume a pending publication
+after its cap. Keep the saved branch until publication finishes; if it was deleted
+manually, restore it or remove that issue's local state entry to investigate again.
 `--budget` caps API spend per issue (default 3 USD) and `--max` caps issues per
 pass (default 3).
 
@@ -42,7 +56,9 @@ and merges every change.
 ### Learning without training
 
 `docs/incidents.jsonl` is the loop's memory: one line per fixed incident with
-the root cause and the fix. The agent reads it before every investigation, so a
+the agent's sanitized title, root cause, and fix. Raw Sentry titles and culprits
+remain in local context/state and are not copied into the committed record.
+The agent reads the record before every investigation, so a
 recurring failure is recognised rather than rediscovered. It is committed in the
 same PR as the fix, so the record only becomes permanent when a person merges.
 

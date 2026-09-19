@@ -3,9 +3,16 @@
 import json
 import os
 import unittest
+from datetime import UTC, datetime
 from unittest.mock import patch
 
+import sentry_sdk
+from sentry_sdk.transport import Transport
+
+from orchestrator.shared.protocol import Task, TaskSpec
 from orchestrator.shared.telemetry import REDACTED, Scrubber, init_sentry, secret_values
+from orchestrator.worker.agent import execute
+from orchestrator.worker.executors import StubExecutor
 
 ADMIN = "admin-token-0123456789abcdefghij"
 WORKER = "worker-token-0123456789abcdefghi"
@@ -94,3 +101,60 @@ class TelemetryTests(unittest.TestCase):
         self.assertEqual(variables["worker_token"], REDACTED)
         self.assertEqual(variables["progress"], 40.0)
         self.assertIn("db.example:5432", variables["url"])
+
+
+class WorkerTelemetryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_sdk_does_not_send_credentials_in_model_locals(self):
+        envelopes = []
+
+        class MemoryTransport(Transport):
+            def capture_envelope(self, envelope):
+                envelopes.append(envelope)
+
+        real_init = sentry_sdk.init
+
+        def init_with_memory_transport(**options):
+            return real_init(**options, transport=MemoryTransport)
+
+        credential = "synthetic-runtime-credential-0123456789"
+        task = Task(
+            spec=TaskSpec(
+                id="task-1",
+                job_id="job-1",
+                kind="stub",
+                payload={"fail": True, "value": {"api_key": credential}},
+                requirements={"runtime": "cpu", "vram_mib": 0},
+                max_attempts=1,
+                timeout_seconds=10,
+            ),
+            state="running",
+            generation=1,
+            created_at=datetime.now(UTC),
+        )
+        previous_client = sentry_sdk.get_client()
+        try:
+            with (
+                patch.dict(os.environ, {"SENTRY_DSN": "https://public@example.test/1"}),
+                patch(
+                    "orchestrator.shared.telemetry.sentry_sdk.init",
+                    side_effect=init_with_memory_transport,
+                ),
+            ):
+                self.assertTrue(init_sentry("worker"))
+                result = await execute(StubExecutor(), task, lambda _progress: None)
+                sentry_sdk.flush()
+            self.assertEqual(result.type, "failed")
+            events = [
+                item.payload.json
+                for envelope in envelopes
+                for item in envelope.items
+                if item.headers.get("type") == "event"
+            ]
+            self.assertEqual(len(events), 1)
+            frames = events[0]["exception"]["values"][0]["stacktrace"]["frames"]
+            self.assertTrue(any(frame["function"] == "execute" for frame in frames))
+            self.assertTrue(all(not frame.get("vars") for frame in frames))
+            self.assertNotIn(credential.encode(), b"".join(e.serialize() for e in envelopes))
+        finally:
+            sentry_sdk.get_client().close()
+            sentry_sdk.get_global_scope().set_client(previous_client)

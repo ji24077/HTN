@@ -21,8 +21,9 @@ worker connection errors.
 ## What is sent
 
 Everything useful for debugging: 100% of traces and profiles, request bodies,
-task payloads, stack-frame variables, application logs, and a session replay
-whenever the dashboard hits an error.
+task payloads, stack traces, application logs, and a session replay whenever
+the dashboard hits an error. Stack-frame locals are omitted because model
+representations can hide sensitive field boundaries before scrubbing runs.
 
 Credentials are removed before anything leaves the process
 (`backend/src/orchestrator/shared/telemetry.py`, `frontend/src/telemetry.ts`):
@@ -35,7 +36,11 @@ Credentials are removed before anything leaves the process
   `WORKER_TOKENS`, `WORKER_TOKEN`, OAuth secrets, database passwords), wherever
   it appears, including inside an object `repr`.
 
-Replays mask all input fields. Worker tokens issued at runtime by browser
+Replays mask all input fields. Auth callback page loads containing codes or
+tokens are excluded from replay, even if authentication removes the parameters
+during telemetry startup; replay resumes on the next ordinary page load.
+Replay metadata and custom recording events also pass through the scrubber.
+Worker tokens issued at runtime by browser
 enrollment are not in the environment, so they are covered by the key and
 pattern rules only. Treat user-submitted task payloads as visible to everyone
 in the Sentry organization.

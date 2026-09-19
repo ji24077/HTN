@@ -5,6 +5,14 @@ const SENSITIVE =
 const CREDENTIAL =
   /Bearer\s+[\w.~+/=-]+|eyJ[\w-]{8,}\.[\w-]{8,}\.[\w-]+|sb_(?:secret|publishable)_[\w-]+/g;
 
+function hasAuthRedirect(): boolean {
+  return [window.location.search, window.location.hash].some((part) =>
+    [...new URLSearchParams(part.slice(1)).keys()].some((key) =>
+      /^(?:code|access_token|refresh_token|token|token_hash)$/i.test(key),
+    ),
+  );
+}
+
 // Supabase puts access tokens and one-time codes in redirect URLs.
 function scrubText(value: string): string {
   return value
@@ -14,7 +22,7 @@ function scrubText(value: string): string {
     )
     .replace(CREDENTIAL, "[redacted]")
     .replace(
-      /([?#&](?:access_token|refresh_token|code|token)=)[^&#\s]+/gi,
+      /([?#&](?:access_token|refresh_token|code|token|token_hash)=)[^&#\s]+/gi,
       "$1[redacted]",
     );
 }
@@ -39,6 +47,9 @@ export function scrub<T>(value: T, depth = 0): T {
 
 // The DSN is served at runtime so one built bundle works in every deployment.
 export async function initTelemetry(): Promise<void> {
+  // Replay's rrweb Meta URLs bypass beforeSend and beforeAddRecordingEvent.
+  // Exclude auth callback page loads, even if auth consumes the URL while we fetch.
+  const authRedirect = hasAuthRedirect();
   try {
     const response = await fetch("/telemetry/config", {
       credentials: "same-origin",
@@ -54,7 +65,15 @@ export async function initTelemetry(): Promise<void> {
       enableLogs: true,
       integrations: [
         Sentry.browserTracingIntegration(),
-        Sentry.replayIntegration({ maskAllInputs: true, blockAllMedia: true }),
+        ...(!authRedirect && !hasAuthRedirect()
+          ? [
+              Sentry.replayIntegration({
+                maskAllInputs: true,
+                blockAllMedia: true,
+                beforeAddRecordingEvent: (event) => scrub(event),
+              }),
+            ]
+          : []),
         Sentry.consoleLoggingIntegration({ levels: ["warn", "error"] }),
       ],
       tracesSampleRate: 1.0,
@@ -67,6 +86,8 @@ export async function initTelemetry(): Promise<void> {
       beforeSendLog: (log) => scrub(log),
       beforeBreadcrumb: (breadcrumb) => scrub(breadcrumb),
     });
+    // Replay metadata uses event processors rather than beforeSend.
+    Sentry.addEventProcessor((event) => scrub(event));
     Sentry.setTag("component", "dashboard");
   } catch {
     // Telemetry must never block the dashboard.
