@@ -1,9 +1,22 @@
 """Framework-neutral JSON tool definitions and a validated dispatcher."""
 
+from collections.abc import Iterable
+from typing import Protocol
+
 from pydantic import Field, ValidationError
 
-from ..shared.protocol import Identifier, Model, Submission
-from .http import ClientError, OrchestratorClient
+from ..shared.protocol import Identifier, Model, Submission, Task, TaskSpec, Worker
+from .http import ClientError
+
+
+class TaskClient(Protocol):
+    async def list_workers(self) -> list[Worker]: ...
+    async def list_tasks(self) -> list[Task]: ...
+    async def get_task(self, task_id: str) -> Task: ...
+    async def submit_tasks(self, tasks: list[TaskSpec]) -> list[Task]: ...
+    async def cancel_task(self, task_id: str) -> Task: ...
+    async def wait_task(self, task_id: str, timeout_seconds: float = 300) -> Task: ...
+    async def list_events(self, after: int = 0) -> list[dict]: ...
 
 
 class EmptyArgs(Model):
@@ -46,23 +59,38 @@ TOOLS = {
 }
 
 
-def tool_definitions() -> list[dict]:
+def select_tools(names: Iterable[str] | None = None) -> dict[str, tuple[type[Model], str]]:
+    """Return the registry limited to ``names`` (all tools when omitted), in registry order."""
+    if names is None:
+        return dict(TOOLS)
+    unknown = set(names) - TOOLS.keys()
+    if unknown:
+        raise ValueError(f"Unknown tools: {sorted(unknown)}")
+    return {name: TOOLS[name] for name in TOOLS if name in names}
+
+
+def tool_definitions(names: Iterable[str] | None = None) -> list[dict]:
     return [
         {"name": name, "description": description, "input_schema": model.model_json_schema()}
-        for name, (model, description) in TOOLS.items()
+        for name, (model, description) in select_tools(names).items()
     ]
 
 
 class AgentTools:
-    def __init__(self, client: OrchestratorClient):
+    def __init__(self, client: TaskClient, names: Iterable[str] | None = None):
+        """Bind a client; ``names`` limits which registry tools this dispatcher exposes."""
         self.client = client
+        self.tools = select_tools(names)
+
+    def definitions(self) -> list[dict]:
+        return tool_definitions(self.tools)
 
     async def call(self, name: str, arguments: dict) -> dict:
         """Return a JSON-serializable envelope; ok describes the call, not task success."""
-        if name not in TOOLS:
+        if name not in self.tools:
             return {"ok": False, "error": {"code": "unknown_tool", "message": "Unknown tool name"}}
         try:
-            args = TOOLS[name][0].model_validate(arguments)
+            args = self.tools[name][0].model_validate(arguments)
         except ValidationError as exc:
             return {
                 "ok": False,

@@ -213,6 +213,7 @@ class Store:
                         "dwp_pair_codes",
                         "dwp_devices",
                         "dwp_assertions",
+                        "chat_conversations",
                         "execution_events",
                     ):
                         await conn.execute(

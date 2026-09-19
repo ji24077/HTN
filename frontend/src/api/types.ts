@@ -53,6 +53,27 @@ export interface Snapshot {
 }
 export type ConnectionStatus = "connecting" | "live" | "reconnecting";
 
+export interface ChatToolActivity {
+  call_id: string;
+  name: string;
+  arguments: Record<string, unknown> | null;
+  status: "running" | "completed" | "failed";
+  result: Record<string, unknown> | null;
+}
+
+export interface ChatTurn {
+  request_id: string;
+  message: string;
+  status: "running" | "completed" | "failed";
+  reply: string;
+  tools: ChatToolActivity[];
+}
+
+export interface ChatMessage {
+  request_id: string;
+  message: string;
+}
+
 export interface ExecutionEvent {
   id: number;
   execution_id: string;

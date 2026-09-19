@@ -101,6 +101,7 @@ async function mount() {
   return { ...view, stream };
 }
 beforeEach(() => {
+  sessionStorage.clear();
   window.history.replaceState(null, "", "/");
   supabaseAuth.signUp
     .mockReset()
@@ -370,7 +371,9 @@ describe("dashboard interactions over pushed updates", () => {
       "worker-b",
     );
     expect(
-      fetchMock.mock.calls.every(([path]) => path === "/auth/session"),
+      fetchMock.mock.calls.every(
+        ([path]) => path === "/auth/session" || path === "/v1/chat/config",
+      ),
     ).toBe(true);
   });
 
@@ -391,7 +394,9 @@ describe("dashboard interactions over pushed updates", () => {
       "Could not dispatch: database unavailable",
     );
     expect(screen.getByRole("button", { name: "Send task" })).toBeEnabled();
-    expect(screen.getByRole("textbox")).toHaveValue("Render preview");
+    expect(screen.getByRole("textbox", { name: "Task name" })).toHaveValue(
+      "Render preview",
+    );
   });
 });
 

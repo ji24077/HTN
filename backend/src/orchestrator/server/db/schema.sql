@@ -97,6 +97,15 @@ CREATE TABLE IF NOT EXISTS dwp_assertions (
 );
 CREATE INDEX IF NOT EXISTS dwp_assertions_expiry ON dwp_assertions(expires_at);
 
+-- Chat history is server-owned and never included in fleet snapshots.
+CREATE TABLE IF NOT EXISTS chat_conversations (
+    id uuid PRIMARY KEY,
+    owner text NOT NULL,
+    data jsonb NOT NULL,
+    updated_at timestamptz NOT NULL DEFAULT clock_timestamp()
+);
+CREATE INDEX IF NOT EXISTS chat_conversations_owner ON chat_conversations(owner);
+
 -- NOTIFY is delivered only after commit. Identical notifications within one
 -- transaction coalesce. Row triggers keep no-op reconciliation scans quiet.
 CREATE OR REPLACE FUNCTION notify_orchestrator_change() RETURNS trigger AS $$
