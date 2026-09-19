@@ -364,14 +364,24 @@ async function api(path, body) {
  * end — so say which copy it probably is, and give the command that ends it, for the
  * machine actually being looked at.
  */
+/**
+ * Careful with backslash escapes below this point.
+ *
+ * Everything from here to </script> is inside a TypeScript template literal, so a \n
+ * written here is consumed at build time and emitted as a real newline in the page. In
+ * an ordinary JS string literal that is a syntax error, and one is enough to stop the
+ * entire inline script parsing -- which does not look like a syntax error to a user. It
+ * looks like an app frozen on "starting…", because no script ran at all to replace the
+ * placeholder. Write \\n to emit an escape rather than a line break.
+ */
 function stoodDownHelp(platform) {
   if (platform === 'win32') return 'It is most likely one installed from PowerShell, at ' +
     '%USERPROFILE%\\.dwp\\bin\\dwp-agent.exe, started by a logon task. To hand over to this app, ' +
-    'run these two lines in PowerShell and open this app again:\n\n' +
-    '    schtasks /Delete /F /TN "DWP Agent"\n' +
+    'run these two lines in PowerShell and open this app again:\\n\\n' +
+    '    schtasks /Delete /F /TN "DWP Agent"\\n' +
     '    Stop-Process -Name dwp-agent -Force'
   if (platform === 'darwin') return 'It is most likely one installed from a terminal, at ' +
-    '~/.dwp/bin/dwp-agent. To hand over to this app, run this and open this app again:\n\n' +
+    '~/.dwp/bin/dwp-agent. To hand over to this app, run this and open this app again:\\n\\n' +
     '    ~/.dwp/bin/dwp-agent uninstall-service; pkill -f dwp-agent'
   return 'It is most likely one installed from a terminal, at ~/.dwp/bin/dwp-agent. ' +
     'Stop that one, then open this app again.'
@@ -381,7 +391,7 @@ function describe(s) {
   if (s.stoodDown) return ['warn', 'Stopped — another copy is running',
     'Another agent on this computer already has this identity, so this one stood down ' +
     'rather than fight it for the connection. Your computer is still doing the work — ' +
-    'the other copy is doing it, so nothing is broken.\n\n' + stoodDownHelp(s.platform)]
+    'the other copy is doing it, so nothing is broken.\\n\\n' + stoodDownHelp(s.platform)]
   if (s.paused) return ['warn', 'Paused', 'No work will be accepted until you resume.']
   if (s.connection === 'online' && s.running.length > 0) return ['busy', 'Working', null]
   if (s.connection === 'online') return ['ok', 'Connected', 'Waiting for work. Nothing to do right now.']
