@@ -52,3 +52,38 @@ export interface Snapshot {
   events: AuditEvent[];
 }
 export type ConnectionStatus = "connecting" | "live" | "reconnecting";
+
+export interface ChatToolActivity {
+  call_id: string;
+  name: string;
+  arguments: Record<string, unknown> | null;
+  status: "running" | "completed" | "failed";
+  result: Record<string, unknown> | null;
+}
+
+export interface ChatTurn {
+  request_id: string;
+  message: string;
+  status: "running" | "completed" | "failed";
+  reply: string;
+  tools: ChatToolActivity[];
+}
+
+export interface ChatMessage {
+  request_id: string;
+  message: string;
+}
+
+export interface ExecutionEvent {
+  id: number;
+  execution_id: string;
+  task_id: string;
+  attempt: number;
+  worker_id: string | null;
+  source: "server" | "worker";
+  sequence: number;
+  kind: string;
+  occurred_at: string;
+  received_at: string;
+  data: Record<string, unknown>;
+}

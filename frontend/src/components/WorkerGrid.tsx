@@ -31,12 +31,17 @@ export function WorkerGrid({
   selected: string;
   onSelect: (id: string) => void;
 }) {
-  const ids = workers.map((worker) => worker.id);
+  const ids = [...workers]
+    .sort(
+      (a, b) =>
+        Number(healthy(b)) - Number(healthy(a)) || a.id.localeCompare(b.id),
+    )
+    .map((worker) => worker.id);
   return (
     <section>
       <div className="section-heading">
         <h2>
-          Available workers{" "}
+          Registered workers{" "}
           <span className="worker-count">
             / {String(ids.length).padStart(2, "0")}
           </span>

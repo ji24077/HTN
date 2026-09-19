@@ -11,7 +11,7 @@ from redis.asyncio import Redis
 from starlette.websockets import WebSocketDisconnect, WebSocketState
 
 from ..shared.protocol import MESSAGE_LIMIT, UNHEALTHY_AFTER, VERSION, Message, json_loads
-from .db.store import StaleAssignment, StaleSession, Store
+from .db.store import StaleAssignment, StaleSession, Store, ingest_execution_events
 
 log = logging.getLogger(__name__)
 
@@ -57,12 +57,26 @@ async def serve_worker(
         new_session = secrets.token_hex(16)
         await store.register(worker_id, new_session, hello.capabilities, enrolled=enrolled)
         session = new_session
-        await send(socket, Message(type="welcome", session_id=session))
+        await send(
+            socket,
+            Message(
+                type="welcome",
+                session_id=session,
+                execution_events=True if hello.execution_events else None,
+            ),
+        )
         log.info("worker connected worker=%s session=%s", worker_id, session)
         while True:
             message = await receive(socket)
             try:
                 match message.type:
+                    case "execution_events":
+                        ack = await ingest_execution_events(
+                            store, worker_id, session, message.execution_batch
+                        )
+                        if ack is None:
+                            continue
+                        response = Message(type="execution_events_ack", execution_batch=ack)
                     case "heartbeat":
                         if message.sequence < 1:
                             raise ValueError("heartbeat requires a positive sequence")

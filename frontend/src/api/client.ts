@@ -1,5 +1,26 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import type { Task, TaskSpec } from "./types";
+import type {
+  ChatMessage,
+  ChatTurn,
+  Task,
+  TaskSpec,
+  ExecutionEvent,
+} from "./types";
+
+export function executionEvents(
+  taskId: string,
+  after: number,
+  signal: AbortSignal,
+) {
+  return request<{
+    events: ExecutionEvent[];
+    next_cursor: number;
+    has_more: boolean;
+  }>(
+    `/v1/tasks/${encodeURIComponent(taskId)}/execution-events?after=${after}`,
+    { signal },
+  );
+}
 
 export class ApiError extends Error {
   constructor(
@@ -269,11 +290,44 @@ export async function logout() {
 export const submitTasks = (tasks: TaskSpec[]) =>
   request<Task[]>("/v1/tasks", {
     method: "POST",
-    body: JSON.stringify({ tasks }),
+    body: JSON.stringify({
+      tasks,
+      ...(tasks.some(
+        (task) =>
+          task.kind === "stub" &&
+          typeof task.payload === "object" &&
+          task.payload !== null &&
+          "fail" in task.payload &&
+          task.payload.fail === true,
+      )
+        ? {
+            instructions:
+              "This is an intentional failure-handling test. Allow the first execution attempt to run even if you can predict its failure; investigate the observed failure afterward. Do not change the payload.",
+          }
+        : {}),
+    }),
   });
 export const cancelTask = (id: string) =>
   request<Task>(`/v1/tasks/${encodeURIComponent(id)}/cancel`, {
     method: "POST",
+  });
+
+export const chatConfig = (signal?: AbortSignal) =>
+  request<{ enabled: boolean }>("/v1/chat/config", { signal });
+export const readChat = (id: string, signal?: AbortSignal) =>
+  request<{ id: string; turns: ChatTurn[] }>(
+    `/v1/chat/${encodeURIComponent(id)}`,
+    { signal },
+  );
+export const sendChat = (
+  id: string,
+  message: ChatMessage,
+  signal?: AbortSignal,
+) =>
+  request<ChatTurn>(`/v1/chat/${encodeURIComponent(id)}/messages`, {
+    method: "POST",
+    body: JSON.stringify(message),
+    signal,
   });
 export const createDeviceInvite = () =>
   request<{ code: string; expires_in: number; server: string }>(
@@ -323,7 +377,7 @@ export function stubTask(
 ): TaskSpec {
   return {
     id: "task-" + crypto.randomUUID(),
-    job_id: "playground",
+    job_id: "job-" + crypto.randomUUID(),
     kind: "stub",
     payload: { duration_seconds: seconds, value: { label } },
     requirements: { runtime: "cpu", vram_mib: 0 },
@@ -333,3 +387,29 @@ export function stubTask(
     allow_failover: failover,
   };
 }
+
+export type SupervisorStatus = {
+  enabled: boolean;
+  sentry_enabled: boolean;
+  job: {
+    state: string;
+    finalized: boolean;
+    memory: {
+      findings: { kind: string; text: string; evidence: string[] }[];
+      questions: string[];
+      followups: { check: string; expected_outcome: string; due_at: string }[];
+    };
+  };
+  runs: { id: string; status: string; reply: string; created_at: string }[];
+  actions: {
+    action_id: string;
+    request: { operation: string; reason: string };
+    result: { state?: string };
+  }[];
+};
+
+export const readSupervisor = (jobId: string, signal?: AbortSignal) =>
+  request<SupervisorStatus>(
+    `/v1/jobs/${encodeURIComponent(jobId)}/supervisor`,
+    { signal },
+  );

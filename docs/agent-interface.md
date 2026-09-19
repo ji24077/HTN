@@ -5,6 +5,14 @@ Python client and CLI use the same authenticated HTTP API and SSE update stream.
 Worker connections remain WebSockets. No model provider or agent framework is
 required, and these commands do not provision infrastructure.
 
+For automatic, persistent monitoring from submission through completion, see the
+[job supervisor](job-supervisor.md). It uses separate job-scoped tools and Sentry's
+HTTP API, and records investigations and recovery decisions in PostgreSQL.
+
+For individual OpenAI calls, use the separate [model client](model-client.md).
+It accepts these tool definitions and returns tool requests; a caller still owns
+execution and conversation orchestration.
+
 ## Local demo commands
 
 Run these from the repository root with the demo server and workers running:
@@ -61,10 +69,11 @@ validates inputs and dispatches only the seven listed operations:
 | `wait_task` | `task_id`, optional `timeout_seconds` | Await a terminal state over SSE |
 | `list_events` | Optional `after` event ID | Read audit history, up to 500 events |
 
-A host can bind these functions to its agent framework or an MCP adapter. This
-prototype provides the callable dispatcher and schemas, not an MCP server or an
-autonomous agent loop. The host supplies credentials and decides which tools its
-agent may invoke. The prototype still uses an admin credential, not scoped roles.
+A host can bind these functions to its agent framework or an MCP adapter. The
+[Fleet assistant](fleet-assistant.md) now supplies a separate bounded agent loop
+for the dashboard. The CLI dispatcher remains framework-independent; it is not
+an MCP server. The host supplies credentials and decides which tools its agent
+may invoke. Fleet authorization still uses approved admins, not tenant-scoped roles.
 
 ```python
 import os

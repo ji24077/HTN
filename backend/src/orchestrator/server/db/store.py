@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import hmac
+import logging
 import math
 import re
 import secrets
@@ -13,9 +14,10 @@ from importlib.resources import files
 from uuid import UUID, uuid4
 
 import asyncpg
-from pydantic import JsonValue
+from pydantic import JsonValue, ValidationError
 
 from ...shared.dwp import validate_public_key
+from ...shared.execution import ExecutionBatch, rejected_ack, scrub_execution
 from ...shared.protocol import (
     ACK_SECONDS,
     LEASE_SECONDS,
@@ -70,6 +72,9 @@ class EnrollmentLimit(Exception):
     pass
 
 
+log = logging.getLogger(__name__)
+
+
 def task_from_row(row: asyncpg.Record) -> Task:
     values = dict(row)
     values.pop("id")
@@ -83,16 +88,105 @@ async def configure_connection(conn: asyncpg.Connection) -> None:
         )
 
 
-async def event(conn, entity: str, entity_id: str, before: str, after: str, **details) -> None:
-    await conn.execute(
+async def event(
+    conn,
+    entity: str,
+    entity_id: str,
+    before: str,
+    after: str,
+    *,
+    spec: dict | None = None,
+    **details,
+) -> None:
+    audit_id = await conn.fetchval(
         """INSERT INTO events(entity,entity_id,previous_state,new_state,details)
-           VALUES($1,$2,$3,$4,$5)""",
+           VALUES($1,$2,$3,$4,$5) RETURNING id""",
         entity,
         entity_id,
         before,
         after,
         details,
     )
+    if entity == "task":
+        if spec is None:
+            spec = await conn.fetchval("SELECT spec FROM tasks WHERE id=$1", entity_id)
+        data = {
+            **details,
+            "state": after,
+            "adapter": spec["kind"],
+            "job_id": spec["job_id"],
+            "runtime": spec["requirements"]["runtime"],
+            "task_hash": hashlib.sha256(json_text(spec).encode()).hexdigest(),
+        }
+        data.pop("session_id", None)
+        if after == "succeeded":
+            data["result_url"] = f"/v1/tasks/{entity_id}"
+        kind = "failed" if after == "queued" and before != "" else after
+        await conn.execute(
+            """INSERT INTO execution_events
+               (task_id,attempt,worker_id,source,sequence,kind,occurred_at,data)
+               VALUES($1,$2,$3,'server',$4,$5,clock_timestamp(),$6)""",
+            entity_id,
+            details.get("generation", 0),
+            details.get("worker_id"),
+            audit_id,
+            kind,
+            scrub_execution(data),
+        )
+        await conn.execute(
+            """INSERT INTO supervisor_events(job_id,kind,data)
+               SELECT id,$2,$3 FROM supervised_jobs WHERE id=$1""",
+            spec["job_id"],
+            "task_" + kind,
+            scrub_execution({"task_id": entity_id, **data}),
+        )
+    elif entity == "worker":
+        await conn.execute(
+            """INSERT INTO supervisor_events(job_id,kind,data)
+               SELECT j.id,'worker_health',$2::jsonb FROM supervised_jobs j
+               WHERE EXISTS(SELECT 1 FROM tasks t WHERE t.spec->>'job_id'=j.id
+                   AND t.worker_id=$1 AND t.state IN ('assigned','running'))
+               OR EXISTS(SELECT 1 FROM job_reservations r WHERE r.job_id=j.id
+                   AND r.worker_id=$1 AND r.expires_at>clock_timestamp())""",
+            entity_id,
+            {"worker_id": entity_id, "state": after},
+        )
+
+
+async def ingest_execution_events(
+    store, worker_id: str, session: str, payload: object
+) -> dict | None:
+    """Store a device's diagnostics batch and build its acknowledgement.
+
+    Diagnostics are best-effort: a batch this server cannot store must never
+    close the connection carrying the task itself. Returns None when the device
+    should simply retry the batch after its resend window.
+    """
+    try:
+        batch = ExecutionBatch.model_validate(payload)
+    except ValidationError as exc:
+        log.warning("dropping malformed execution batch worker=%s: %s", worker_id, exc)
+        return rejected_ack(payload)
+    try:
+        sequences = await store.append_execution_events(worker_id, session, batch)
+        rejected = False
+    except StaleAssignment:
+        sequences, rejected = [item.sequence for item in batch.events], True
+    except (TimeoutError, asyncpg.PostgresError) as exc:
+        log.warning(
+            "deferring execution batch worker=%s task=%s attempt=%s: %s",
+            worker_id,
+            batch.taskId,
+            batch.attempt,
+            exc,
+        )
+        return None
+    return {
+        "taskId": batch.taskId,
+        "attempt": batch.attempt,
+        "sequences": sequences,
+        "rejected": rejected,
+    }
 
 
 class Store:
@@ -150,6 +244,13 @@ class Store:
                         "dwp_pair_codes",
                         "dwp_devices",
                         "dwp_assertions",
+                        "chat_conversations",
+                        "execution_events",
+                        "supervised_jobs",
+                        "supervisor_events",
+                        "supervisor_runs",
+                        "supervisor_actions",
+                        "job_reservations",
                     ):
                         await conn.execute(
                             f'ALTER TABLE "{schema}".{table} ENABLE ROW LEVEL SECURITY'
@@ -190,6 +291,76 @@ class Store:
             f"SELECT {TASK_SUMMARY_COLUMNS} FROM tasks ORDER BY created_at DESC,id LIMIT 500"
         )
         return [task_from_row(row) for row in rows]
+
+    async def execution_events(
+        self, task_id: str, after: int = 0, worker_id: str | None = None, attempt: int | None = None
+    ):
+        await self.task(task_id)
+        rows = await self.pool.fetch(
+            """SELECT *, task_id || ':' || attempt::text AS execution_id
+               FROM execution_events WHERE task_id=$1 AND id>$2
+               AND ($3::text IS NULL OR worker_id=$3)
+               AND ($4::int IS NULL OR attempt=$4) ORDER BY id LIMIT 200""",
+            task_id,
+            after,
+            worker_id,
+            attempt,
+        )
+        return [dict(row) for row in rows]
+
+    async def append_execution_events(self, worker_id: str, session: str, batch: ExecutionBatch):
+        async with self.change() as (conn, _):
+            await self._worker(conn, worker_id, session)
+            # Replay may arrive after cancellation, completion, or a newer attempt.
+            # Historical assignment ownership permits diagnostics, never task mutation.
+            owned = await conn.fetchval(
+                """SELECT EXISTS(SELECT 1 FROM events WHERE entity='task' AND entity_id=$1
+                   AND new_state='assigned' AND details->>'worker_id'=$2
+                   AND (details->>'generation')::int=$3)""",
+                batch.taskId,
+                worker_id,
+                batch.attempt,
+            )
+            if not owned:
+                raise StaleAssignment("execution was not assigned to this worker")
+            # Everything here runs under the global lock; keep it to two round trips.
+            await conn.executemany(
+                """INSERT INTO execution_events
+                   (task_id,attempt,worker_id,source,sequence,kind,occurred_at,data)
+                   VALUES($1,$2,$3,'worker',$4,$5,$6,$7)
+                   ON CONFLICT(task_id,attempt,source,sequence) DO NOTHING""",
+                [
+                    (
+                        batch.taskId,
+                        batch.attempt,
+                        worker_id,
+                        item.sequence,
+                        item.kind,
+                        item.at,
+                        scrub_execution(item.data),
+                    )
+                    for item in batch.events
+                ],
+            )
+            percents = [
+                float(percent)
+                for item in batch.events
+                if item.kind == "progress"
+                and isinstance(percent := item.data.get("percent"), int | float)
+                and not isinstance(percent, bool)
+                and math.isfinite(percent)
+                and 0 <= percent <= 100
+            ]
+            if percents:
+                await conn.execute(
+                    """UPDATE tasks SET progress=GREATEST(progress,$4)
+                       WHERE id=$1 AND worker_id=$2 AND generation=$3 AND state='running'""",
+                    batch.taskId,
+                    worker_id,
+                    batch.attempt,
+                    max(percents),
+                )
+            return [item.sequence for item in batch.events]
 
     async def workers(self) -> list[Worker]:
         rows = await self.pool.fetch("SELECT * FROM workers ORDER BY id LIMIT 500")
@@ -434,9 +605,11 @@ class Store:
         )
         return [dict(row) for row in rows]
 
-    async def submit(self, specs: list[TaskSpec]) -> list[Task]:
+    async def submit(self, specs: list[TaskSpec], *, instructions: str | None = None) -> list[Task]:
         # Validate the in-process planner boundary as well as the HTTP boundary.
-        specs = Submission(tasks=specs).tasks
+        specs = Submission(tasks=specs, instructions=instructions).tasks
+        if instructions is not None and len({spec.job_id for spec in specs}) != 1:
+            raise Conflict("instructions apply to a single submitted job")
         result = []
         async with self.change() as (conn, _):
             for spec in specs:
@@ -448,12 +621,24 @@ class Store:
                     ) != json_text(encoded):
                         raise Conflict("task ID already exists with a different specification")
                 else:
+                    await conn.execute(
+                        "INSERT INTO supervised_jobs(id,instructions) VALUES($1,$2) ON CONFLICT DO NOTHING",
+                        spec.job_id,
+                        instructions or "",
+                    )
+                    job_state = await conn.fetchval(
+                        "SELECT state FROM supervised_jobs WHERE id=$1", spec.job_id
+                    )
+                    if job_state not in {"active", "paused"}:
+                        raise Conflict("cannot add tasks to a terminal job")
                     row = await conn.fetchrow(
                         "INSERT INTO tasks(id,spec,state) VALUES($1,$2,'queued') RETURNING *",
                         spec.id,
                         encoded,
                     )
-                    await event(conn, "task", spec.id, "", "queued", job_id=spec.job_id)
+                    await event(
+                        conn, "task", spec.id, "", "queued", spec=encoded, job_id=spec.job_id
+                    )
                 result.append(task_from_row(row))
         return result
 
@@ -564,7 +749,12 @@ class Store:
         await conn.execute("UPDATE tasks SET lease_until=$2 WHERE id=$1", task.spec.id, until)
 
     async def heartbeat(
-        self, worker_id: str, session: str, active: list[Ref], paused: bool, progress: float = 0
+        self,
+        worker_id: str,
+        session: str,
+        active: list[Ref],
+        paused: bool,
+        progress: float | None = None,
     ) -> list[Ref]:
         accepted = []
         async with self.change() as (conn, now):
@@ -584,9 +774,10 @@ class Store:
                 task = task_from_row(row)
                 if task.state == "running" and self._valid(task, worker_id, session, ref, now):
                     await self._renew(conn, task, now)
-                    await conn.execute(
-                        "UPDATE tasks SET progress=$2 WHERE id=$1", ref.task_id, progress
-                    )
+                    if progress is not None:
+                        await conn.execute(
+                            "UPDATE tasks SET progress=$2 WHERE id=$1", ref.task_id, progress
+                        )
                     accepted.append(ref)
         return accepted
 
@@ -608,6 +799,11 @@ class Store:
             caps = worker.capabilities
             row = await conn.fetchrow(
                 """SELECT * FROM tasks WHERE state='queued'
+                   AND NOT EXISTS (SELECT 1 FROM supervised_jobs j
+                       WHERE j.id=tasks.spec->>'job_id' AND j.state!='active')
+                   AND NOT EXISTS (SELECT 1 FROM job_reservations r
+                       WHERE r.worker_id=$4 AND r.job_id!=tasks.spec->>'job_id'
+                       AND r.expires_at>clock_timestamp())
                    AND spec->>'kind'=ANY($1::text[])
                    AND spec->'requirements'->>'runtime'=$2
                    AND (spec->'requirements'->>'vram_mib')::int <= $3
@@ -642,6 +838,7 @@ class Store:
                 task.spec.id,
                 "queued",
                 "assigned",
+                spec=task.spec.model_dump(mode="json"),
                 worker_id=worker_id,
                 session_id=session,
                 generation=task.generation,
@@ -673,6 +870,7 @@ class Store:
                 ref.task_id,
                 "assigned",
                 "running",
+                spec=task.spec.model_dump(mode="json"),
                 worker_id=worker_id,
                 generation=ref.generation,
             )
@@ -693,6 +891,7 @@ class Store:
             task.spec.id,
             task.state,
             state,
+            spec=task.spec.model_dump(mode="json"),
             worker_id=task.worker_id,
             session_id=task.session_id,
             generation=task.generation,
@@ -739,6 +938,7 @@ class Store:
                 ref.task_id,
                 task.state,
                 "succeeded",
+                spec=task.spec.model_dump(mode="json"),
                 worker_id=worker_id,
                 generation=ref.generation,
             )
@@ -761,12 +961,22 @@ class Store:
                 task_id,
                 task.state,
                 "cancelled",
+                spec=task.spec.model_dump(mode="json"),
                 worker_id=task.worker_id,
                 generation=task.generation,
             )
 
     async def reconcile(self) -> None:
         async with self.change() as (conn, now):
+            expired = await conn.fetch(
+                "DELETE FROM job_reservations WHERE expires_at<=$1 RETURNING job_id,worker_id", now
+            )
+            for reservation in expired:
+                await conn.execute(
+                    "INSERT INTO supervisor_events(job_id,kind,data) VALUES($1,'reservation_expired',$2)",
+                    reservation["job_id"],
+                    {"worker_id": reservation["worker_id"]},
+                )
             # Capture affected tasks before expiry clears their worker assignment.
             rows = await conn.fetch("SELECT * FROM workers WHERE state!='offline'")
             for row in rows:

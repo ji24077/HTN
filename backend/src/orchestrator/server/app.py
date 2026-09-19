@@ -15,9 +15,16 @@ from redis.asyncio import Redis
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
 
+from ..agent import AgentLoop
+from ..llm import OpenAIClient
 from ..shared.protocol import MESSAGE_LIMIT
 from ..shared.security import authorized
 from ..shared.telemetry import init_sentry
+from ..supervisor.routes import router as supervisor_router
+from ..supervisor.sentry import SentryReader
+from ..supervisor.service import SupervisorService
+from .chat import router as chat_router
+from .chat_store import ChatStore
 from .config import ServerConfig
 from .dashboard import router as dashboard_router
 from .db.store import Conflict, NotFound, Store
@@ -59,6 +66,9 @@ def create_app(surface: str = "combined") -> FastAPI:
         store = await Store.open(config.database_url, schema=config.database_schema)
         cache = None
         reconciler = None
+        model_client = None
+        supervisor_task = None
+        sentry_reader = None
         updates = ChangeFeed(config.database_url)
         auth = SupabaseAuth(config.supabase_url) if config.supabase_url else None
         enrollment = (
@@ -81,6 +91,16 @@ def create_app(surface: str = "combined") -> FastAPI:
             app.state.config, app.state.store, app.state.cache = config, store, cache
             app.state.supabase_auth = auth
             app.state.enrollment = enrollment
+            app.state.chat_store = ChatStore(store.pool)
+            if surface != "worker" and os.getenv("OPENAI_API_KEY"):
+                try:
+                    model_client = OpenAIClient.from_env()
+                except ValueError as exc:
+                    # A partial or malformed OPENAI_* configuration disables chat;
+                    # the dashboard and worker gateway keep running.
+                    log.warning("chat disabled: %s", exc)
+                else:
+                    app.state.chat_agent = AgentLoop(model_client)
             if (
                 surface == "combined"
                 and not config.worker_tokens
@@ -98,13 +118,28 @@ def create_app(surface: str = "combined") -> FastAPI:
             app.state.updates = updates
             updates.start()
             reconciler = asyncio.create_task(reconcile_loop(store))
+            if (
+                model_client is not None
+                and os.getenv("SUPERVISOR_ENABLED", "true").lower() == "true"
+            ):
+                sentry_reader = SentryReader.from_env()
+                app.state.supervisor_sentry = sentry_reader
+                app.state.supervisor = SupervisorService(store, model_client, sentry_reader)
+                supervisor_task = asyncio.create_task(app.state.supervisor.run(updates))
             yield
         finally:
+            if supervisor_task is not None:
+                supervisor_task.cancel()
+                await asyncio.gather(supervisor_task, return_exceptions=True)
+            if sentry_reader is not None:
+                await sentry_reader.close()
             await updates.close()
             if reconciler is not None:
                 reconciler.cancel()
                 await asyncio.gather(reconciler, return_exceptions=True)
             try:
+                if model_client is not None:
+                    await model_client.aclose()
                 if auth is not None:
                     await auth.close()
                 if enrollment is not None:
@@ -122,6 +157,10 @@ def create_app(surface: str = "combined") -> FastAPI:
         openapi_url=None,
     )
     app.state.surface = surface
+    app.state.chat_agent = None
+    app.state.supervisor = None
+    app.state.supervisor_sentry = None
+    app.state.chat_slots = asyncio.Semaphore(2)
 
     @app.exception_handler(Conflict)
     async def conflict(_request: Request, exc: Conflict):
@@ -166,6 +205,8 @@ def create_app(surface: str = "combined") -> FastAPI:
         app.add_api_websocket_route("/v1/worker", worker)
     if surface in {"combined", "public"}:
         app.include_router(api_router)
+        app.include_router(chat_router)
+        app.include_router(supervisor_router)
         app.include_router(dashboard_router)
         app.include_router(dwp_router)
         app.include_router(dwp_assets_router)

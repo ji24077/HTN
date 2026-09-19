@@ -8,7 +8,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
 
-from ..shared.protocol import Identifier, Submission, Task, Worker, json_loads, json_text
+from ..shared.protocol import Identifier, Submission, Task, TaskSpec, Worker, json_loads, json_text
 from .auth import require_admin
 from .db.store import TASK_SUMMARY_COLUMNS
 
@@ -91,14 +91,23 @@ async def submit(request: Request):
         submission = Submission.model_validate(json_loads(bytes(data)))
     except (ValueError, ValidationError) as exc:
         raise HTTPException(status_code=400, detail="invalid task submission") from exc
-    for task in submission.tasks:
+    return await submit_specs(request, submission.tasks, submission.instructions)
+
+
+async def submit_specs(
+    request: Request, specs: list[TaskSpec], instructions: str | None = None
+) -> list[Task]:
+    """Shared submission checks for the HTTP API and authenticated chat tools."""
+    for task in specs:
         if (
             task.target_worker_id
             and task.target_worker_id not in request.app.state.config.worker_tokens
             and not await request.app.state.store.enrolled_worker(task.target_worker_id)
         ):
             raise HTTPException(status_code=400, detail="unknown target worker")
-    return await request.app.state.store.submit(submission.tasks)
+    if instructions is None:
+        return await request.app.state.store.submit(specs)
+    return await request.app.state.store.submit(specs, instructions=instructions)
 
 
 @router.get("/tasks", response_model=list[Task])
@@ -115,6 +124,22 @@ async def task(task_id: Identifier, request: Request):
 async def cancel(task_id: Identifier, request: Request):
     await request.app.state.store.cancel(task_id)
     return await request.app.state.store.task(task_id)
+
+
+@router.get("/tasks/{task_id}/execution-events")
+async def execution_events(
+    task_id: Identifier,
+    request: Request,
+    after: int = Query(default=0, ge=0, le=2**63 - 1),
+    worker_id: Identifier | None = None,
+    attempt: int | None = Query(default=None, ge=0, le=10),
+):
+    rows = await request.app.state.store.execution_events(task_id, after, worker_id, attempt)
+    return {
+        "events": rows,
+        "next_cursor": rows[-1]["id"] if rows else after,
+        "has_more": len(rows) == 200,
+    }
 
 
 @router.get("/workers", response_model=list[Worker])

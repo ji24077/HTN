@@ -41,8 +41,17 @@ from ..shared.protocol import (
     bounded_json,
     task_ref,
 )
+from ..shared.worker_telemetry import worker_telemetry
 from .auth import require_admin
-from .db.store import Conflict, EnrollmentLimit, NotFound, StaleAssignment, StaleSession, Store
+from .db.store import (
+    Conflict,
+    EnrollmentLimit,
+    NotFound,
+    StaleAssignment,
+    StaleSession,
+    Store,
+    ingest_execution_events,
+)
 from .dwp_assets import release_info
 
 log = logging.getLogger(__name__)
@@ -180,6 +189,7 @@ async def pair(request: Request):
             "hostId": worker_id,
             "label": label,
             "wsUrl": origin(request).replace("http", "ws", 1) + "/agent/connect",
+            "telemetry": worker_telemetry(),
             **release_info(),
         },
         headers={"Cache-Control": "no-store"},
@@ -230,6 +240,7 @@ class Assignment:
     ref: Ref
     lease: str
     accepted: bool = False
+    job_id: str = ""
 
     def matches(self, payload: LeaseRef) -> bool:
         return payload.taskId == self.ref.task_id and secrets.compare_digest(
@@ -312,7 +323,9 @@ class Connection:
         if self.active is None and not self.paused:
             task = await self.store.claim(self.worker_id, self.session)
             if task:
-                self.active = Assignment(task_ref(task), secrets.token_hex(24))
+                self.active = Assignment(
+                    task_ref(task), secrets.token_hex(24), job_id=task.spec.job_id
+                )
                 await send(
                     self.socket,
                     "task.offer",
@@ -371,6 +384,8 @@ class Connection:
                 "serverTime": datetime.now(timezone.utc).isoformat(),
                 "heartbeatSeconds": HEARTBEAT_INTERVAL,
                 "releaseVersion": release_info()["releaseVersion"],
+                "telemetry": worker_telemetry(),
+                "executionEvents": True,
             },
             frame["id"],
         )
@@ -378,6 +393,11 @@ class Connection:
 
     async def message(self, frame: dict, raw_output: str | None):
         kind, payload = frame["type"], frame["payload"]
+        if kind == "task.events":
+            ack = await ingest_execution_events(self.store, self.worker_id, self.session, payload)
+            if ack is not None:
+                await send(self.socket, "task.events.ack", ack)
+            return
         if kind == "heartbeat":
             Heartbeat.model_validate(payload)
         elif kind == "consent.update":
@@ -467,6 +487,16 @@ class Connection:
                             scope.set_tag("device.id", self.worker_id)
                             scope.set_tag("task.id", active.ref.task_id)
                             scope.set_tag("task.generation", active.ref.generation)
+                            scope.set_tag("worker_id", self.worker_id)
+                            scope.set_tag("task_id", active.ref.task_id)
+                            scope.set_tag("job_id", active.job_id)
+                            scope.set_tag("attempt", active.ref.generation)
+                            scope.set_tag(
+                                "reservation_id", f"{active.ref.task_id}:{active.ref.generation}"
+                            )
+                            scope.set_tag(
+                                "execution_id", f"{active.ref.task_id}:{active.ref.generation}"
+                            )
                             sentry_sdk.capture_message(
                                 "Paired device execution failed", level="error"
                             )

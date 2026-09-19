@@ -36,6 +36,22 @@ CREATE TABLE IF NOT EXISTS events (
     new_state text NOT NULL,
     details jsonb NOT NULL
 );
+CREATE INDEX IF NOT EXISTS events_task_history ON events(entity, entity_id, id);
+
+CREATE TABLE IF NOT EXISTS execution_events (
+    id bigserial PRIMARY KEY,
+    task_id text NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    attempt integer NOT NULL,
+    worker_id text,
+    source text NOT NULL CHECK (source IN ('server', 'worker')),
+    sequence bigint NOT NULL,
+    kind text NOT NULL,
+    occurred_at timestamptz NOT NULL,
+    received_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+    data jsonb NOT NULL,
+    UNIQUE(task_id, attempt, source, sequence)
+);
+CREATE INDEX IF NOT EXISTS execution_events_task ON execution_events(task_id, id);
 
 -- Only credential digests are retained. Auth keys are returned once, never stored.
 CREATE TABLE IF NOT EXISTS worker_enrollments (
@@ -81,6 +97,66 @@ CREATE TABLE IF NOT EXISTS dwp_assertions (
 );
 CREATE INDEX IF NOT EXISTS dwp_assertions_expiry ON dwp_assertions(expires_at);
 
+-- Chat history is server-owned and never included in fleet snapshots.
+CREATE TABLE IF NOT EXISTS chat_conversations (
+    id uuid PRIMARY KEY,
+    owner text NOT NULL,
+    data jsonb NOT NULL,
+    updated_at timestamptz NOT NULL DEFAULT clock_timestamp()
+);
+CREATE INDEX IF NOT EXISTS chat_conversations_owner ON chat_conversations(owner);
+
+CREATE TABLE IF NOT EXISTS supervised_jobs (
+    id text PRIMARY KEY,
+    state text NOT NULL DEFAULT 'active'
+        CHECK (state IN ('active','paused','succeeded','failed','cancelled')),
+    instructions text NOT NULL DEFAULT '',
+    memory jsonb NOT NULL DEFAULT '{"findings":[],"questions":[],"followups":[]}',
+    event_cursor bigint NOT NULL DEFAULT 0,
+    next_check_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+    retry_after timestamptz NOT NULL DEFAULT clock_timestamp(),
+    finalized boolean NOT NULL DEFAULT false,
+    created_at timestamptz NOT NULL DEFAULT clock_timestamp()
+);
+CREATE INDEX IF NOT EXISTS tasks_job ON tasks((spec->>'job_id'));
+ALTER TABLE supervised_jobs ADD COLUMN IF NOT EXISTS active_run uuid;
+ALTER TABLE supervised_jobs ADD COLUMN IF NOT EXISTS revision bigint NOT NULL DEFAULT 0;
+ALTER TABLE supervised_jobs ADD COLUMN IF NOT EXISTS sentry_cursor text;
+ALTER TABLE supervised_jobs ADD COLUMN IF NOT EXISTS sentry_start timestamptz;
+ALTER TABLE supervised_jobs ADD COLUMN IF NOT EXISTS sentry_end timestamptz;
+CREATE TABLE IF NOT EXISTS supervisor_events (
+    id bigserial PRIMARY KEY,
+    job_id text NOT NULL REFERENCES supervised_jobs(id),
+    kind text NOT NULL,
+    data jsonb NOT NULL,
+    dedupe_key text,
+    at timestamptz NOT NULL DEFAULT clock_timestamp(),
+    UNIQUE(job_id, dedupe_key)
+);
+CREATE TABLE IF NOT EXISTS job_reservations (
+    worker_id text PRIMARY KEY REFERENCES workers(id),
+    job_id text NOT NULL REFERENCES supervised_jobs(id),
+    expires_at timestamptz NOT NULL
+);
+CREATE INDEX IF NOT EXISTS supervisor_events_job ON supervisor_events(job_id,id);
+CREATE TABLE IF NOT EXISTS supervisor_runs (
+    id uuid PRIMARY KEY,
+    job_id text NOT NULL REFERENCES supervised_jobs(id),
+    event_cursor bigint NOT NULL,
+    conversation jsonb NOT NULL,
+    status text NOT NULL DEFAULT 'running',
+    created_at timestamptz NOT NULL DEFAULT clock_timestamp()
+);
+CREATE INDEX IF NOT EXISTS supervisor_runs_job ON supervisor_runs(job_id,created_at);
+CREATE TABLE IF NOT EXISTS supervisor_actions (
+    job_id text NOT NULL REFERENCES supervised_jobs(id),
+    action_id uuid NOT NULL,
+    request jsonb NOT NULL,
+    result jsonb NOT NULL,
+    at timestamptz NOT NULL DEFAULT clock_timestamp(),
+    PRIMARY KEY(job_id,action_id)
+);
+
 -- NOTIFY is delivered only after commit. Identical notifications within one
 -- transaction coalesce. Row triggers keep no-op reconciliation scans quiet.
 CREATE OR REPLACE FUNCTION notify_orchestrator_change() RETURNS trigger AS $$
@@ -98,4 +174,8 @@ AFTER INSERT OR UPDATE OR DELETE ON tasks
 FOR EACH ROW EXECUTE FUNCTION notify_orchestrator_change();
 CREATE OR REPLACE TRIGGER events_changed
 AFTER INSERT OR UPDATE OR DELETE ON events
+FOR EACH ROW EXECUTE FUNCTION notify_orchestrator_change();
+
+CREATE OR REPLACE TRIGGER supervisor_events_changed
+AFTER INSERT ON supervisor_events
 FOR EACH ROW EXECUTE FUNCTION notify_orchestrator_change();

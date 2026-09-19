@@ -1,7 +1,6 @@
 """Shared models and the two boundaries for future planners and executors."""
 
 import json
-from collections.abc import Callable
 from datetime import datetime
 from typing import Annotated, Literal, Protocol
 
@@ -158,6 +157,8 @@ class Message(Model):
         "failed",
         "result_accepted",
         "revoke",
+        "execution_events",
+        "execution_events_ack",
     ]
     sequence: int = Field(default=0, ge=0, strict=True)
     version: int = Field(default=VERSION, strict=True)
@@ -171,6 +172,8 @@ class Message(Model):
     error: str = Field(default="", max_length=2048)
     retryable: bool = Field(default=False, strict=True)
     progress: float = Field(default=0, ge=0, le=100)
+    execution_events: bool | None = None
+    execution_batch: dict[str, JsonValue] | None = None
 
     @field_validator("result")
     @classmethod
@@ -180,6 +183,7 @@ class Message(Model):
 
 class Submission(Model):
     tasks: list[TaskSpec] = Field(min_length=1, max_length=100)
+    instructions: str | None = Field(default=None, max_length=8000)
 
 
 class TaskQueue(Protocol):
@@ -188,9 +192,16 @@ class TaskQueue(Protocol):
         ...
 
 
+class ExecutionReport(Protocol):
+    def __call__(self, percent: float) -> None: ...
+    def step(self, message: str, **data: JsonValue) -> None: ...
+    def stdout(self, text: str) -> None: ...
+    def stderr(self, text: str) -> None: ...
+
+
 class Executor(Protocol):
     kind: str
 
-    async def execute(self, spec: TaskSpec, report: Callable[[float], None]) -> JsonValue:
+    async def execute(self, spec: TaskSpec, report: ExecutionReport) -> JsonValue:
         """Honor asyncio cancellation; do not publish canonical outputs here."""
         ...

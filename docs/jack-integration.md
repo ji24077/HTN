@@ -90,8 +90,12 @@ an optional mounted directory and are not baked into the image.
 
 ## Sentry and self-heal
 
-Existing backend and frontend telemetry is preserved. Desktop workers additionally accept
-`SENTRY_DSN`, `SENTRY_ENVIRONMENT`, and `SENTRY_RELEASE`. Blank DSN disables telemetry.
+Existing backend and frontend telemetry is preserved. Desktop workers automatically
+receive public Sentry settings at pairing and reconnect, and retain them in their
+device profile for installed app/service startup. The platform defaults to its own
+`SENTRY_DSN`; `SENTRY_WORKER_DSN` can override it or explicitly disable worker reporting.
+Local `SENTRY_DSN`, `SENTRY_ENVIRONMENT`, and `SENTRY_RELEASE` environment settings
+override the managed configuration. An explicitly blank local DSN disables telemetry.
 Caught execution failures carry task/worker tags. Private keys, PEM values, invitation codes,
 tokens, and configured credentials are scrubbed. The gateway records a sanitized failure
 for iOS; no native Swift Sentry SDK is added.

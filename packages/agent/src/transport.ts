@@ -19,6 +19,8 @@ import { SupersessionPolicy } from './supersession.ts'
 import * as history from './history.ts'
 import type { RunRecord } from './history.ts'
 import { captureWorkloadFailure } from './telemetry.ts'
+import { applyManagedTelemetry } from './managed-telemetry.ts'
+import { ExecutionJournal } from './execution.ts'
 
 const log = createLogger({ component: 'agent' })
 
@@ -57,6 +59,7 @@ type Running = {
   /** Carried so a window can say "running walker_evolution" rather than a bare task id. */
   adapter: string
   startedAt: number
+  finishTracking: (kind: 'interrupted' | 'cancelled') => void
 }
 
 /**
@@ -124,6 +127,7 @@ export function connect(
   const supersession = new SupersessionPolicy()
   const hostLog = log.child({ hostId: cfg.hostId, label: cfg.label })
   const running = new Map<string, Running>()
+  const journal = new ExecutionJournal(cfg.server, cfg.hostId)
 
   const state: AgentState = {
     connection: 'offline', attempt: 0, connectedSince: null, running: [],
@@ -185,6 +189,12 @@ export function connect(
     let lastInbound = Date.now()
     let updating = false
     let lastUpdateCheck = Date.now()
+    let trackExecutions = false
+    const eventTimer = setInterval(() => {
+      if (trackExecutions && ws.readyState === WebSocket.OPEN && ws.bufferedAmount < 128 * 1024) {
+        journal.flush(batch => send('task.events', batch))
+      }
+    }, 250)
 
     const send = (type: string, payload: unknown, replyTo?: string): void => {
       if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(envelope(type, payload, replyTo)))
@@ -371,6 +381,8 @@ export function connect(
       if (msg.type === 'hello.ack') {
         const ack = HelloAck.safeParse(msg.payload)
         if (ack.success) {
+          applyManagedTelemetry(cfg, ack.data.telemetry)
+          trackExecutions = ack.data.executionEvents === true
           // Adopt the server's cadence rather than our own guess.
           if (ack.data.heartbeatSeconds > 0) {
             heartbeatMs = ack.data.heartbeatSeconds * 1000
@@ -396,6 +408,11 @@ export function connect(
         return
       }
 
+      if (msg.type === 'task.events.ack') {
+        journal.acknowledge(msg.payload)
+        return
+      }
+
       if (msg.type === 'revoked') {
         const r = Revoked.safeParse(msg.payload)
         hostLog.error('host.revoked', { reason: r.success ? r.data.reason : 'unknown' })
@@ -409,7 +426,7 @@ export function connect(
       if (msg.type === 'task.cancel') {
         const taskId = (msg.payload as { taskId?: string }).taskId
         const r = taskId ? running.get(taskId) : undefined
-        if (r) { r.controller.abort(); clearInterval(r.renew); running.delete(taskId!) }
+        if (r) { r.finishTracking('cancelled'); r.controller.abort(); clearInterval(r.renew); running.delete(taskId!) }
         return
       }
 
@@ -425,10 +442,18 @@ export function connect(
 
         send('task.accept', { taskId: offer.taskId, leaseId: offer.leaseId })
         const controller = new AbortController()
+        const report = journal.reporter(offer.taskId, offer.attempt)
+        let trackedFinished = false
+        const finishTracking = (kind: 'succeeded' | 'failed' | 'cancelled' | 'timed_out' | 'interrupted', data = {}) => {
+          if (trackedFinished) return
+          trackedFinished = true
+          journal.emit(offer.taskId, offer.attempt, kind, { duration_ms: performance.now() - t0, ...data })
+        }
         const renewMs = Math.max(1_000, Math.floor((offer.leaseSeconds * 1000) / 3))
         const renew = setInterval(() => send('lease.renew', { taskId: offer.taskId, leaseId: offer.leaseId }), renewMs)
         running.set(offer.taskId, {
           controller, leaseId: offer.leaseId, renew, adapter: offer.adapter, startedAt: Date.now(),
+          finishTracking,
         })
         notify()
 
@@ -447,20 +472,27 @@ export function connect(
         let errorClass: string | undefined
         let message: string | undefined
         let outputBytes: number | undefined
-        const wallClock = setTimeout(() => controller.abort(), offer.wallClockMs)
+        journal.emit(offer.taskId, offer.attempt, 'started', {
+          adapter: offer.adapter, job_id: offer.jobId, agent_version: AGENT_VERSION,
+          runtime: process.versions.bun ? `bun ${process.versions.bun}` : `node ${process.version}`,
+          os: process.platform, arch: process.arch, input_hash: hashOutput(offer.input),
+        })
+        report.progress(0, 1)
+        const wallClock = setTimeout(() => { finishTracking('timed_out'); controller.abort() }, offer.wallClockMs)
         void wallClock
 
         const work =
           offer.adapter === 'cpu_inference_batch'
             ? runInference(offer.input, {
-                hostId: cfg.hostId, server: cfg.server, privateKey, signal: controller.signal,
+                hostId: cfg.hostId, server: cfg.server, privateKey, signal: controller.signal, report,
               })
           : offer.adapter === 'walker_evolution'
-            ? runWalker(offer.input, cfg.hostId, controller.signal)
-          : runEcho(offer.input, cfg.hostId, controller.signal)
+            ? runWalker(offer.input, cfg.hostId, controller.signal, report)
+          : runEcho(offer.input, cfg.hostId, controller.signal, report)
 
         void work
           .then(output => {
+            if (controller.signal.aborted) return
             const finishedAt = new Date().toISOString()
             /**
              * Say so here rather than shipping a result the server will not store.
@@ -490,6 +522,8 @@ export function connect(
             const outputHash = hashOutput(output)
             outcome = 'ok'
             try { outputBytes = Buffer.byteLength(JSON.stringify(output) ?? '') } catch { /* unmeasurable */ }
+            report.progress(1, 1)
+            finishTracking('succeeded', { output_hash: outputHash, result_url: `/v1/tasks/${offer.taskId}` })
             send('task.result', {
               taskId: offer.taskId,
               leaseId: offer.leaseId,
@@ -507,9 +541,16 @@ export function connect(
             })
           })
           .catch((err: unknown) => {
+            finishTracking(controller.signal.aborted ? 'cancelled' : 'failed', {
+              // Bounded so a deep async stack cannot push the one event operators need past the 8 KiB cap.
+              error: err instanceof Error
+                ? { name: err.name, message: err.message.slice(0, 2048), stack: err.stack?.slice(0, 4096) }
+                : String(err).slice(0, 2048),
+            })
             if (!controller.signal.aborted) {
               captureWorkloadFailure(err, {
                 workerId: cfg.hostId, taskId: offer.taskId, adapter: offer.adapter, attempt: offer.attempt,
+                jobId: offer.jobId,
               })
             }
             outcome = controller.signal.aborted ? 'aborted' : 'error'
@@ -556,8 +597,9 @@ export function connect(
       if (tornDown) return
       tornDown = true
       if (heartbeat) clearInterval(heartbeat)
+      clearInterval(eventTimer)
       const abandoned = [...running.keys()]
-      for (const [, r] of running) { r.controller.abort(); clearInterval(r.renew) }
+      for (const [, r] of running) { r.finishTracking('interrupted'); r.controller.abort(); clearInterval(r.renew) }
       running.clear()
 
       const heldMs = connectedSince ? Date.now() - connectedSince : 0
@@ -675,7 +717,11 @@ export function connect(
 
   open()
   for (const sig of ['SIGINT', 'SIGTERM'] as const) {
-    process.on(sig, () => { stopped = true; supersession.cancelPending(); process.exit(0) })
+    process.on(sig, () => {
+      stopped = true; supersession.cancelPending()
+      for (const r of running.values()) r.finishTracking('interrupted')
+      process.exit(0)
+    })
   }
 
   return {

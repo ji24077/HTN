@@ -1,10 +1,10 @@
 import { hostname } from 'node:os'
-import { diagnoseOrigin } from '@dwp/protocol'
+import { diagnoseOrigin, WorkerTelemetry } from '@dwp/protocol'
 import { installDnsFallback, dnsFallbackEnabled } from './resolver.ts'
 import { invocation } from './paths.ts'
 import { ensureKeypair } from './keys.ts'
-import { saveConfig } from './config.ts'
-import { rememberTelemetrySecret } from './telemetry.ts'
+import { saveConfig, type AgentConfig } from './config.ts'
+import { initTelemetry, rememberTelemetrySecret } from './telemetry.ts'
 
 export type PairOutcome =
   | { ok: true; hostId: string; label: string; server: string; pinnedKey: boolean }
@@ -64,18 +64,23 @@ export async function pairHost(server: string, code: string, label?: string): Pr
     return { ok: false, message: `Pairing failed (HTTP ${res.status}). ${body.slice(0, 200)}` }
   }
 
-  const { hostId, label: assigned, wsUrl, releaseKey, releaseVersion } = await res.json() as {
+  const { hostId, label: assigned, wsUrl, releaseKey, releaseVersion, telemetry } = await res.json() as {
     hostId: string; label: string; wsUrl: string
     releaseKey?: string | null; releaseVersion?: string | null
+    telemetry?: unknown
   }
-  saveConfig({
+  const config: AgentConfig = {
     server: origin, wsUrl, hostId, label: assigned,
     allowCompute: true, allowBrowser: false, maxConcurrency: 2,
     // Pinned once, here. Every future update is checked against this and nothing else.
     releaseKey: releaseKey ?? null,
     installedRelease: releaseVersion ?? null,
     autoUpdate: true,
-  })
+  }
+  const parsed = WorkerTelemetry.safeParse(telemetry)
+  if (parsed.success) config.telemetry = parsed.data
+  saveConfig(config)
+  initTelemetry(config.telemetry)
   return { ok: true, hostId, label: assigned, server: origin, pinnedKey: Boolean(releaseKey) }
 }
 
