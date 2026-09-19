@@ -45,6 +45,7 @@ from gpushare.dashboard.runner import (
     generate_stream,
     latest_run,
     list_pods,
+    restore_serving,
     serving,
     start_data_generation,
     start_inference_optimization,
@@ -441,6 +442,10 @@ def build_app():
     from fastapi.responses import FileResponse
 
     app = FastAPI(title="gpushare")
+    # Before serving a single request: if a model is still resident on a pod
+    # from a previous run of this process, take it back rather than reporting
+    # "no model is loaded" at a page that can see the pod is busy.
+    restore_serving()
 
     @app.get("/")
     def index():

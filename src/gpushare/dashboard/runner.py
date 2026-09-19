@@ -1374,15 +1374,19 @@ def _model_ref(model_id: str, pod_id: str) -> str:
     raise JobError(f"unknown model {model_id!r}")
 
 
-def _tunnel_up(timeout: float = 3.0) -> bool:
+def _server_health(timeout: float = 3.0) -> dict[str, Any] | None:
     import urllib.error
     import urllib.request
 
     try:
         with urllib.request.urlopen(f"http://127.0.0.1:{SERVE_PORT}/health", timeout=timeout) as r:
-            return r.status == 200
-    except (urllib.error.URLError, OSError, TimeoutError):
-        return False
+            return json.loads(r.read()) if r.status == 200 else None
+    except (urllib.error.URLError, OSError, TimeoutError, json.JSONDecodeError):
+        return None
+
+
+def _tunnel_up(timeout: float = 3.0) -> bool:
+    return _server_health(timeout) is not None
 
 
 def stop_inference_server() -> dict[str, Any]:
@@ -1397,17 +1401,69 @@ def stop_inference_server() -> dict[str, Any]:
     return {"stopped": was}
 
 
+SERVING_PATH = STATE_ROOT / "serving.json"
+
+
+def _remember_serving(**fields: Any) -> None:
+    with contextlib.suppress(OSError):
+        SERVING_PATH.parent.mkdir(parents=True, exist_ok=True)
+        SERVING_PATH.write_text(json.dumps(fields, indent=2))
+
+
+def restore_serving() -> None:
+    """Re-adopt a model that is still resident after a dashboard restart.
+
+    Which model is loaded lived only in this process's memory, so every restart
+    made the UI report "no model is loaded" while the pod was still holding it —
+    and the recovery was to reload an 8 GB model and rebuild a 30K-token cache
+    that were both already there. That cost minutes each time.
+
+    Adoption is conditional on the server agreeing: the tunnel is reached and
+    its /health must name the same weights the note claims. A stale note whose
+    server has since died, or been replaced by a different model, is discarded
+    rather than trusted.
+    """
+    if _serve.get("model_id"):
+        return
+    try:
+        note = json.loads(SERVING_PATH.read_text())
+    except (OSError, json.JSONDecodeError):
+        return
+    health = _server_health(timeout=2.0)
+    if not health or health.get("model") != note.get("model_ref"):
+        return
+    with _serve_lock:
+        # No `tunnel` handle: the process that owned it is gone. The forward
+        # itself outlives it, so requests work; stop_inference_server will kill
+        # the remote server and leave the orphaned ssh, which is the lesser of
+        # the two problems it used to have.
+        _serve.update(
+            model_id=note.get("model_id"),
+            model_ref=note.get("model_ref"),
+            pod_id=note.get("pod_id"),
+            dtype=note.get("dtype", "bf16"),
+        )
+    print(f"adopted the model already serving on {note.get('pod_id')}", file=sys.stderr)
+
+
 def serving() -> dict[str, Any]:
     """What the chat box is currently talking to, if anything."""
     with _serve_lock:
         if not _serve.get("model_id"):
             return {"running": False}
+        health = _server_health(timeout=1.0) or {}
         return {
-            "running": _tunnel_up(timeout=1.0),
+            "running": bool(health),
             "model_id": _serve["model_id"],
             "model_ref": _serve["model_ref"],
             "pod_id": _serve["pod_id"],
             "dtype": _serve["dtype"],
+            # Read off the server, not remembered here. A page that cannot see
+            # whether the document is loaded will happily run the "before" case
+            # without it — which returns in a fraction of a second and looks
+            # like the optimization already happened.
+            "prefix_tokens": health.get("prefix_tokens", 0),
+            "prefix_build_s": health.get("prefix_build_s"),
         }
 
 
@@ -1504,6 +1560,7 @@ def start_inference_server(*, pod_id: str, model_id: str, dtype: str = "bf16") -
                 pod_id=pod_id,
                 dtype=dtype,
             )
+        _remember_serving(model_id=model_id, model_ref=ref, pod_id=pod_id, dtype=dtype)
         return {
             "pod": pod,
             "model_id": model_id,

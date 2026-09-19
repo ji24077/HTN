@@ -349,10 +349,10 @@
           </div>
           <div id="agentDiag" style="margin-top:12px"></div>
           <table class="dv" style="margin-top:12px"><thead>
-            <tr><th></th><th>TTFT</th><th>총</th><th>출력</th></tr></thead><tbody>
-            <tr><td>최적화 전</td><td id="bTtft">—</td><td id="bTotal">—</td><td id="bTok">—</td></tr>
-            <tr><td>최적화 후</td><td id="aTtft">—</td><td id="aTotal">—</td><td id="aTok">—</td></tr>
-            <tr><td>배수</td><td id="xTtft">—</td><td id="xTotal">—</td><td>—</td></tr>
+            <tr><th></th><th>TTFT</th><th>총</th><th>출력</th><th>입력</th></tr></thead><tbody>
+            <tr><td>최적화 전</td><td id="bTtft">—</td><td id="bTotal">—</td><td id="bTok">—</td><td id="bIn">—</td></tr>
+            <tr><td>최적화 후</td><td id="aTtft">—</td><td id="aTotal">—</td><td id="aTok">—</td><td id="aIn">—</td></tr>
+            <tr><td>배수</td><td id="xTtft">—</td><td id="xTotal">—</td><td>—</td><td>—</td></tr>
           </tbody></table>
           <div id="reportOut" class="code" style="margin-top:12px;min-height:150px;max-height:320px;overflow:auto;white-space:pre-wrap">—</div>
         </article>
@@ -779,7 +779,7 @@
     // streams; after it, text starts immediately and streams for the same
     // length. Total moves far less, and the table shows both so the smaller
     // number is not hidden behind the bigger one.
-    let beforeRun = null, afterRun = null;
+    let beforeRun = null, afterRun = null, policyBuild = null;
 
     async function streamReport(noCache, tag) {
       const out = el('reportOut'), ev = el('event').value.trim();
@@ -815,6 +815,10 @@
               tokens = f.new_tokens;
               el(tag + 'Total').textContent = ((performance.now()-t0)/1000).toFixed(2) + 's';
               el(tag + 'Tok').textContent = (tokens == null ? '—' : tokens) + ' tok';
+              // Input size and cache state, so a run that never saw the policy
+              // cannot be mistaken for a fast one. A four-figure drop here is
+              // the tell: no document, nothing to optimise.
+              el(tag + 'In').textContent = (f.prompt_tokens || 0).toLocaleString() + ' · ' + (f.cache || '—');
             }
           }
         }
@@ -827,8 +831,27 @@
       return run;
     }
 
+    // The policy has to be installed for BOTH runs: it is the document the
+    // model reads, and without it the server falls back to a short unrelated
+    // prompt — which returns in a fraction of a second and looks like the
+    // optimization already happened. Installing is setup; the agent's decision
+    // is whether to recompute that KV or reuse it.
+    async function ensurePolicy(box) {
+      const h = await api('/api/models');
+      if (h.serving && h.serving.prefix_tokens) return true;
+      box.innerHTML = '<div class="empty-note">정책 문서를 올리는 중 — 아직 캐시는 쓰지 않습니다…</div>';
+      try {
+        const r = await api('/api/prefix', {method:'POST', body: JSON.stringify({prefix: policyText()})});
+        policyBuild = r.build_s;
+        el('policyStat').textContent = r.prefix_tokens.toLocaleString() + ' 토큰 · 한 번 계산에 ' + r.build_s.toFixed(2) + 's';
+        return true;
+      } catch (err) { box.innerHTML = '<div class="empty-note">' + esc(String(err.message || err)) + '</div>'; return false; }
+    }
+
     async function runBefore() {
-      el('agentDiag').innerHTML = '<div class="empty-note">캐시 없이 실행 중 — 첫 토큰까지 걸리는 시간을 보세요…</div>';
+      const box = el('agentDiag');
+      if (!(await ensurePolicy(box))) return;
+      box.innerHTML = '<div class="empty-note">캐시를 쓰지 않고 실행 중 — 첫 토큰까지 걸리는 시간을 보세요…</div>';
       beforeRun = await streamReport(true, 'b');
       if (!beforeRun) return;
       if (beforeRun && afterRun) {
@@ -842,22 +865,16 @@
 
     async function runAgent() {
       const box = el('agentDiag');
-      const policy = policyText();
-      // The diagnosis is arithmetic on the prompt this page just built, not a
-      // guess: the policy is fixed across requests and the event is not.
-      const est = Math.round(policy.length / 3.36);
+      if (!(await ensurePolicy(box))) return;
+      // Arithmetic on the prompt this page just built, not a guess: the policy
+      // is fixed across requests and the event is not.
+      const est = Math.round(policyText().length / 3.36);
       box.innerHTML = '<div class="callout"><strong>워크로드 분석</strong>'
-        + '입력의 대부분이 매 요청 동일한 정책입니다 (약 ' + est.toLocaleString() + ' 토큰). '
-        + '병목은 반복되는 prefill이지 출력 생성이 아닙니다.<br>'
-        + '조치: 정적 정책을 프롬프트 앞에 두고 KV를 한 번만 계산해 재사용합니다.</div>'
-        + '<div class="empty-note" style="margin-top:10px">캐시 구축 중 — 이 한 번은 느린 경로를 그대로 지불합니다…</div>';
-      try {
-        const r = await api('/api/prefix', {method:'POST', body: JSON.stringify({prefix: policy})});
-        box.innerHTML = '<div class="callout"><strong>적용 완료</strong>'
-          + r.prefix_tokens.toLocaleString() + ' 토큰을 캐시했습니다 · 이 구축 자체가 '
-          + r.build_s.toFixed(2) + '초로, 지금까지 매 요청 내던 값입니다. 3번을 눌러 보세요.</div>';
-        el('policyStat').textContent = r.prefix_tokens.toLocaleString() + ' 토큰 캐시됨 · cold prefill ' + r.build_s.toFixed(2) + 's';
-      } catch (err) { box.innerHTML = '<div class="empty-note">' + esc(String(err.message || err)) + '</div>'; }
+        + '입력의 약 ' + est.toLocaleString() + ' 토큰이 매 요청 동일한 정책입니다. '
+        + '병목은 반복되는 prefill이지 출력 생성이 아닙니다.'
+        + (policyBuild ? ' 이 문서를 한 번 읽는 데 ' + policyBuild.toFixed(2) + '초가 걸렸고, 지금까지 매 요청 그 값을 냈습니다.' : '')
+        + '<br>조치: 그 KV를 다시 계산하지 않고 재사용합니다.</div>'
+        + '<div class="callout" style="margin-top:8px"><strong>적용됨</strong>3번을 눌러 같은 프롬프트를 다시 돌려 보세요.</div>';
     }
 
     async function runAfter() {

@@ -439,3 +439,34 @@ def test_a_pod_without_a_checkpoint_is_refused_by_name(monkeypatch, tmp_path):
         assert "run training first" in str(e)
     else:
         raise AssertionError("a missing run was accepted")
+
+
+def test_a_restart_re_adopts_a_model_that_is_still_resident(monkeypatch, tmp_path):
+    """Which model is loaded lived only in process memory.
+
+    Every dashboard restart therefore reported "no model is loaded" while the
+    pod was still holding it, and the recovery was to reload an 8 GB model and
+    rebuild a 30K-token cache that were both already there.
+    """
+    note = tmp_path / "serving.json"
+    note.write_text(json.dumps({"model_id": "longctx", "model_ref": "Qwen/Qwen3-4B-Instruct-2507",
+                                "pod_id": "pod-a", "dtype": "bf16"}))
+    monkeypatch.setattr(runner, "SERVING_PATH", note)
+    monkeypatch.setattr(runner, "_serve", {})
+    monkeypatch.setattr(runner, "_server_health",
+                        lambda timeout=3.0: {"model": "Qwen/Qwen3-4B-Instruct-2507"})
+
+    runner.restore_serving()
+
+    assert runner._serve["pod_id"] == "pod-a"
+
+    # A note whose server has been replaced by a different model is discarded.
+    monkeypatch.setattr(runner, "_serve", {})
+    monkeypatch.setattr(runner, "_server_health", lambda timeout=3.0: {"model": "something/else"})
+    runner.restore_serving()
+    assert not runner._serve, "a stale note was adopted"
+
+    # So is one whose server is gone.
+    monkeypatch.setattr(runner, "_server_health", lambda timeout=3.0: None)
+    runner.restore_serving()
+    assert not runner._serve, "a dead server was adopted"
