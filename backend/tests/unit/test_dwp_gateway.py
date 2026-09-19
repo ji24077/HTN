@@ -3,6 +3,7 @@
 import base64
 import hashlib
 import json
+import os
 import time
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -89,6 +90,15 @@ class FakeStore:
         self.finished = []
         self.disconnected = []
         self.paused = False
+        self.execution_batches = []
+
+    async def append_execution_events(self, worker_id, session, batch):
+        self.assert_session(session)
+        current = await self.task(batch.taskId)
+        if current.worker_id != worker_id or current.generation != batch.attempt:
+            raise StaleAssignment("not assigned")
+        self.execution_batches.append(batch)
+        return [item.sequence for item in batch.events]
 
     async def create_pair_code(self, owner_id):
         self.owner = owner_id
@@ -286,6 +296,44 @@ class GatewayTests(unittest.TestCase):
         self.assertEqual(paired.json()["hostId"], self.store.worker_id)
         self.assertEqual(self.client.post("/hosts/pair", json=body).status_code, 400)
 
+    def test_pairing_and_reconnect_deliver_current_public_worker_telemetry(self):
+        with patch.dict(
+            os.environ,
+            {
+                "SENTRY_DSN": "https://backend@example.invalid/1",
+                "SENTRY_WORKER_DSN": "https://worker@example.invalid/2",
+                "SENTRY_ENVIRONMENT": "fleet",
+                "SENTRY_AUTH_TOKEN": "must-not-send",
+            },
+            clear=True,
+        ):
+            issued = self.client.post(
+                "/v1/device-invites", headers={"Authorization": "Bearer approved"}
+            )
+            paired = self.client.post(
+                "/hosts/pair",
+                json={
+                    "code": issued.json()["code"],
+                    "publicKey": self.public,
+                    "label": "Desktop",
+                },
+            )
+            expected = {
+                "dsn": "https://worker@example.invalid/2",
+                "environment": "fleet",
+                "release": None,
+            }
+            self.assertEqual(paired.json()["telemetry"], expected)
+            self.assertNotIn("must-not-send", paired.text)
+            self.assertEqual(paired.headers["cache-control"], "no-store")
+            with self.connect() as socket:
+                socket.send_json(hello(paused=True))
+                self.assertEqual(socket.receive_json()["payload"]["telemetry"], expected)
+            os.environ["SENTRY_WORKER_DSN"] = ""
+            with self.connect() as socket:
+                socket.send_json(hello(paused=True))
+                self.assertIsNone(socket.receive_json()["payload"]["telemetry"]["dsn"])
+
     def test_pairing_body_and_attempts_are_bounded(self):
         response = self.client.post("/hosts/pair", content="x" * 5000)
         self.assertEqual(response.status_code, 413)
@@ -418,6 +466,32 @@ class GatewayTests(unittest.TestCase):
                 socket.send_json({**hello(), **invalid})
                 with self.assertRaises(WebSocketDisconnect):
                     socket.receive_json()
+
+    def test_execution_events_are_acknowledged_and_do_not_complete_work(self):
+        with self.connect() as socket:
+            offer = self.start(socket)
+            socket.send_json(frame("task.accept", self.ref(offer)))
+            batch = {
+                "taskId": offer["taskId"],
+                "attempt": offer["attempt"],
+                "events": [
+                    {
+                        "sequence": 1,
+                        "at": "2026-09-19T12:00:00Z",
+                        "kind": "stdout",
+                        "data": {"text": "successful output"},
+                    },
+                ],
+            }
+            socket.send_json(frame("task.events", batch))
+            ack = socket.receive_json()
+            self.assertEqual(ack["type"], "task.events.ack")
+            self.assertEqual(ack["payload"]["sequences"], [1])
+            self.assertFalse(ack["payload"]["rejected"])
+            self.assertEqual(self.store.tasks[0].state, "running")
+            socket.send_json(frame("task.events", {**batch, "attempt": 2}))
+            self.assertTrue(socket.receive_json()["payload"]["rejected"])
+        self.assertEqual(len(self.store.execution_batches), 1)
 
 
 if __name__ == "__main__":

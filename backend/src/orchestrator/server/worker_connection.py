@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from redis.asyncio import Redis
 from starlette.websockets import WebSocketDisconnect, WebSocketState
 
+from ..shared.execution import ExecutionBatch
 from ..shared.protocol import MESSAGE_LIMIT, UNHEALTHY_AFTER, VERSION, Message, json_loads
 from .db.store import StaleAssignment, StaleSession, Store
 
@@ -57,12 +58,37 @@ async def serve_worker(
         new_session = secrets.token_hex(16)
         await store.register(worker_id, new_session, hello.capabilities, enrolled=enrolled)
         session = new_session
-        await send(socket, Message(type="welcome", session_id=session))
+        await send(
+            socket,
+            Message(
+                type="welcome",
+                session_id=session,
+                execution_events=True if hello.execution_events else None,
+            ),
+        )
         log.info("worker connected worker=%s session=%s", worker_id, session)
         while True:
             message = await receive(socket)
             try:
                 match message.type:
+                    case "execution_events":
+                        batch = ExecutionBatch.model_validate(message.execution_batch)
+                        try:
+                            sequences = await store.append_execution_events(
+                                worker_id, session, batch
+                            )
+                            rejected = False
+                        except StaleAssignment:
+                            sequences, rejected = [item.sequence for item in batch.events], True
+                        response = Message(
+                            type="execution_events_ack",
+                            execution_batch={
+                                "taskId": batch.taskId,
+                                "attempt": batch.attempt,
+                                "sequences": sequences,
+                                "rejected": rejected,
+                            },
+                        )
                     case "heartbeat":
                         if message.sequence < 1:
                             raise ValueError("heartbeat requires a positive sequence")

@@ -1,5 +1,6 @@
 import * as Sentry from '@sentry/node'
 import type { NodeOptions } from '@sentry/node'
+import { WorkerTelemetry } from '@dwp/protocol'
 
 const REDACTED = '[redacted]'
 const SENSITIVE_KEY = /authorization|cookie|token|secret|passw|credential|private[-_]?key|api[-_]?key|signature|dsn|^code$|pair(?:ing)?[-_]?code/i
@@ -47,29 +48,44 @@ export function scrubTelemetry<T>(value: T, env: NodeJS.ProcessEnv = process.env
   return walk(value, 0) as T
 }
 
-export function telemetryOptions(env: NodeJS.ProcessEnv = process.env): NodeOptions | null {
-  const dsn = env.SENTRY_DSN?.trim()
+export function telemetryOptions(env: NodeJS.ProcessEnv = process.env, saved?: unknown): NodeOptions | null {
+  const parsed = WorkerTelemetry.safeParse(saved)
+  const remote = parsed.success ? parsed.data : undefined
+  // Presence matters: an explicitly empty local DSN is the operator's opt-out.
+  const dsn = (env.SENTRY_DSN !== undefined ? env.SENTRY_DSN : remote?.dsn)?.trim()
   if (!dsn) return null
   return {
     dsn,
-    environment: env.SENTRY_ENVIRONMENT || 'development',
-    release: env.SENTRY_RELEASE || env.RELEASE || undefined,
+    environment: env.SENTRY_ENVIRONMENT ?? remote?.environment ?? 'development',
+    release: env.SENTRY_RELEASE ?? env.RELEASE ?? remote?.release ?? undefined,
     sendDefaultPii: false,
     maxBreadcrumbs: 0,
     // The worker reports exceptions without recording task inputs or network bodies.
     defaultIntegrations: false,
     integrations: [Sentry.onUncaughtExceptionIntegration(), Sentry.onUnhandledRejectionIntegration()],
     skipOpenTelemetrySetup: true,
-    beforeSend: event => scrubTelemetry(event, env),
+    beforeSend: event => scrubTelemetry(event, { ...env, SENTRY_DSN: dsn }),
     initialScope: { tags: { component: 'worker', runtime: 'desktop-agent' } },
   }
 }
 
-export function initTelemetry(): boolean {
-  const options = telemetryOptions()
-  if (!options) return false
+let activeSettings: string | undefined
+
+export function initTelemetry(saved?: unknown): boolean {
+  const options = telemetryOptions(process.env, saved)
+  const fingerprint = JSON.stringify(options ? [options.dsn, options.environment, options.release] : null)
+  if (fingerprint === activeSettings && (!options || Sentry.isEnabled())) return Boolean(options)
+  const previous = Sentry.getClient()
+  Sentry.getCurrentScope().setClient(undefined)
+  if (previous) void Promise.resolve(previous.close(2_000)).catch(() => {})
+  activeSettings = undefined
+  if (!options) {
+    activeSettings = fingerprint
+    return false
+  }
   try {
     Sentry.init(options)
+    activeSettings = fingerprint
     return true
   } catch {
     // Reporting is optional and must not prevent a worker from starting.
@@ -88,6 +104,7 @@ export function captureWorkloadFailure(
       task_id: context.taskId,
       adapter: context.adapter,
       attempt: String(context.attempt),
+      execution_id: `${context.taskId}:${context.attempt}`,
     })
     Sentry.captureException(error)
   })

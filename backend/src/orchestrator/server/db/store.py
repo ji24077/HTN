@@ -16,6 +16,7 @@ import asyncpg
 from pydantic import JsonValue
 
 from ...shared.dwp import validate_public_key
+from ...shared.execution import ExecutionBatch, scrub_execution
 from ...shared.protocol import (
     ACK_SECONDS,
     LEASE_SECONDS,
@@ -71,15 +72,41 @@ async def configure_connection(conn: asyncpg.Connection) -> None:
 
 
 async def event(conn, entity: str, entity_id: str, before: str, after: str, **details) -> None:
-    await conn.execute(
+    audit_id = await conn.fetchval(
         """INSERT INTO events(entity,entity_id,previous_state,new_state,details)
-           VALUES($1,$2,$3,$4,$5)""",
+           VALUES($1,$2,$3,$4,$5) RETURNING id""",
         entity,
         entity_id,
         before,
         after,
         details,
     )
+    if entity == "task":
+        row = await conn.fetchrow("SELECT spec FROM tasks WHERE id=$1", entity_id)
+        spec = row["spec"]
+        data = {
+            **details,
+            "state": after,
+            "adapter": spec["kind"],
+            "job_id": spec["job_id"],
+            "runtime": spec["requirements"]["runtime"],
+            "task_hash": hashlib.sha256(json_text(spec).encode()).hexdigest(),
+        }
+        data.pop("session_id", None)
+        if after == "succeeded":
+            data["result_url"] = f"/v1/tasks/{entity_id}"
+        kind = "failed" if after == "queued" and before != "" else after
+        await conn.execute(
+            """INSERT INTO execution_events
+               (task_id,attempt,worker_id,source,sequence,kind,occurred_at,data)
+               VALUES($1,$2,$3,'server',$4,$5,clock_timestamp(),$6)""",
+            entity_id,
+            details.get("generation", 0),
+            details.get("worker_id"),
+            audit_id,
+            kind,
+            scrub_execution(data),
+        )
 
 
 class Store:
@@ -137,6 +164,7 @@ class Store:
                         "dwp_pair_codes",
                         "dwp_devices",
                         "dwp_assertions",
+                        "execution_events",
                     ):
                         await conn.execute(
                             f'ALTER TABLE "{schema}".{table} ENABLE ROW LEVEL SECURITY'
@@ -175,6 +203,67 @@ class Store:
     async def tasks(self) -> list[Task]:
         rows = await self.pool.fetch("SELECT * FROM tasks ORDER BY created_at DESC,id LIMIT 500")
         return [task_from_row(row) for row in rows]
+
+    async def execution_events(
+        self, task_id: str, after: int = 0, worker_id: str | None = None, attempt: int | None = None
+    ):
+        await self.task(task_id)
+        rows = await self.pool.fetch(
+            """SELECT *, task_id || ':' || attempt::text AS execution_id
+               FROM execution_events WHERE task_id=$1 AND id>$2
+               AND ($3::text IS NULL OR worker_id=$3)
+               AND ($4::int IS NULL OR attempt=$4) ORDER BY id LIMIT 200""",
+            task_id,
+            after,
+            worker_id,
+            attempt,
+        )
+        return [dict(row) for row in rows]
+
+    async def append_execution_events(self, worker_id: str, session: str, batch: ExecutionBatch):
+        async with self.change() as (conn, _):
+            await self._worker(conn, worker_id, session)
+            # Replay may arrive after cancellation, completion, or a newer attempt.
+            # Historical assignment ownership permits diagnostics, never task mutation.
+            owned = await conn.fetchval(
+                """SELECT EXISTS(SELECT 1 FROM events WHERE entity='task' AND entity_id=$1
+                   AND new_state='assigned' AND details->>'worker_id'=$2
+                   AND (details->>'generation')::int=$3)""",
+                batch.taskId,
+                worker_id,
+                batch.attempt,
+            )
+            if not owned:
+                raise StaleAssignment("execution was not assigned to this worker")
+            for item in batch.events:
+                await conn.execute(
+                    """INSERT INTO execution_events
+                       (task_id,attempt,worker_id,source,sequence,kind,occurred_at,data)
+                       VALUES($1,$2,$3,'worker',$4,$5,$6,$7)
+                       ON CONFLICT(task_id,attempt,source,sequence) DO NOTHING""",
+                    batch.taskId,
+                    batch.attempt,
+                    worker_id,
+                    item.sequence,
+                    item.kind,
+                    item.at,
+                    scrub_execution(item.data),
+                )
+                percent = item.data.get("percent") if item.kind == "progress" else None
+                if (
+                    isinstance(percent, int | float)
+                    and math.isfinite(percent)
+                    and 0 <= percent <= 100
+                ):
+                    await conn.execute(
+                        """UPDATE tasks SET progress=GREATEST(progress,$4)
+                           WHERE id=$1 AND worker_id=$2 AND generation=$3 AND state='running'""",
+                        batch.taskId,
+                        worker_id,
+                        batch.attempt,
+                        float(percent),
+                    )
+            return [item.sequence for item in batch.events]
 
     async def workers(self) -> list[Worker]:
         rows = await self.pool.fetch("SELECT * FROM workers ORDER BY id LIMIT 500")
@@ -549,7 +638,12 @@ class Store:
         await conn.execute("UPDATE tasks SET lease_until=$2 WHERE id=$1", task.spec.id, until)
 
     async def heartbeat(
-        self, worker_id: str, session: str, active: list[Ref], paused: bool, progress: float = 0
+        self,
+        worker_id: str,
+        session: str,
+        active: list[Ref],
+        paused: bool,
+        progress: float | None = None,
     ) -> list[Ref]:
         accepted = []
         async with self.change() as (conn, now):
@@ -569,9 +663,10 @@ class Store:
                 task = task_from_row(row)
                 if task.state == "running" and self._valid(task, worker_id, session, ref, now):
                     await self._renew(conn, task, now)
-                    await conn.execute(
-                        "UPDATE tasks SET progress=$2 WHERE id=$1", ref.task_id, progress
-                    )
+                    if progress is not None:
+                        await conn.execute(
+                            "UPDATE tasks SET progress=$2 WHERE id=$1", ref.task_id, progress
+                        )
                     accepted.append(ref)
         return accepted
 

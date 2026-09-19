@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from ..shared.worker_telemetry import worker_telemetry
 from .auth import require_admin
 from .db.store import PENDING_ENROLLMENT_SECONDS, EnrollmentLimit
 
@@ -169,6 +170,7 @@ async def enroll(request: Request):
             "tailscale_auth_key": auth_key,
             "tailscale_hostname": "orch-" + worker_id,
             "auth_key_expires_in": 600,
+            "telemetry": worker_telemetry(),
         },
         status_code=201,
         headers={"Cache-Control": "no-store", "Pragma": "no-cache"},

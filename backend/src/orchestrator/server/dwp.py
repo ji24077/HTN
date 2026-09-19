@@ -28,6 +28,7 @@ from ..shared.dwp import (
     verify_assertion,
     verify_result,
 )
+from ..shared.execution import ExecutionBatch
 from ..shared.protocol import (
     HEARTBEAT_INTERVAL,
     LEASE_SECONDS,
@@ -38,6 +39,7 @@ from ..shared.protocol import (
     bounded_json,
     task_ref,
 )
+from ..shared.worker_telemetry import worker_telemetry
 from .auth import require_admin
 from .db.store import Conflict, EnrollmentLimit, NotFound, StaleAssignment, StaleSession, Store
 from .dwp_assets import release_info
@@ -162,6 +164,7 @@ async def pair(request: Request):
             "hostId": worker_id,
             "label": label,
             "wsUrl": origin(request).replace("http", "ws", 1) + "/agent/connect",
+            "telemetry": worker_telemetry(),
             **release_info(),
         },
         headers={"Cache-Control": "no-store"},
@@ -300,6 +303,8 @@ class Connection:
                 "serverTime": datetime.now(timezone.utc).isoformat(),
                 "heartbeatSeconds": HEARTBEAT_INTERVAL,
                 "releaseVersion": release_info()["releaseVersion"],
+                "telemetry": worker_telemetry(),
+                "executionEvents": True,
             },
             frame["id"],
         )
@@ -307,6 +312,27 @@ class Connection:
 
     async def message(self, frame: dict, raw_output: str | None):
         kind, payload = frame["type"], frame["payload"]
+        if kind == "task.events":
+            batch = ExecutionBatch.model_validate(payload)
+            try:
+                sequences = await self.store.append_execution_events(
+                    self.worker_id, self.session, batch
+                )
+                rejected = False
+            except StaleAssignment:
+                sequences = [item.sequence for item in batch.events]
+                rejected = True
+            await send(
+                self.socket,
+                "task.events.ack",
+                {
+                    "taskId": batch.taskId,
+                    "attempt": batch.attempt,
+                    "sequences": sequences,
+                    "rejected": rejected,
+                },
+            )
+            return
         if kind == "heartbeat":
             Heartbeat.model_validate(payload)
         elif kind == "consent.update":
@@ -374,6 +400,11 @@ class Connection:
                             scope.set_tag("device.id", self.worker_id)
                             scope.set_tag("task.id", active.ref.task_id)
                             scope.set_tag("task.generation", active.ref.generation)
+                            scope.set_tag("worker_id", self.worker_id)
+                            scope.set_tag("task_id", active.ref.task_id)
+                            scope.set_tag(
+                                "execution_id", f"{active.ref.task_id}:{active.ref.generation}"
+                            )
                             sentry_sdk.capture_message(
                                 "Paired device execution failed", level="error"
                             )

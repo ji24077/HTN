@@ -8,6 +8,45 @@ disables it and nothing is sent.
 | Control plane (`orchestrator-public`, `-worker-gateway`, `-server`) | `htn-backend` | `SENTRY_DSN` in `.env` |
 | Worker (`orchestrator-worker`) | `htn-backend` | `SENTRY_DSN` in `.env.worker` |
 | Dashboard | `htn-frontend` | `SENTRY_FRONTEND_DSN` in `.env` |
+| Installed desktop runner | Backend project by default | Automatically provisioned during pairing and refreshed on reconnect |
+
+## Automatic runner configuration
+
+For successful-run history, task output, and repair-agent diagnostics, see
+[execution tracking](execution-tracking.md). Those records live in the task API
+and dashboard independently of Sentry; exception events link through `execution_id`.
+
+Set `SENTRY_DSN` on the platform and restart it. Desktop pairing sends the public
+ingest DSN, environment, and release to the runner, which saves them in its device
+profile. The same startup code reads that profile for Node, desktop apps, compiled
+binaries, and installed login services. No `.env` file or Sentry API token is needed
+on the runner. A device's Sentry errors still contain worker/task tags and pass
+through the existing credential scrubber; ordinary desktop connection logs remain
+local JSONL logs, not Sentry Logs.
+
+An updated desktop runner that was already paired acquires these settings on its
+next connection. Later reconnects also refresh changed settings or disable reporting
+when the platform sends an empty DSN. Cached settings cover startup errors before
+the connection is established. Older servers that omit telemetry remain compatible;
+switching a device to a different server clears its cached telemetry configuration.
+Changing platform settings requires restarting the platform; connected desktop
+runners receive the change when they reconnect.
+
+`SENTRY_WORKER_DSN` on the platform optionally selects a separate worker project.
+Leaving that variable unset inherits `SENTRY_DSN`; setting it explicitly empty
+disables managed worker reporting. Explicit `SENTRY_DSN`, `SENTRY_ENVIRONMENT`, and
+`SENTRY_RELEASE` values in a desktop runner's environment override the managed
+values. An explicitly empty runner `SENTRY_DSN` is a local opt-out.
+
+Python automatic enrollment writes the same public settings to its generated worker
+environment file alongside the Tailscale configuration. Existing Python profiles
+need their Sentry settings updated manually; their private worker protocol does not
+refresh configuration. iOS continues to report device failures through the backend;
+this does not add a native Swift Sentry SDK.
+
+Distribution still requires shipping an updated runner build: binaries already
+installed before this feature cannot load profile telemetry until updated. No
+release is automatically signed or published by this source change.
 
 Backend and worker events share a project and are told apart by the
 `component` tag (`server` or `worker`), plus `surface` or `worker_id`. The

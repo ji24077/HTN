@@ -11,6 +11,7 @@ import { invocation } from './paths.ts'
 import { installService, uninstallService, serviceStatus } from './service.ts'
 import { runGui, guiAddress } from './gui.ts'
 import { AGENT_HOME, AGENT_VERSION } from './paths.ts'
+import { initTelemetry } from './telemetry.ts'
 
 const [given, ...rest] = process.argv.slice(2)
 
@@ -81,7 +82,9 @@ switch (command) {
     const origin = server.replace(/\/+$/, '')
     cfg.server = origin
     cfg.wsUrl = `${origin.replace(/^http/, 'ws')}/agent/connect`
+    if (cfg.telemetry) delete cfg.telemetry
     saveConfig(cfg)
+    initTelemetry()
     console.log(`Now pointing at ${origin}\n  host id stays ${cfg.hostId} — no re-pairing needed.`)
     break
   }
