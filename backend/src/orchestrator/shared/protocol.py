@@ -34,9 +34,23 @@ def json_loads(value: str | bytes) -> object:
     return json.loads(value, parse_constant=reject_constant)
 
 
+class JsonTooLarge(ValueError):
+    """One payload or result is over JSON_LIMIT.
+
+    Still a ValueError, so every caller that already rejects oversized JSON keeps doing
+    so. A distinct type because the size of *one task's result* is a fact about that
+    task, and the connection handlers need to be able to tell it apart from the frame
+    being malformed. Reading it as the latter is what made a single oversized result
+    close the WebSocket, which marked the worker unhealthy and re-queued the slice onto
+    the next machine, which produced the same oversized result, and so on across the
+    fleet.
+    """
+
+
 def bounded_json(value: JsonValue) -> JsonValue:
-    if len(json_text(value).encode()) > JSON_LIMIT:
-        raise ValueError("JSON payload/result must be at most 64 KiB")
+    size = len(json_text(value).encode())
+    if size > JSON_LIMIT:
+        raise JsonTooLarge(f"JSON payload/result must be at most {JSON_LIMIT} bytes, got {size}")
     return value
 
 

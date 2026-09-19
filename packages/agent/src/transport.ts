@@ -1,7 +1,7 @@
 import { freemem } from 'node:os'
 import WebSocket from 'ws'
 import {
-  decode, envelope, mintAssertion, signAttestation, hashOutput,
+  decode, envelope, mintAssertion, signAttestation, hashOutput, resultTooLarge, JSON_LIMIT,
   TaskOffer, HelloAck, Revoked,
 } from '@dwp/protocol'
 import type { KeyObject } from 'node:crypto'
@@ -441,6 +441,28 @@ export function connect(
         void work
           .then(output => {
             const finishedAt = new Date().toISOString()
+            /**
+             * Say so here rather than shipping a result the server will not store.
+             *
+             * The server refuses an oversized result, and used to refuse it by closing
+             * the connection — which marked this host unhealthy, re-queued the slice, and
+             * handed the same too-big slice to the next machine to fail the same way.
+             * Reporting it as this task's error keeps the failure where it belongs and
+             * puts the real reason on the task instead of `worker_reconnected`.
+             */
+            if (resultTooLarge(output)) {
+              hostLog.error('task.result_too_large', {
+                taskId: offer.taskId, adapter: offer.adapter, limitBytes: JSON_LIMIT,
+                note: 'this slice produced more output than one result may carry — split it',
+              })
+              send('task.error', {
+                taskId: offer.taskId,
+                leaseId: offer.leaseId,
+                errorClass: 'result_too_large',
+                message: `result exceeds the ${JSON_LIMIT}-byte limit; submit this work in smaller slices`,
+              })
+              return
+            }
             const outputHash = hashOutput(output)
             send('task.result', {
               taskId: offer.taskId,

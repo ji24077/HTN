@@ -30,10 +30,13 @@ from ..shared.dwp import (
 )
 from ..shared.protocol import (
     HEARTBEAT_INTERVAL,
+    JSON_LIMIT,
     LEASE_SECONDS,
     MESSAGE_LIMIT,
     UNHEALTHY_AFTER,
     Capabilities,
+    JsonTooLarge,
+    Machine,
     Ref,
     bounded_json,
     task_ref,
@@ -246,6 +249,39 @@ class Connection:
     async def cancel(self, task_id: str, reason: str = "assignment no longer active"):
         await send(self.socket, "task.cancel", {"taskId": task_id, "reason": reason})
 
+    async def reject_result(self, active: Assignment) -> None:
+        """Fail the one task whose result we will not store, and keep the connection.
+
+        Not retryable, and that is the point. These adapters are deterministic — the same
+        slice on another machine produces byte-identical output — so re-queueing an
+        oversized result just hands the same poison pill to the next worker. Together
+        with the close that used to follow, that is how one 1500-gait slice took a whole
+        fleet down: every machine that picked the slice up computed it, had its socket
+        closed on the way back, was marked unhealthy, reconnected, and lost whatever else
+        it was holding as `worker_reconnected`.
+
+        The device is told the assignment is over so it stops renewing a lease against a
+        task that has already failed.
+        """
+        log.warning(
+            "device result rejected as too large worker=%s task=%s limit=%d",
+            self.worker_id,
+            active.ref.task_id,
+            JSON_LIMIT,
+        )
+        if not active.accepted:
+            # `finish` only accepts a running task, and a result can arrive before the
+            # accept we asked for has been processed.
+            await self.store.ack(self.worker_id, self.session, active.ref)
+        await self.store.finish(
+            self.worker_id, self.session, active.ref, None, "result_too_large", False
+        )
+        self.active = None
+        await self.cancel(
+            active.ref.task_id,
+            f"result exceeds the {JSON_LIMIT}-byte limit; submit this work in smaller slices",
+        )
+
     async def refresh(self):
         # Presence is evidence of a live authenticated connection; a task lease is
         # renewed separately, only by a message containing the current opaque lease.
@@ -369,41 +405,63 @@ class Connection:
                     if active.ref not in accepted:
                         raise StaleAssignment("lease expired")
                 elif kind == "task.result":
-                    evidence = verify_result(
-                        payload,
-                        raw_output,
-                        self.public_key,
-                        task_id=active.ref.task_id,
-                        attempt=active.ref.generation,
-                        worker_id=self.worker_id,
-                    )
-                    result = bounded_json(payload.get("output"))
-                    with sentry_sdk.start_span(
-                        op="device.result", name="Accept signed device result"
-                    ):
-                        await self.store.finish(
-                            self.worker_id,
-                            self.session,
-                            active.ref,
-                            result,
-                            "",
-                            False,
-                            attestation=evidence,
+                    try:
+                        evidence = verify_result(
+                            payload,
+                            raw_output,
+                            self.public_key,
+                            task_id=active.ref.task_id,
+                            attempt=active.ref.generation,
+                            worker_id=self.worker_id,
                         )
-                    self.active = None
+                        result = bounded_json(payload.get("output"))
+                    except JsonTooLarge:
+                        # Deliberately not the same as a forged result. A signature that
+                        # does not verify means this connection is lying and closing it is
+                        # right; a result that is merely too big means this *slice* was
+                        # too big, and the connection is doing exactly what it was told.
+                        await self.reject_result(active)
+                    else:
+                        with sentry_sdk.start_span(
+                            op="device.result", name="Accept signed device result"
+                        ):
+                            await self.store.finish(
+                                self.worker_id,
+                                self.session,
+                                active.ref,
+                                result,
+                                "",
+                                False,
+                                attestation=evidence,
+                            )
+                        self.active = None
                 else:
+                    retryable = True
                     if kind == "task.error":
-                        TaskError.model_validate(payload)
+                        reported = TaskError.model_validate(payload)
                         # Device-provided free text and task data never enter telemetry.
                         failure = "device_execution_failed"
+                        if reported.errorClass == "result_too_large":
+                            # The one device-reported class that is a fact about the task
+                            # rather than about the machine: the slice is too big for a
+                            # result frame, and it will be too big on the next machine too.
+                            # Not a Sentry error for the same reason — nothing is broken.
+                            failure, retryable = "result_too_large", False
+                            log.warning(
+                                "device refused to send an oversized result "
+                                "worker=%s task=%s limit=%d",
+                                self.worker_id,
+                                active.ref.task_id,
+                                JSON_LIMIT,
+                            )
                     else:
                         failure = "device_declined"
                     if not active.accepted:
                         await self.store.ack(self.worker_id, self.session, active.ref)
                     await self.store.finish(
-                        self.worker_id, self.session, active.ref, None, failure, True
+                        self.worker_id, self.session, active.ref, None, failure, retryable
                     )
-                    if kind == "task.error":
+                    if kind == "task.error" and failure != "result_too_large":
                         with sentry_sdk.new_scope() as scope:
                             scope.set_tag("device.protocol", "dwp-v1")
                             scope.set_tag("device.id", self.worker_id)
