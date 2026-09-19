@@ -107,7 +107,9 @@ def init_sentry(component: str, **tags: str) -> bool:
         profile_session_sample_rate=1.0,
         profile_lifecycle="trace",
         enable_logs=True,
-        # Rich context for debugging; every outgoing payload passes the scrubber.
+        # Model reprs lose sensitive field boundaries before before_send runs.
+        # Keep traceback locations, but do not collect potentially unsafe locals.
+        include_local_variables=False,
         send_default_pii=True,
         max_request_body_size="medium",
         event_scrubber=EventScrubber(
