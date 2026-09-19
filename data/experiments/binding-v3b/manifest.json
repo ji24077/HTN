@@ -1,0 +1,65 @@
+{
+  "version": "targeted-training-v2-overlapping-numbers",
+  "seed": 20260920,
+  "intended_use": "training_only",
+  "generator_sha256": "6915751171fe3b151ab750717695ae96fcf0aad31a965d6907444d29e36817e9",
+  "synthetic_rows": 2400,
+  "counterfactual_groups": 1200,
+  "template_count": 20,
+  "unique_job_titles": 561,
+  "pair_modes": {
+    "distractor_change": 800,
+    "target_change": 1600
+  },
+  "changed_fields": {
+    "age": 320,
+    "founded": 194,
+    "graduation": 116,
+    "name": 320,
+    "org": 160,
+    "other_age": 86,
+    "other_name": 190,
+    "published": 214,
+    "role": 160,
+    "year": 640
+  },
+  "base_training": {
+    "path": "data\\train.jsonl",
+    "rows": 1768,
+    "sha256": "42f582b3e8f3a70f25a8ac50136881cedfc5d23e0b9f9998ca5232add88d4782"
+  },
+  "limitations": [
+    "Template-generated fictional appointments are supervised practice, not a generalization benchmark.",
+    "Generator reads only the explicitly supplied training source; it never reads evaluation rows or predictions.",
+    "Pools and structures are independently authored but not asserted disjoint from unseen evaluation content.",
+    "Keep group_id members together in any future split; counterfactual partners are near duplicates by design.",
+    "All five fields are explicit. Missing-field abstention requires a separate schema and task design.",
+    "Date and age ranges overlap across the corpus. Founding/graduation still causally precede appointment and retrospective publication follows it; this does not cover every possible temporal relation.",
+    "Exact offsets use Python Unicode code points, not UTF-8 byte positions."
+  ],
+  "files": {
+    "train.jsonl": {
+      "rows": 2400,
+      "sha256": "5bcf9f7e9fe92e36cc9336461b0fa154ea4149efb3bc5fa6b3d52fe5272195bf",
+      "categories": {
+        "chronology": 720,
+        "combined": 240,
+        "compositional_roles": 480,
+        "subject_binding": 480,
+        "verbatim_copy": 480
+      }
+    },
+    "train_mixed.jsonl": {
+      "rows": 4168,
+      "sha256": "81d5ec85a79abc8baa4c2ce922ab4fd84ac9bb7c0adc857ded5d9eaefd3bb43b",
+      "categories": {
+        "chronology": 720,
+        "combined": 240,
+        "compositional_roles": 480,
+        "original": 1768,
+        "subject_binding": 480,
+        "verbatim_copy": 480
+      }
+    }
+  }
+}

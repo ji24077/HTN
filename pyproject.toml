@@ -33,6 +33,7 @@ cuda = [
     # Qwen2.5-0.5B is the real workload. transformers carries the architecture
     # and tokenizer; the training loop itself is ours.
     "transformers>=4.45",
+    "peft>=0.14",          # optional LoRA training on smaller GPUs
     # torchft: fill in after T-2a. It ships nightly-only — if the verdict is
     # "works", pin the exact wheel here and add its index below.
 ]
@@ -44,6 +45,7 @@ rocm = [
     # Qwen2.5-0.5B is the real workload. transformers carries the architecture
     # and tokenizer; the training loop itself is ours.
     "transformers>=4.45",
+    "peft>=0.14",
     # torch+rocm depends on this and it only exists on the ROCm index, so it
     # needs both a listing here and a [tool.uv.sources] entry below. Without
     # it the lock fails on EVERY machine, not just the AMD box.

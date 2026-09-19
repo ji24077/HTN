@@ -1,0 +1,9 @@
+# Preserve the exact bytes of measured evidence and its frozen data.
+data/experiments/** -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+eval/laptop-*.json -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+eval/profile-v3-*.json -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+eval/v3b-*.json -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+experiments/*.json -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+ckpt/laptop-*/meta.json -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+ckpt/memory-*/meta.json -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+ckpt/profile-v3b-*/meta.json -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol

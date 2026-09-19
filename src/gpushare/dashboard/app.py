@@ -65,7 +65,7 @@ MODEL_KEY = "qwen2.5-0.5b"
 # ─────────────────────────────────────────────────────────────────────────────
 def _read(path: Path) -> dict | None:
     try:
-        return json.loads(path.read_text())
+        return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
 
@@ -110,7 +110,7 @@ def experiment() -> dict[str, Any]:
 
 def _count(p: Path) -> int:
     try:
-        return sum(1 for ln in p.read_text().splitlines() if ln.strip())
+        return sum(1 for ln in p.read_text(encoding="utf-8").splitlines() if ln.strip())
     except OSError:
         return 0
 

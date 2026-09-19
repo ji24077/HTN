@@ -6,9 +6,19 @@ __pycache__/
 *.db
 .pytest_cache/
 .ruff_cache/
+.cache/
 .DS_Store
 .gpushare/
 
-# Checkpoint weights are large and reproducible; *.safetensors above already
-# excludes them. ckpt/*/meta.json is small and IS the measurement evidence,
-# so the directory itself is deliberately NOT ignored.
+# Keep measurements; trained weights and tokenizer copies stay local.
+ckpt/**
+!ckpt/**/
+!ckpt/**/meta.json
+
+# Local drafts and superseded partial evaluations; final reports are published.
+data/experiments/binding-v3/
+experiments/token-audit-binding-v3.json
+eval/laptop-control-challenge.json
+eval/laptop-lora-original.json
+eval/laptop-mixed-challenge.json
+eval/laptop-mixed-validation.json

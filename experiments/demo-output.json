@@ -1,0 +1,50 @@
+{
+  "record": {
+    "name": "Mira Chen",
+    "age": 37,
+    "org": "Aster Works",
+    "role": "systems engineer",
+    "year": 2019
+  },
+  "evidence": {
+    "spans": {
+      "name": [
+        {
+          "start": 39,
+          "end": 48,
+          "text": "Mira Chen"
+        }
+      ],
+      "age": [
+        {
+          "start": 93,
+          "end": 95,
+          "text": "37"
+        }
+      ],
+      "org": [
+        {
+          "start": 17,
+          "end": 28,
+          "text": "Aster Works"
+        }
+      ],
+      "role": [
+        {
+          "start": 54,
+          "end": 70,
+          "text": "systems engineer"
+        }
+      ],
+      "year": [
+        {
+          "start": 74,
+          "end": 78,
+          "text": "2019"
+        }
+      ]
+    },
+    "missing_fields": [],
+    "scope": "literal presence only; semantic binding is not checked"
+  }
+}

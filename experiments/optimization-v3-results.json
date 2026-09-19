@@ -1,0 +1,724 @@
+{
+  "branch": "ji-phin-agentinfra",
+  "base_commit": "5f4a27b1f026944b62017f6054695e3706557c58",
+  "checkpoint_hashes": {
+    "v2": {
+      "adapter_config.json": "728600bf6190bf793bad36975e2e5d1c00046ad9ca86d0075c60d7f1a2bea07d",
+      "adapter_model.safetensors": "7d0ad3145a518c3c61879c84a064ae8c9d27215e7b669e9dd9260c8a883b3ae0",
+      "meta.json": "5ca39f34ad814124d3fb2420b3fb0b1bf73e82b67dbbd229134d9223f6f6b6e6"
+    },
+    "v3b": {
+      "adapter_config.json": "07d36e13b0d75ea18d9f0dde9fda49b13553639b337956b76030b3b645341dd1",
+      "adapter_model.safetensors": "600691de70c80f28743563212ef26b4dac61a1014effaafde5fec1a48020992d",
+      "meta.json": "942b2e76772fda170f71bb48807fc725a77aaf9610749841acb7847bd11b2b6e"
+    }
+  },
+  "training_data": {
+    "file": "data\\experiments\\binding-v3b\\train_replay.jsonl",
+    "rows": 5168,
+    "original": 1768,
+    "targeted": 2400,
+    "v2_replay": 1000,
+    "selection_seed": 431,
+    "shuffle_seed": 1337,
+    "sha256": "b3a7903d5e8ba97b9079ebeba28d2a6192fd426f6410ca35b39f2bc57340a78a",
+    "sources": {
+      "data\\experiments\\binding-v3b\\train_mixed.jsonl": "81d5ec85a79abc8baa4c2ce922ab4fd84ac9bb7c0adc857ded5d9eaefd3bb43b",
+      "data\\experiments\\extraction-v2\\train.jsonl": "ee36a74d0266d36de67f27a9e1eb80711e763b1e7c7aa457cdc6d64c08079afc"
+    },
+    "source_policy": "Only training files; no evaluation rows used."
+  },
+  "candidate_training_metadata": "ckpt/laptop-lora-v3b/meta.json",
+  "candidate_training": {
+    "steps": 300,
+    "t_step_median_s": 0.1807526999982656,
+    "peak_vram_gb": 3.01482752,
+    "peak_reserved_gb": 3.16669952,
+    "input_tokens_per_second": 3892.3808563855273,
+    "answer_tokens_per_second": 1762.256203844243,
+    "examples_drawn": 2400,
+    "unique_examples_seen": 2400,
+    "dataset_coverage": 0.46439628482972134,
+    "initialization": "adapter_weights_only",
+    "lr": 0.0001,
+    "sampling": "shuffle"
+  },
+  "performance_probe": {
+    "steps_per_config": 24,
+    "warmup_steps_discarded": 6,
+    "identical_controls": [
+      "training_data",
+      "initial_adapter",
+      "effective_batch_8",
+      "learning_rate_0.0001",
+      "seed_1337",
+      "shuffled_example_stream",
+      "bf16",
+      "sdpa",
+      "seq_len_160"
+    ],
+    "checkpointed": {
+      "t_step_median_s": 0.5095312500052387,
+      "peak_vram_gb": 1.230882816,
+      "input_tokens_per_second": 1401.1648056182248
+    },
+    "batched": {
+      "t_step_median_s": 0.18472955000470392,
+      "peak_vram_gb": 2.989168128,
+      "input_tokens_per_second": 3826.8379861577732
+    },
+    "step_speed_ratio": 2.7582552439079944,
+    "limitation": "One short sequential measurement per configuration; no repeated thermal/power-controlled benchmark. Configurations use different activation checkpointing, microbatch partition and projection chunk size; bf16 training trajectories are not bit-identical."
+  },
+  "evaluations": {
+    "independent": {
+      "n": 50,
+      "baseline_report": "eval/v3b-baseline-independent.json",
+      "candidate_report": "eval/v3b-candidate-independent.json",
+      "baseline": {
+        "json_parse_rate": 1.0,
+        "exact_match_rate": 0.96,
+        "field_accuracy": {
+          "name": 1.0,
+          "age": 1.0,
+          "org": 0.96,
+          "role": 1.0,
+          "year": 1.0
+        },
+        "categories": {
+          "punctuation": {
+            "n": 10,
+            "json_parse_rate": 1.0,
+            "field_accuracy": {
+              "name": 1.0,
+              "age": 1.0,
+              "org": 0.8,
+              "role": 1.0,
+              "year": 1.0
+            },
+            "exact_match_rate": 0.8,
+            "held_out_loss": null,
+            "samples": []
+          },
+          "chronology": {
+            "n": 10,
+            "json_parse_rate": 1.0,
+            "field_accuracy": {
+              "name": 1.0,
+              "age": 1.0,
+              "org": 1.0,
+              "role": 1.0,
+              "year": 1.0
+            },
+            "exact_match_rate": 1.0,
+            "held_out_loss": null,
+            "samples": []
+          },
+          "subject_selection": {
+            "n": 10,
+            "json_parse_rate": 1.0,
+            "field_accuracy": {
+              "name": 1.0,
+              "age": 1.0,
+              "org": 1.0,
+              "role": 1.0,
+              "year": 1.0
+            },
+            "exact_match_rate": 1.0,
+            "held_out_loss": null,
+            "samples": []
+          },
+          "diacritics": {
+            "n": 10,
+            "json_parse_rate": 1.0,
+            "field_accuracy": {
+              "name": 1.0,
+              "age": 1.0,
+              "org": 1.0,
+              "role": 1.0,
+              "year": 1.0
+            },
+            "exact_match_rate": 1.0,
+            "held_out_loss": null,
+            "samples": []
+          },
+          "record_formats": {
+            "n": 10,
+            "json_parse_rate": 1.0,
+            "field_accuracy": {
+              "name": 1.0,
+              "age": 1.0,
+              "org": 1.0,
+              "role": 1.0,
+              "year": 1.0
+            },
+            "exact_match_rate": 1.0,
+            "held_out_loss": null,
+            "samples": []
+          }
+        },
+        "exact_match_95pct_interval": [
+          0.8653990931249297,
+          0.9889611156723802
+        ]
+      },
+      "candidate": {
+        "json_parse_rate": 1.0,
+        "exact_match_rate": 0.98,
+        "field_accuracy": {
+          "name": 1.0,
+          "age": 1.0,
+          "org": 0.98,
+          "role": 1.0,
+          "year": 1.0
+        },
+        "categories": {
+          "punctuation": {
+            "n": 10,
+            "json_parse_rate": 1.0,
+            "field_accuracy": {
+              "name": 1.0,
+              "age": 1.0,
+              "org": 0.9,
+              "role": 1.0,
+              "year": 1.0
+            },
+            "exact_match_rate": 0.9,
+            "held_out_loss": null,
+            "samples": []
+          },
+          "chronology": {
+            "n": 10,
+            "json_parse_rate": 1.0,
+            "field_accuracy": {
+              "name": 1.0,
+              "age": 1.0,
+              "org": 1.0,
+              "role": 1.0,
+              "year": 1.0
+            },
+            "exact_match_rate": 1.0,
+            "held_out_loss": null,
+            "samples": []
+          },
+          "subject_selection": {
+            "n": 10,
+            "json_parse_rate": 1.0,
+            "field_accuracy": {
+              "name": 1.0,
+              "age": 1.0,
+              "org": 1.0,
+              "role": 1.0,
+              "year": 1.0
+            },
+            "exact_match_rate": 1.0,
+            "held_out_loss": null,
+            "samples": []
+          },
+          "diacritics": {
+            "n": 10,
+            "json_parse_rate": 1.0,
+            "field_accuracy": {
+              "name": 1.0,
+              "age": 1.0,
+              "org": 1.0,
+              "role": 1.0,
+              "year": 1.0
+            },
+            "exact_match_rate": 1.0,
+            "held_out_loss": null,
+            "samples": []
+          },
+          "record_formats": {
+            "n": 10,
+            "json_parse_rate": 1.0,
+            "field_accuracy": {
+              "name": 1.0,
+              "age": 1.0,
+              "org": 1.0,
+              "role": 1.0,
+              "year": 1.0
+            },
+            "exact_match_rate": 1.0,
+            "held_out_loss": null,
+            "samples": []
+          }
+        },
+        "exact_match_95pct_interval": [
+          0.8950455641036219,
+          0.9964607407283539
+        ]
+      },
+      "paired_fixed": 1,
+      "paired_regressed": 0,
+      "strict_gate_passed": true,
+      "tolerance": 0.02,
+      "evaluation": {
+        "dataset_sha256": "b0a38f4bd399cf92a4ba95f6a3309c0d94c742788f859332c7714fd61176d1b4",
+        "n": 50,
+        "prompt": "Extract:\n{sentence}\nJSON:\n",
+        "max_new_tokens": 128,
+        "seq_len": 160,
+        "decoding": "greedy",
+        "scoring_version": 2
+      },
+      "inference": {
+        "batch": 32,
+        "dtype": "bf16",
+        "fuse_adapter": false,
+        "length_bucketing": false
+      }
+    },
+    "original": {
+      "n": 200,
+      "baseline_report": "eval/v3b-baseline-original.json",
+      "candidate_report": "eval/v3b-candidate-original.json",
+      "baseline": {
+        "json_parse_rate": 1.0,
+        "exact_match_rate": 0.875,
+        "field_accuracy": {
+          "name": 0.985,
+          "age": 1.0,
+          "org": 0.945,
+          "role": 0.93,
+          "year": 0.995
+        },
+        "categories": {
+          "original": {
+            "n": 200,
+            "json_parse_rate": 1.0,
+            "field_accuracy": {
+              "name": 0.985,
+              "age": 1.0,
+              "org": 0.945,
+              "role": 0.93,
+              "year": 0.995
+            },
+            "exact_match_rate": 0.875,
+            "held_out_loss": null,
+            "samples": []
+          }
+        },
+        "exact_match_95pct_interval": [
+          0.8219857499741765,
+          0.9138802552428735
+        ]
+      },
+      "candidate": {
+        "json_parse_rate": 1.0,
+        "exact_match_rate": 0.895,
+        "field_accuracy": {
+          "name": 0.995,
+          "age": 1.0,
+          "org": 0.95,
+          "role": 0.94,
+          "year": 1.0
+        },
+        "categories": {
+          "original": {
+            "n": 200,
+            "json_parse_rate": 1.0,
+            "field_accuracy": {
+              "name": 0.995,
+              "age": 1.0,
+              "org": 0.95,
+              "role": 0.94,
+              "year": 1.0
+            },
+            "exact_match_rate": 0.895,
+            "held_out_loss": null,
+            "samples": []
+          }
+        },
+        "exact_match_95pct_interval": [
+          0.8448196800887696,
+          0.9302925120731899
+        ]
+      },
+      "paired_fixed": 9,
+      "paired_regressed": 5,
+      "strict_gate_passed": true,
+      "tolerance": 0.02,
+      "evaluation": {
+        "dataset_sha256": "f7a237567415299cc15fc50af17106148b27d3a077d762b4f3993431cf175c67",
+        "n": 200,
+        "prompt": "Extract:\n{sentence}\nJSON:\n",
+        "max_new_tokens": 128,
+        "seq_len": 160,
+        "decoding": "greedy",
+        "scoring_version": 2
+      },
+      "inference": {
+        "batch": 32,
+        "dtype": "bf16",
+        "fuse_adapter": false,
+        "length_bucketing": false
+      }
+    },
+    "challenge": {
+      "n": 800,
+      "baseline_report": "eval/v3b-baseline-challenge.json",
+      "candidate_report": "eval/v3b-candidate-challenge.json",
+      "baseline": {
+        "json_parse_rate": 1.0,
+        "exact_match_rate": 0.81,
+        "field_accuracy": {
+          "name": 0.9,
+          "age": 0.9825,
+          "org": 1.0,
+          "role": 1.0,
+          "year": 0.9175
+        },
+        "categories": {
+          "distractor_person": {
+            "n": 80,
+            "json_parse_rate": 1.0,
+            "field_accuracy": {
+              "name": 0.9875,
+              "age": 0.825,
+              "org": 1.0,
+              "role": 1.0,
+              "year": 1.0
+            },
+            "exact_match_rate": 0.8125,
+            "held_out_loss": null,
+            "samples": []
+          },
+          "parenthetical_dates": {
+            "n": 80,
+            "json_parse_rate": 1.0,
+            "field_accuracy": {
+              "name": 0.8125,
+              "age": 1.0,
+              "org": 1.0,
+              "role": 1.0,
+              "year": 0.975
+            },
+            "exact_match_rate": 0.7875,
+            "held_out_loss": null,
+            "samples": []
+          },
+          "correction": {
+            "n": 80,
+            "json_parse_rate": 1.0,
+            "field_accuracy": {
+              "name": 0.8625,
+              "age": 1.0,
+              "org": 1.0,
+              "role": 1.0,
+              "year": 1.0
+            },
+            "exact_match_rate": 0.8625,
+            "held_out_loss": null,
+            "samples": []
+          },
+          "nested_punctuation": {
+            "n": 80,
+            "json_parse_rate": 1.0,
+            "field_accuracy": {
+              "name": 0.7875,
+              "age": 1.0,
+              "org": 1.0,
+              "role": 1.0,
+              "year": 1.0
+            },
+            "exact_match_rate": 0.7875,
+            "held_out_loss": null,
+            "samples": []
+          },
+          "labelled_note": {
+            "n": 80,
+            "json_parse_rate": 1.0,
+            "field_accuracy": {
+              "name": 0.9,
+              "age": 1.0,
+              "org": 1.0,
+              "role": 1.0,
+              "year": 1.0
+            },
+            "exact_match_rate": 0.9,
+            "held_out_loss": null,
+            "samples": []
+          },
+          "irrelevant_numbers": {
+            "n": 80,
+            "json_parse_rate": 1.0,
+            "field_accuracy": {
+              "name": 0.8875,
+              "age": 1.0,
+              "org": 1.0,
+              "role": 1.0,
+              "year": 0.2
+            },
+            "exact_match_rate": 0.1875,
+            "held_out_loss": null,
+            "samples": []
+          },
+          "quoted_title": {
+            "n": 80,
+            "json_parse_rate": 1.0,
+            "field_accuracy": {
+              "name": 0.85,
+              "age": 1.0,
+              "org": 1.0,
+              "role": 1.0,
+              "year": 1.0
+            },
+            "exact_match_rate": 0.85,
+            "held_out_loss": null,
+            "samples": []
+          },
+          "unrelated_age": {
+            "n": 80,
+            "json_parse_rate": 1.0,
+            "field_accuracy": {
+              "name": 0.9375,
+              "age": 1.0,
+              "org": 1.0,
+              "role": 1.0,
+              "year": 1.0
+            },
+            "exact_match_rate": 0.9375,
+            "held_out_loss": null,
+            "samples": []
+          },
+          "reverse_note": {
+            "n": 80,
+            "json_parse_rate": 1.0,
+            "field_accuracy": {
+              "name": 0.975,
+              "age": 1.0,
+              "org": 1.0,
+              "role": 1.0,
+              "year": 1.0
+            },
+            "exact_match_rate": 0.975,
+            "held_out_loss": null,
+            "samples": []
+          },
+          "tabular_note": {
+            "n": 80,
+            "json_parse_rate": 1.0,
+            "field_accuracy": {
+              "name": 1.0,
+              "age": 1.0,
+              "org": 1.0,
+              "role": 1.0,
+              "year": 1.0
+            },
+            "exact_match_rate": 1.0,
+            "held_out_loss": null,
+            "samples": []
+          }
+        },
+        "exact_match_95pct_interval": [
+          0.7813585824895336,
+          0.8356785142629474
+        ]
+      },
+      "candidate": {
+        "json_parse_rate": 1.0,
+        "exact_match_rate": 0.81875,
+        "field_accuracy": {
+          "name": 0.96125,
+          "age": 1.0,
+          "org": 0.99875,
+          "role": 1.0,
+          "year": 0.855
+        },
+        "categories": {
+          "quoted_title": {
+            "n": 80,
+            "json_parse_rate": 1.0,
+            "field_accuracy": {
+              "name": 0.9125,
+              "age": 1.0,
+              "org": 0.9875,
+              "role": 1.0,
+              "year": 1.0
+            },
+            "exact_match_rate": 0.9,
+            "held_out_loss": null,
+            "samples": []
+          },
+          "parenthetical_dates": {
+            "n": 80,
+            "json_parse_rate": 1.0,
+            "field_accuracy": {
+              "name": 1.0,
+              "age": 1.0,
+              "org": 1.0,
+              "role": 1.0,
+              "year": 0.4375
+            },
+            "exact_match_rate": 0.4375,
+            "held_out_loss": null,
+            "samples": []
+          },
+          "irrelevant_numbers": {
+            "n": 80,
+            "json_parse_rate": 1.0,
+            "field_accuracy": {
+              "name": 0.9375,
+              "age": 1.0,
+              "org": 1.0,
+              "role": 1.0,
+              "year": 0.1125
+            },
+            "exact_match_rate": 0.0875,
+            "held_out_loss": null,
+            "samples": []
+          },
+          "correction": {
+            "n": 80,
+            "json_parse_rate": 1.0,
+            "field_accuracy": {
+              "name": 0.925,
+              "age": 1.0,
+              "org": 1.0,
+              "role": 1.0,
+              "year": 1.0
+            },
+            "exact_match_rate": 0.925,
+            "held_out_loss": null,
+            "samples": []
+          },
+          "nested_punctuation": {
+            "n": 80,
+            "json_parse_rate": 1.0,
+            "field_accuracy": {
+              "name": 0.95,
+              "age": 1.0,
+              "org": 1.0,
+              "role": 1.0,
+              "year": 1.0
+            },
+            "exact_match_rate": 0.95,
+            "held_out_loss": null,
+            "samples": []
+          },
+          "labelled_note": {
+            "n": 80,
+            "json_parse_rate": 1.0,
+            "field_accuracy": {
+              "name": 0.925,
+              "age": 1.0,
+              "org": 1.0,
+              "role": 1.0,
+              "year": 1.0
+            },
+            "exact_match_rate": 0.925,
+            "held_out_loss": null,
+            "samples": []
+          },
+          "distractor_person": {
+            "n": 80,
+            "json_parse_rate": 1.0,
+            "field_accuracy": {
+              "name": 0.9875,
+              "age": 1.0,
+              "org": 1.0,
+              "role": 1.0,
+              "year": 1.0
+            },
+            "exact_match_rate": 0.9875,
+            "held_out_loss": null,
+            "samples": []
+          },
+          "reverse_note": {
+            "n": 80,
+            "json_parse_rate": 1.0,
+            "field_accuracy": {
+              "name": 0.9875,
+              "age": 1.0,
+              "org": 1.0,
+              "role": 1.0,
+              "year": 1.0
+            },
+            "exact_match_rate": 0.9875,
+            "held_out_loss": null,
+            "samples": []
+          },
+          "unrelated_age": {
+            "n": 80,
+            "json_parse_rate": 1.0,
+            "field_accuracy": {
+              "name": 0.9875,
+              "age": 1.0,
+              "org": 1.0,
+              "role": 1.0,
+              "year": 1.0
+            },
+            "exact_match_rate": 0.9875,
+            "held_out_loss": null,
+            "samples": []
+          },
+          "tabular_note": {
+            "n": 80,
+            "json_parse_rate": 1.0,
+            "field_accuracy": {
+              "name": 1.0,
+              "age": 1.0,
+              "org": 1.0,
+              "role": 1.0,
+              "year": 1.0
+            },
+            "exact_match_rate": 1.0,
+            "held_out_loss": null,
+            "samples": []
+          }
+        },
+        "exact_match_95pct_interval": [
+          0.7905528114197324,
+          0.843900654999149
+        ]
+      },
+      "paired_fixed": 68,
+      "paired_regressed": 61,
+      "strict_gate_passed": false,
+      "tolerance": 0.02,
+      "evaluation": {
+        "dataset_sha256": "59da97881483ece2de04854f79634b35d7dce9b662e67cd74888e5852a544b3d",
+        "n": 800,
+        "prompt": "Extract:\n{sentence}\nJSON:\n",
+        "max_new_tokens": 128,
+        "seq_len": 160,
+        "decoding": "greedy",
+        "scoring_version": 2
+      },
+      "inference": {
+        "batch": 32,
+        "dtype": "bf16",
+        "fuse_adapter": false,
+        "length_bucketing": false
+      }
+    }
+  },
+  "all_strict_gates_passed": false,
+  "selection": {
+    "default_checkpoint": "ckpt/laptop-lora-v2",
+    "candidate_status": "rejected_for_default_use",
+    "reason": "Challenge year accuracy fell from 0.9175 to 0.855, exceeding the absolute 0.02 tolerance."
+  },
+  "demo": {
+    "model": "ckpt/laptop-lora-v2",
+    "input": "experiments/demo-input.txt",
+    "output": "experiments/demo-output.json",
+    "live_cli_smoke_passed": true
+  },
+  "validation": {
+    "pytest_passed": 160,
+    "ruff": "passed",
+    "git_diff_check": "passed"
+  },
+  "limitations": [
+    "Before/after changes both data and optimization duration; not a causal data-only ablation.",
+    "One training seed. The candidate draws 2400 of 5168 training examples, not a full epoch.",
+    "Independent 50-example benchmark is agent-authored after knowledge of prior failure types, not blind human evaluation.",
+    "All benchmarks are fictional and all five fields are supplied; deployment accuracy and missing-fact behavior remain unvalidated.",
+    "Grounding checks source presence, not semantic correctness or calibrated confidence.",
+    "Adapter fusion and length bucketing remain optional and disabled by default; a small profile showed output changes.",
+    "Evaluation runtime includes loss/scoring/serialization and is not generation-only latency.",
+    "Local RTX 4060 Laptop GPU only; no paid API or remote GPU calls during these experiments."
+  ]
+}

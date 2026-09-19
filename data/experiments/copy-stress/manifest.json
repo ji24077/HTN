@@ -1,0 +1,65 @@
+{
+  "seed": 20260919,
+  "generator": "deterministic fictional biography templates v1",
+  "limitations": "Controlled copy/extraction stress test, not natural-language generalization evidence. All people/appointments are synthetic. Never train on heldout or challenge.",
+  "evaluation": "Retain original data/heldout.jsonl; also evaluate new heldout and challenge separately. Challenge uses unseen template families. Synthetic splits have disjoint names and organizations.",
+  "base_sha256": {
+    "train.jsonl": "42f582b3e8f3a70f25a8ac50136881cedfc5d23e0b9f9998ca5232add88d4782",
+    "heldout.jsonl": "4b978b0aaa4d3e149d1030b491f6db1ed13c0c70880e033f1094360d8090f760"
+  },
+  "files": {
+    "train.jsonl": {
+      "rows": 2000,
+      "sha256": "8beb22a9aacc08259db3c230236a8531e74561b63716391087f699380f9c26cf",
+      "categories": {
+        "plain": 250,
+        "role_first": 250,
+        "appositive": 250,
+        "org_first": 250,
+        "two_sentences": 250,
+        "date_distractor": 250,
+        "number_distractor": 250,
+        "year_first": 250
+      }
+    },
+    "heldout.jsonl": {
+      "rows": 200,
+      "sha256": "8e3e5a2e80c058557678677b3621f7bd71fa1d0ed85df22b956b260dc216e3e7",
+      "categories": {
+        "two_sentences": 25,
+        "date_distractor": 25,
+        "role_first": 25,
+        "year_first": 25,
+        "number_distractor": 25,
+        "org_first": 25,
+        "appositive": 25,
+        "plain": 25
+      }
+    },
+    "challenge.jsonl": {
+      "rows": 200,
+      "sha256": "153d9cdab1ffe9b325e9b98caeb5841ddba07887363234904b97a2d80f44b2a7",
+      "categories": {
+        "labelled_note": 50,
+        "irrelevant_numbers": 50,
+        "parenthetical_dates": 50,
+        "quoted_title": 50
+      }
+    },
+    "train_mixed.jsonl": {
+      "rows": 3768,
+      "sha256": "38c6720289133c8bf0fe00df8ddf8dea05d4edb7de8dccba1264ae8c65a38589",
+      "categories": {
+        "original": 1768,
+        "role_first": 250,
+        "date_distractor": 250,
+        "appositive": 250,
+        "org_first": 250,
+        "year_first": 250,
+        "plain": 250,
+        "two_sentences": 250,
+        "number_distractor": 250
+      }
+    }
+  }
+}
