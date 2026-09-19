@@ -15,6 +15,48 @@ docker run -d --name dwp-agent --restart unless-stopped \
 That is the whole thing. The container joins, connects, and starts accepting work. The
 window is at `http://127.0.0.1:43117/` — open it and the agent tells you the rest.
 
+## Putting it on your other machines
+
+Three things have to line up, and `node scripts/add-machine.ts` checks all three and
+prints the command to paste:
+
+```
+  Control service  https://your-machine.tailnet.ts.net
+  Reachable from   anywhere on the internet
+  Image            ghcr.io/<owner>/dwp-agent:latest
+
+  Machine 1 of 1. Paste this on that computer:
+
+      docker run -d --name dwp-agent --restart unless-stopped -v dwp-agent-data:/data …
+```
+
+**The address has to be one that other machine can reach.** This is the mistake that
+costs the most time, because a `127.0.0.1` URL is perfectly valid — for a completely
+different computer. `add-machine` refuses to hand one out, and says which of the two
+fixes you want:
+
+```sh
+LISTEN_HOST=0.0.0.0 ./scripts/start-fleet.sh --replace   # machines on this network
+node scripts/share.ts --port 8080                        # machines anywhere
+```
+
+`share.ts` puts the control service on a permanent public HTTPS name with Tailscale
+Funnel. Only the machine running the control service needs Tailscale; the machines
+joining need nothing but Docker and working wifi, because they dial out over ordinary
+WSS.
+
+**A proxy in front means the server must be told.** Funnel terminates TLS and forwards
+plain HTTP to loopback, so without `TRUSTED_PROXY_IPS` the server believes it is serving
+`http://` and hands every joining agent a `ws://host/agent/connect` URL — port 80, where
+nothing is listening. Pairing succeeds and the connection that follows is refused
+forever, which reads as a broken agent rather than a mis-derived URL. `start-fleet.sh`
+now sets `TRUSTED_PROXY_IPS=127.0.0.1`, which is safe: a machine on the LAN connects from
+its own address and cannot spoof those headers, and anything already on this host can
+read the admin token anyway.
+
+**The invite expires.** Ten minutes, one use, ten per hour per owner. Mint several at
+once with `--count 4`.
+
 ## How another machine gets the image
 
 Someone joining does not have this repository and should not need it. They need two
@@ -51,6 +93,18 @@ PowerShell, which is exactly where a Windows contributor will paste it.
 
 Set `DWP_AGENT_IMAGE` on the control service if you publish somewhere other than the
 default, so that page names your image rather than the default one.
+
+**With no registry at all**, for a machine you can copy a file to:
+
+```sh
+docker save dwp-agent:latest | gzip -1 > dwp-agent.tgz     # ~89 MB
+# copy it across by whatever means, then on that machine:
+gunzip -c dwp-agent.tgz | docker load
+```
+
+Then run the command `add-machine` printed, with `dwp-agent:latest` as the image. This
+works offline and needs no accounts, and it is per-machine and per-update — which is
+exactly the cost a registry removes.
 
 **For someone who prefers a compose file**, `deploy/compose.agent.remote.yaml` pulls the
 published image and needs nothing else from this repository:

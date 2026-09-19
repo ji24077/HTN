@@ -160,7 +160,7 @@ def agent_image() -> str:
     somebody else's would send every new machine to an image its operator does not
     control.
     """
-    return os.environ.get("DWP_AGENT_IMAGE", "ghcr.io/ji24077/dwp-agent:latest")
+    return os.environ.get("DWP_AGENT_IMAGE", "").strip() or "ghcr.io/ji24077/dwp-agent:latest"
 
 
 @router.get("/join", response_class=HTMLResponse)

@@ -225,6 +225,9 @@ def create_worker_app() -> FastAPI:
 
 def run(factory: str, host: str, port: int) -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    # Forwarded headers are ignored unless a proxy is named, and then only from that
+    # proxy's address. See trusted_proxies() for why this is not merely a nicety.
+    proxies = trusted_proxies()
     uvicorn.run(
         f"orchestrator.server.app:{factory}",
         factory=True,
@@ -233,8 +236,26 @@ def run(factory: str, host: str, port: int) -> None:
         ws="websockets",
         ws_max_size=MESSAGE_LIMIT,
         timeout_graceful_shutdown=10,
-        proxy_headers=False,
+        proxy_headers=bool(proxies),
+        **({"forwarded_allow_ips": proxies} if proxies else {}),
     )
+
+
+def trusted_proxies() -> str:
+    """Which peers may set X-Forwarded-Proto and X-Forwarded-For, if any.
+
+    Empty by default: a server that believes those headers from anyone lets any client
+    dictate the scheme and address it reports, and this one is reachable directly.
+
+    It must be settable, though, because a TLS-terminating proxy is how every machine
+    outside this network actually joins. Tailscale Funnel accepts HTTPS on 443 and
+    forwards plain HTTP to loopback, so without this the app sees `http` and hands every
+    joining agent a `ws://host/agent/connect` URL -- port 80, where nothing is listening.
+    Pairing succeeds over HTTPS and the connection that follows is refused forever, which
+    reads as a broken agent rather than a mis-derived URL. The /join page has the same
+    bug for the same reason: it offers an http:// origin no funnel will answer on.
+    """
+    return os.getenv("TRUSTED_PROXY_IPS", "").strip()
 
 
 def main() -> None:

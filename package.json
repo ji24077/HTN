@@ -13,6 +13,7 @@
     "docker:build": "docker build -f deploy/Dockerfile.agent -t dwp-agent:latest .",
     "docker:test": "node scripts/docker-fleet-test.ts",
     "docker:publish": "node scripts/publish-image.ts",
+    "add-machine": "node scripts/add-machine.ts",
     "build:binaries": "node scripts/build-binaries.ts",
     "build:fixtures": "node scripts/build-fixtures.ts",
     "release": "node scripts/publish-release.ts",
