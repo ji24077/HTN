@@ -713,7 +713,15 @@
       box.textContent = text ? '프리필 계산 중… (cold 경로)' : '해제 중…';
       try {
         const r = await api('/api/prefix', {method:'POST', body: JSON.stringify({prefix: text})});
-        if (!text || r.cleared) { box.textContent = '캐시 해제됨 — 모든 요청이 cold'; return; }
+        if (!text || r.cleared) {
+          // The server prefix is gone, so the chat prompt must go back to a
+          // plain sentence too — otherwise sendMessage() keeps wrapping it in
+          // VERDICT_INSTRUCTION+TURN_END for a policy that is no longer there,
+          // and the server folds that whole wrapped string into its unrelated
+          // fallback template instead of a real answer.
+          policyLoaded = false; paintChatState();
+          box.textContent = '캐시 해제됨 — 모든 요청이 cold'; return;
+        }
         box.textContent = r.prefix_tokens.toLocaleString() + ' 토큰 캐시됨 · cold prefill ' + r.build_s.toFixed(2) + 's';
       } catch (err) { box.textContent = String(err.message || err); }
     }

@@ -29,7 +29,7 @@ import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from threading import Thread
+from threading import Lock, Thread
 
 import torch
 
@@ -37,6 +37,14 @@ from gpushare.agent.task import MODEL_ID, PROMPT, parse_output
 
 DTYPES = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}
 STATE: dict = {}
+# ThreadingHTTPServer runs each request on its own thread so /health never
+# blocks behind a stream (see main()). Nothing else made GPU access or
+# STATE["prefix"] exclusive, so two overlapping requests — a /prefix reload
+# racing a /generate/stream, or two "hit" generations sharing the same
+# pc.cache — could crop() and read the same KV tensor at once and corrupt
+# each other's output. One lock around every model/STATE touch serializes
+# requests instead.
+_MODEL_LOCK = Lock()
 
 # Nothing is appended after the dynamic text. It used to be "\nJSON:\n", which
 # silently forced one output shape: the same cached policy has to serve both a
@@ -163,52 +171,55 @@ def encode_for(sentence: str, *, no_cache: bool = False):
 
 @torch.no_grad()
 def generate(sentence: str, *, max_new: int, greedy: bool, no_cache: bool = False) -> dict:
-    model, tok = STATE["model"], STATE["tok"]
-    ids, pc, info = encode_for(sentence, no_cache=no_cache)
-    prompt = tok.decode(ids[0], skip_special_tokens=False)
-    enc = {"input_ids": ids}
+    # Serialized: an overlapping /prefix reload or a second generate() sharing
+    # this same pc.cache would crop() and read it concurrently. See _MODEL_LOCK.
+    with _MODEL_LOCK:
+        model, tok = STATE["model"], STATE["tok"]
+        ids, pc, info = encode_for(sentence, no_cache=no_cache)
+        prompt = tok.decode(ids[0], skip_special_tokens=False)
+        enc = {"input_ids": ids}
 
-    torch.cuda.synchronize()
-    t0 = time.perf_counter()
-    kw = {"past_key_values": pc.cache} if pc else {}
-    out = model.generate(
-        **enc,
-        **kw,
-        max_new_tokens=max_new,
-        do_sample=not greedy,
-        temperature=0.7 if not greedy else None,
-        pad_token_id=tok.pad_token_id,
-    )
-    torch.cuda.synchronize()
-    dt = time.perf_counter() - t0
-    if pc:
-        pc.reset()
+        torch.cuda.synchronize()
+        t0 = time.perf_counter()
+        kw = {"past_key_values": pc.cache} if pc else {}
+        out = model.generate(
+            **enc,
+            **kw,
+            max_new_tokens=max_new,
+            do_sample=not greedy,
+            temperature=0.7 if not greedy else None,
+            pad_token_id=tok.pad_token_id,
+        )
+        torch.cuda.synchronize()
+        dt = time.perf_counter() - t0
+        if pc:
+            pc.reset()
 
-    gen = out[0, enc["input_ids"].shape[1] :]
-    raw = tok.decode(gen, skip_special_tokens=True)
-    parsed = parse_output(raw)
-    n_new = int(gen.shape[0])
-    return {
-        "prompt": prompt,
-        # Reported because prefill cost is driven by this number, not by the
-        # character count a caller can see. Without it, a long-context latency
-        # reading cannot be checked against the chip's FLOP ceiling — and an
-        # impossible reading (more TFLOPS than the GPU has) is the signal that
-        # the input was silently truncated rather than that serving got fast.
-        "prompt_tokens": int(enc["input_ids"].shape[1]),
-        "raw_output": raw,
-        "parsed": parsed.model_dump() if parsed else None,
-        "parsed_ok": parsed is not None,
-        "new_tokens": n_new,
-        "latency_s": dt,
-        # Interactive latency at batch 1. NOT the throughput number — see the
-        # module docstring.
-        "tokens_per_s": n_new / dt if dt else 0.0,
-        "model": STATE["model_ref"],
-        "dtype": STATE["dtype"],
-        "greedy": greedy,
-        **info,
-    }
+        gen = out[0, enc["input_ids"].shape[1] :]
+        raw = tok.decode(gen, skip_special_tokens=True)
+        parsed = parse_output(raw)
+        n_new = int(gen.shape[0])
+        return {
+            "prompt": prompt,
+            # Reported because prefill cost is driven by this number, not by the
+            # character count a caller can see. Without it, a long-context latency
+            # reading cannot be checked against the chip's FLOP ceiling — and an
+            # impossible reading (more TFLOPS than the GPU has) is the signal that
+            # the input was silently truncated rather than that serving got fast.
+            "prompt_tokens": int(enc["input_ids"].shape[1]),
+            "raw_output": raw,
+            "parsed": parsed.model_dump() if parsed else None,
+            "parsed_ok": parsed is not None,
+            "new_tokens": n_new,
+            "latency_s": dt,
+            # Interactive latency at batch 1. NOT the throughput number — see the
+            # module docstring.
+            "tokens_per_s": n_new / dt if dt else 0.0,
+            "model": STATE["model_ref"],
+            "dtype": STATE["dtype"],
+            "greedy": greedy,
+            **info,
+        }
 
 
 class TokenStreamer:
@@ -278,62 +289,69 @@ def generate_stream(sentence: str, *, max_new: int, greedy: bool, no_cache: bool
 
     Greedy still, so the streamed text is byte-identical to what the blocking
     endpoint returns — streaming is presentation, never a different answer.
+
+    Holds _MODEL_LOCK for the whole generation, not just the GPU call: a
+    /prefix reload landing mid-stream would crop() the same pc.cache this
+    generation is still reading from, and a second concurrent stream would
+    share it too. `with` releases the lock on early client disconnect
+    (GeneratorExit) as well as on normal completion.
     """
-    model, tok = STATE["model"], STATE["tok"]
-    ids, pc, info = encode_for(sentence, no_cache=no_cache)
+    with _MODEL_LOCK:
+        model, tok = STATE["model"], STATE["tok"]
+        ids, pc, info = encode_for(sentence, no_cache=no_cache)
 
-    streamer = TokenStreamer(tok)
-    kwargs = dict(
-        input_ids=ids,
-        max_new_tokens=max_new,
-        do_sample=not greedy,
-        pad_token_id=tok.pad_token_id,
-        streamer=streamer,
-    )
-    if pc:
-        kwargs["past_key_values"] = pc.cache
-    if not greedy:
-        kwargs["temperature"] = 0.7
+        streamer = TokenStreamer(tok)
+        kwargs = dict(
+            input_ids=ids,
+            max_new_tokens=max_new,
+            do_sample=not greedy,
+            pad_token_id=tok.pad_token_id,
+            streamer=streamer,
+        )
+        if pc:
+            kwargs["past_key_values"] = pc.cache
+        if not greedy:
+            kwargs["temperature"] = 0.7
 
-    torch.cuda.synchronize()
-    t0 = time.perf_counter()
-    # generate() blocks, so it runs on its own thread and the streamer is the
-    # channel. Without this there is nothing to iterate until it has finished,
-    # which is exactly the behaviour we are removing.
-    thread = Thread(target=model.generate, kwargs=kwargs, daemon=True)
-    thread.start()
+        torch.cuda.synchronize()
+        t0 = time.perf_counter()
+        # generate() blocks, so it runs on its own thread and the streamer is the
+        # channel. Without this there is nothing to iterate until it has finished,
+        # which is exactly the behaviour we are removing.
+        thread = Thread(target=model.generate, kwargs=kwargs, daemon=True)
+        thread.start()
 
-    ttft = None
-    pieces = []
-    for text in streamer:
-        if not text:
-            continue
-        if ttft is None:
-            ttft = time.perf_counter() - t0
-        pieces.append(text)
-        yield {"token": text}
+        ttft = None
+        pieces = []
+        for text in streamer:
+            if not text:
+                continue
+            if ttft is None:
+                ttft = time.perf_counter() - t0
+            pieces.append(text)
+            yield {"token": text}
 
-    thread.join()
-    if pc:
-        pc.reset()
-    raw = "".join(pieces)
-    dt = time.perf_counter() - t0
-    parsed = parse_output(raw)
-    yield {
-        "done": True,
-        "raw_output": raw,
-        "new_tokens": len(streamer.ids_seen()),
-        "parsed": parsed.model_dump() if parsed else None,
-        "parsed_ok": parsed is not None,
-        # ttft is prefill plus one decode step, not prefill alone. Naming it
-        # "prefill" would overstate how much prefix caching removes.
-        "ttft_s": ttft,
-        "latency_s": dt,
-        "decode_s": (dt - ttft) if ttft is not None else None,
-        "model": STATE["model_ref"],
-        "dtype": STATE["dtype"],
-        **info,
-    }
+        thread.join()
+        if pc:
+            pc.reset()
+        raw = "".join(pieces)
+        dt = time.perf_counter() - t0
+        parsed = parse_output(raw)
+        yield {
+            "done": True,
+            "raw_output": raw,
+            "new_tokens": len(streamer.ids_seen()),
+            "parsed": parsed.model_dump() if parsed else None,
+            "parsed_ok": parsed is not None,
+            # ttft is prefill plus one decode step, not prefill alone. Naming it
+            # "prefill" would overstate how much prefix caching removes.
+            "ttft_s": ttft,
+            "latency_s": dt,
+            "decode_s": (dt - ttft) if ttft is not None else None,
+            "model": STATE["model_ref"],
+            "dtype": STATE["dtype"],
+            **info,
+        }
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -392,21 +410,25 @@ class Handler(BaseHTTPRequestHandler):
 
     def _prefix(self, req: dict) -> None:
         text = req.get("prefix")
-        # Drop the old cache BEFORE building the new one. Holding both is two
-        # multi-GB KV tensors plus the new prefill's activations, which OOMs on
-        # a 24 GB card — reloading the policy, the most ordinary thing to do
-        # twice, was killing the server.
-        STATE.pop("prefix", None)
-        torch.cuda.empty_cache()
-        if not text:
-            self._send(200, {"prefix_tokens": 0, "cleared": True})
-            return
-        pc = PrefixCache(STATE["model"], STATE["tok"], str(text))
-        STATE["prefix"] = pc
-        # build_s IS the cold-path prefill for this prefix — the number the
-        # cache removes. Reported so the speedup can be stated from a measured
-        # baseline instead of a remembered one.
-        self._send(200, {"prefix_tokens": pc.n, "build_s": pc.build_s, "cleared": False})
+        # Locked so this never races a /generate or /generate/stream that is
+        # still reading STATE["prefix"] — dropping/rebuilding it mid-request
+        # is what produced degenerate output when a reload landed mid-stream.
+        with _MODEL_LOCK:
+            # Drop the old cache BEFORE building the new one. Holding both is two
+            # multi-GB KV tensors plus the new prefill's activations, which OOMs on
+            # a 24 GB card — reloading the policy, the most ordinary thing to do
+            # twice, was killing the server.
+            STATE.pop("prefix", None)
+            torch.cuda.empty_cache()
+            if not text:
+                self._send(200, {"prefix_tokens": 0, "cleared": True})
+                return
+            pc = PrefixCache(STATE["model"], STATE["tok"], str(text))
+            STATE["prefix"] = pc
+            # build_s IS the cold-path prefill for this prefix — the number the
+            # cache removes. Reported so the speedup can be stated from a measured
+            # baseline instead of a remembered one.
+            self._send(200, {"prefix_tokens": pc.n, "build_s": pc.build_s, "cleared": False})
 
     def do_POST(self):  # noqa: N802
         if self.path not in ("/generate", "/generate/stream", "/prefix"):
