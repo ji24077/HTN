@@ -52,6 +52,19 @@ Binaries cover `echo` and `walker_evolution`. Machines doing machine-learning or
 work use the Node install below, because those runtimes cannot live inside a single file
 (see `docs/06-distribution-plan.md`).
 
+## Run at login
+
+So nobody has to keep a terminal window open:
+
+```bash
+dwp-agent install-service     # macOS, Linux and Windows
+dwp-agent service-status
+dwp-agent uninstall-service
+```
+
+Per-user — a LaunchAgent, a systemd user unit, or a Scheduled Task at logon. No sudo, no
+root daemon. `pause` still works without uninstalling.
+
 ## Optional workloads
 
 Joining costs about 11 MB. Two workloads run with no extra install at all:

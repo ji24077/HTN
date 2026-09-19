@@ -7,8 +7,9 @@ import {
 import type { KeyObject } from 'node:crypto'
 import { createLogger } from '@dwp/protocol'
 import { diagnoseOrigin } from '@dwp/protocol'
-import { fallbackLookup, dnsFallbackEnabled, installDnsFallback } from './resolver.ts'
+import { fallbackLookup, dnsFallbackEnabled, installDnsFallback, directDial } from './resolver.ts'
 import { applyUpdate, restartIntoNewVersion } from './update.ts'
+import { isCompiledBinary } from './paths.ts'
 import { probe } from './capability.ts'
 import { isPaused, type AgentConfig } from './config.ts'
 import { runEcho } from './adapters/echo.ts'
@@ -70,10 +71,28 @@ export function connect(cfg: AgentConfig, privateKey: KeyObject): void {
   const open = (): void => {
     if (stopped) return
     attempt += 1
-    const dialStartedAt = Date.now()
     hostLog.info('connect.attempt', { attempt, url: cfg.wsUrl })
-    const ws = new WebSocket(cfg.wsUrl, {
-      headers: { authorization: `Bearer ${mintAssertion(cfg.hostId, privateKey)}` },
+    // Resolve before dialling when this machine's own resolver cannot. The `lookup` hook
+    // below covers Node, but a compiled binary uses its own WebSocket and ignores it —
+    // so without this a machine with broken DNS could pair and then never connect.
+    void directDial(cfg.wsUrl).catch(() => null).then(openWith)
+  }
+
+  const openWith = (direct: Awaited<ReturnType<typeof directDial>>): void => {
+    if (stopped) return
+    const dialStartedAt = Date.now()
+    if (direct) {
+      hostLog.info('connect.direct_address', {
+        address: direct.url,
+        reason: 'this machine cannot resolve the hostname; used a public resolver',
+      })
+    }
+    const ws = new WebSocket(direct?.url ?? cfg.wsUrl, {
+      ...(direct ? { servername: direct.options.servername } : {}),
+      headers: {
+        ...(direct?.options.headers ?? {}),
+        authorization: `Bearer ${mintAssertion(cfg.hostId, privateKey)}`,
+      },
       // Without this a dial into a black hole never returns: the upgrade request is
       // swallowed, no response ever comes, and the socket sits in CONNECTING forever —
       // a laptop that wakes from sleep and then simply does nothing, with no error to
@@ -140,31 +159,57 @@ export function connect(cfg: AgentConfig, privateKey: KeyObject): void {
      * costs nothing.
      */
     const maybeUpdate = (offered: string | null): void => {
-      if (!offered || cfg.autoUpdate === false) return
+      if (cfg.autoUpdate === false) return
+
+      /**
+       * A compiled binary ignores what the handshake announces.
+       *
+       * `hello.ack` carries the *source* release version, so a binary agent saw a
+       * mismatch on every handshake and every poll — firing a needless fetch of the
+       * binaries index and logging a line that read like an available update when there
+       * was none. It was harmless, because applyUpdate routes to the binary path and
+       * compares against the right index, but a permanent false positive is exactly the
+       * sort of noise that hides a real one later.
+       */
+      if (isCompiledBinary()) {
+        if (updating || running.size > 0) return
+        updating = true
+        void applyUpdate(cfg, privateKey).then(onUpdateResult).catch((err: unknown) => {
+          hostLog.warn('update.failed', { err })
+          updating = false
+        })
+        return
+      }
+
+      if (!offered) return
       if (offered === cfg.installedRelease) return
       if (running.size > 0) return
       if (updating) return
       updating = true
 
       hostLog.info('update.available', { have: cfg.installedRelease ?? null, offered })
-      void applyUpdate(cfg, privateKey)
-        .then(result => {
-          if (result.status === 'updated') {
-            console.log(`\n  Updated to ${result.to}. Restarting.\n`)
-            stopped = true
-            try { ws.close(1000, 'updating') } catch {}
-            setTimeout(restartIntoNewVersion, 500)
-            return
-          }
-          if (result.status === 'refused') {
-            hostLog.error('update.refused', { reason: result.reason })
-            console.error(`\n  Refused an update: ${result.reason}\n`)
-          } else if (result.status === 'unavailable') {
-            hostLog.warn('update.unavailable', { reason: result.reason })
-          }
-          updating = false
-        })
-        .catch((err: unknown) => { hostLog.warn('update.failed', { err }); updating = false })
+      void applyUpdate(cfg, privateKey).then(onUpdateResult).catch((err: unknown) => {
+        hostLog.warn('update.failed', { err })
+        updating = false
+      })
+    }
+
+    const onUpdateResult = (result: Awaited<ReturnType<typeof applyUpdate>>): void => {
+      if (result.status === 'updated') {
+        console.log(`\n  Updated to ${result.to}. Restarting.\n`)
+        stopped = true
+        try { ws.close(1000, 'updating') } catch {}
+        setTimeout(restartIntoNewVersion, 500)
+        return
+      }
+      if (result.status === 'refused') {
+        hostLog.error('update.refused', { reason: result.reason })
+        console.error(`\n  Refused an update: ${result.reason}\n`)
+      } else if (result.status === 'unavailable') {
+        hostLog.warn('update.unavailable', { reason: result.reason })
+      }
+      // 'current' is the ordinary outcome for a binary: nothing to say about it.
+      updating = false
     }
 
     const startHeartbeat = (): void => {

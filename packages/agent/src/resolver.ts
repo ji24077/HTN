@@ -55,6 +55,46 @@ export const fallbackLookup: LookupFunction = ((hostname, options, callback) => 
   })
 }) as LookupFunction
 
+/**
+ * Dial options that bypass a broken resolver, for transports that ignore `lookup`.
+ *
+ * The lookup hook works for Node's `ws` and for fetch, but a Bun-compiled binary uses its
+ * own WebSocket implementation and ignores it — so a machine whose resolver cannot see a
+ * freshly created hostname could pair (fetch honoured the fallback) and then never
+ * connect. Resolving here and dialling the address directly closes that gap, with the
+ * certificate still checked against the real hostname via SNI.
+ */
+export async function directDial(wsUrl: string): Promise<null | {
+  url: string
+  options: { servername: string; headers: Record<string, string> }
+}> {
+  if (!dnsFallbackEnabled()) return null
+  const url = new URL(wsUrl)
+
+  // Only step in when the system resolver genuinely cannot answer.
+  try {
+    await new Promise<void>((resolve, reject) =>
+      systemLookup(url.hostname, err => (err ? reject(err) : resolve())))
+    return null
+  } catch {}
+
+  let addresses: string[]
+  try {
+    addresses = await resolveViaPublic(url.hostname)
+  } catch {
+    return null
+  }
+  if (addresses.length === 0) return null
+
+  const port = url.port || (url.protocol === 'wss:' ? '443' : '80')
+  return {
+    url: `${url.protocol}//${addresses[0]}:${port}${url.pathname}${url.search}`,
+    // SNI and Host stay the real name, so TLS verification is unchanged — only the
+    // address we connect to is supplied by a different resolver.
+    options: { servername: url.hostname, headers: { host: url.hostname } },
+  }
+}
+
 export const dnsFallbackEnabled = (): boolean =>
   process.env.DWP_DNS_FALLBACK === '1' || process.env.DWP_DNS_FALLBACK === 'true'
 

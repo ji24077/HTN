@@ -226,6 +226,57 @@ One thing worth doing properly along the way: the version is now baked in at bui
 with `--define` rather than kept in a hand-edited constant. That constant had already
 drifted — it said 0.2.0 while the package said 0.3.0.
 
+## Phase 4 — Run at login ✅, GUI deferred
+
+*Half done, and the half that was skipped was skipped deliberately.*
+
+### Done: runs at login, all three platforms
+
+```bash
+dwp-agent install-service     # starts automatically from now on
+dwp-agent service-status
+dwp-agent uninstall-service
+```
+
+- **macOS** — a LaunchAgent in `~/Library/LaunchAgents`
+- **Linux** — a systemd *user* unit, with lingering so it survives logout
+- **Windows** — a Scheduled Task at logon
+
+Per-user throughout: no sudo, no root daemon, nothing system-wide. An agent that runs as
+the person who installed it can be stopped by that person and cannot reach anything they
+could not reach themselves.
+
+Verified on macOS end to end: installed, launchd started it, `service-status` reported it
+running, and it appeared online in the fleet.
+
+**This is the part non-technical friends actually needed.** The complaint before a tray
+icon is *"do I have to leave this window open?"*, and that is now answered.
+
+### Deferred: the tray app
+
+Not built, for two reasons that only became clear once the ground was checked:
+
+1. **Rust is not installed on this machine.** Tauri needs it — a ~1 GB toolchain and a
+   new language in the tree, for a shell around an agent that already works.
+2. **macOS would end up with two agent implementations.** There is already a Swift
+   `DWPAgentKit` for iOS that also builds for macOS. Wrapping it in a `MenuBarExtra`
+   would put a second protocol implementation on the desktop beside the Node one, both
+   claiming to be hosts, and both needing to stay in step. Using it because it is nearby
+   is not a reason.
+
+So the honest gap is **Windows and Linux GUI**, which nothing covers. Tauri remains the
+right answer there, and it is a decision to take deliberately — it costs a toolchain, and
+signing costs money (below) — rather than something to start because a plan said Phase 4.
+
+### Known limitation: updates on a machine with broken DNS
+
+A compiled binary now dials through a public resolver when the system resolver cannot
+answer (`connect.direct_address`), so it connects. The *update check* still uses plain
+`fetch`, which has no such fallback inside a Bun binary, so on such a machine a binary
+connects and works but cannot fetch a new release — it logs `update.unavailable` and
+carries on. A stable hostname avoids the problem entirely, since it is freshly created
+subdomains that resolvers are slow to see.
+
 ## Phase 4 — Desktop app
 
 A [Tauri](https://tauri.app) tray application — chosen over Electron for size (~10 MB

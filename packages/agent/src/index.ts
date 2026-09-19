@@ -7,6 +7,7 @@ import { browserProbe } from './adapters/browser.ts'
 import { applyUpdate, completePendingInstall, currentVersion } from './update.ts'
 import { WORKLOADS, enableWorkload, isInstalled, availableAdapters, type WorkloadId } from './workloads.ts'
 import { invocation } from './paths.ts'
+import { installService, uninstallService, serviceStatus } from './service.ts'
 import { AGENT_HOME, AGENT_VERSION } from './paths.ts'
 
 const [command, ...rest] = process.argv.slice(2)
@@ -128,6 +129,38 @@ switch (command) {
     break
   }
 
+  /**
+   * Run at login, so nobody has to keep a terminal window open. Per-user throughout —
+   * no sudo, no root daemon, and stoppable by whoever installed it.
+   */
+  case 'install-service': {
+    requireConfig()
+    const where = await installService()
+    console.log(`\n  This computer will now join the network automatically when you log in.`)
+    console.log(`    ${where}`)
+    console.log(`\n  Stop that with:  ${invocation()} uninstall-service`)
+    console.log(`  Pause work without uninstalling:  ${invocation()} pause\n`)
+    break
+  }
+
+  case 'uninstall-service': {
+    await uninstallService()
+    console.log(`\n  It will no longer start on login. Your pairing and keys are untouched.\n`)
+    break
+  }
+
+  case 'service-status': {
+    const s = await serviceStatus()
+    if (!s.installed) {
+      console.log(`\n  Not set to run at login.\n  Turn that on with:  ${invocation()} install-service\n`)
+    } else {
+      console.log(`\n  Runs at login: yes`)
+      console.log(`  Running now:   ${s.running ? 'yes' : 'no'}`)
+      console.log(`  Defined in:    ${s.path}\n`)
+    }
+    break
+  }
+
   case 'update': {
     const cfg = requireConfig()
     const { privateKey } = ensureKeypair()
@@ -180,6 +213,8 @@ switch (command) {
   trust-updates [--yes]                                 adopt this server's release key
   workloads                                             what this computer can run
   enable <ml|browser>                                   add an optional workload
+  install-service                                       start automatically at login
+  uninstall-service | service-status                    manage that
   pause | resume                                        local kill switch (works offline)
   status                                                show identity and capability
   browser-probe [--url <url>]                           launch Chromium and report observed egress
