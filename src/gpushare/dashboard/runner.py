@@ -916,16 +916,24 @@ def start_training(
 
 
 def _checkpoint_for(pod_id: str) -> dict[str, Any]:
+    """Where this pod's trained weights are, or a refusal.
+
+    There used to be a fallback here to a hardcoded path from the first
+    experiment. On any pod that never ran it, that path does not exist, and
+    transformers reads a missing local path as a Hugging Face repo id — so the
+    failure surfaced minutes later as "Repo id must be in the form
+    'namespace/repo_name'", which says nothing about the actual problem. A
+    checkpoint that is not there is worth saying plainly.
+    """
     latest = latest_run()
     if latest and latest.get("pod_id") == pod_id:
         return latest
-    # Compatibility with the first real 4090 experiment, which predates the UI.
-    return {
-        "pod_id": pod_id,
-        "remote_checkpoint": "/workspace/gpushare/ckpt/run",
-        "local_dir": str(ROOT),
-        "legacy": True,
-    }
+    where = (latest or {}).get("pod_id")
+    raise JobError(
+        f"pod {pod_id} has no trained checkpoint"
+        + (f" — the last run left one on {where}; pick that pod" if where
+           else " — run training first")
+    )
 
 
 def start_training_optimization(*, pod_id: str) -> Job:

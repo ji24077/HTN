@@ -412,3 +412,30 @@ def test_the_measurement_panels_survive_a_ui_rewrite():
         "--s-before",   # the validated series palette
     ):
         assert anchor in page, f"{anchor} was dropped from the page"
+
+
+def test_a_pod_without_a_checkpoint_is_refused_by_name(monkeypatch, tmp_path):
+    """The old fallback pointed at a path from the first experiment.
+
+    On a pod that never ran it the file is absent, and transformers reads a
+    missing local path as a repo id — so the run died minutes in with "Repo id
+    must be in the form 'namespace/repo_name'", which names neither the pod nor
+    the missing checkpoint.
+    """
+    monkeypatch.setattr(runner, "latest_run", lambda: {"pod_id": "trained-here"})
+
+    try:
+        runner._checkpoint_for("some-other-pod")
+    except runner.JobError as e:
+        assert "no trained checkpoint" in str(e)
+        assert "trained-here" in str(e), "the pod that does have it must be named"
+    else:
+        raise AssertionError("a pod with no checkpoint was accepted")
+
+    monkeypatch.setattr(runner, "latest_run", lambda: None)
+    try:
+        runner._checkpoint_for("any")
+    except runner.JobError as e:
+        assert "run training first" in str(e)
+    else:
+        raise AssertionError("a missing run was accepted")
