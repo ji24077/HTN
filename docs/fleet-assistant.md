@@ -7,8 +7,9 @@ calls show their arguments and results in expandable rows. Current tool activity
 is fetched every 1.5 seconds while a message is pending; fleet updates still use SSE.
 
 Set `OPENAI_API_KEY` and `OPENAI_MODEL=gpt-6-astra` in the backend environment and
-restart the backend. With no key, the panel reports that chat is not configured;
-the rest of the dashboard continues to work. The model key never reaches the browser.
+restart the backend. With no key, or with a partial or malformed `OPENAI_*` setting,
+the backend logs a warning and the panel reports that chat is not configured; the
+rest of the dashboard continues to work. The model key never reaches the browser.
 
 ## Separate components
 
@@ -45,8 +46,10 @@ persistence callback. `authorized_tools` exposes `definitions()` and async
 
 Chat exposes `list_workers`, `list_tasks`, `get_task`, `submit_tasks`, `cancel_task`,
 `list_events`, and `list_workloads`. The latter returns payload templates and the
-configured inference fixture. Submissions allow up to ten tasks per tool call,
-using only `stub`, `echo`, `walker_evolution`, and `cpu_inference_batch`.
+configured inference fixture. Listings omit task payloads, results, and event
+details so they fit the 64 KiB tool-result cap; `get_task` returns one task's full
+record. Submissions allow up to ten tasks per tool call, using only the kinds that
+`list_workloads` advertises (`stub`, `echo`, `walker_evolution`, `cpu_inference_batch`).
 Long `wait_task` calls are omitted: users can ask for status in a follow-up.
 Rendering, arbitrary code, uploads, and job splitting remain unimplemented.
 
