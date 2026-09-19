@@ -15,8 +15,10 @@ from urllib.parse import urlsplit
 from uuid import uuid4
 
 import httpx
+from pydantic import ValidationError
 
 from ..shared.security import credential
+from ..shared.worker_telemetry import WorkerTelemetry
 from .config import WorkerConfig
 from .tunnel import EmbeddedTunnel
 
@@ -262,7 +264,7 @@ def worker_environment(data, directory, helper):
     if not isinstance(auth_key, str) or not auth_key.startswith("tskey-auth-"):
         raise SetupError("Invalid Tailscale enrollment key from backend")
     hostname = "orch-" + worker_id
-    return {
+    env = {
         "WORKER_ID": worker_id,
         "WORKER_TOKEN": credential(data["worker_token"]),
         "WORKER_TRANSPORT": "tailscale",
@@ -274,6 +276,17 @@ def worker_environment(data, directory, helper):
         "TAILSCALE_HOSTNAME": hostname,
         "TAILSCALE_STATE_DIR": str(directory / "tailscale" / worker_id),
     }
+    if "telemetry" in data:
+        try:
+            telemetry = WorkerTelemetry.model_validate(data["telemetry"])
+        except ValidationError:
+            telemetry = WorkerTelemetry()
+        env.update(
+            SENTRY_DSN=telemetry.dsn or "",
+            SENTRY_ENVIRONMENT=telemetry.environment,
+            SENTRY_RELEASE=telemetry.release or "",
+        )
+    return env
 
 
 async def setup(args):

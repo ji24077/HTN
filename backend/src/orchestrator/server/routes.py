@@ -119,6 +119,22 @@ async def cancel(task_id: Identifier, request: Request):
     return await request.app.state.store.task(task_id)
 
 
+@router.get("/tasks/{task_id}/execution-events")
+async def execution_events(
+    task_id: Identifier,
+    request: Request,
+    after: int = Query(default=0, ge=0, le=2**63 - 1),
+    worker_id: Identifier | None = None,
+    attempt: int | None = Query(default=None, ge=0, le=10),
+):
+    rows = await request.app.state.store.execution_events(task_id, after, worker_id, attempt)
+    return {
+        "events": rows,
+        "next_cursor": rows[-1]["id"] if rows else after,
+        "has_more": len(rows) == 200,
+    }
+
+
 @router.get("/workers", response_model=list[Worker])
 async def workers(request: Request):
     return await request.app.state.store.workers()

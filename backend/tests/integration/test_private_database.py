@@ -23,6 +23,7 @@ from orchestrator.server.db.store import (
     Store,
 )
 from orchestrator.server.updates import ChangeFeed
+from orchestrator.shared.execution import ExecutionBatch
 from orchestrator.shared.protocol import Capabilities, TaskSpec, task_ref
 
 
@@ -30,6 +31,75 @@ from orchestrator.shared.protocol import Capabilities, TaskSpec, task_ref
     os.getenv("RUN_DATABASE_TESTS") == "1", "Set RUN_DATABASE_TESTS=1; needs demo extra"
 )
 class PrivateDatabaseTests(unittest.IsolatedAsyncioTestCase):
+    async def test_execution_replay_is_owned_deduplicated_and_cannot_change_new_attempt(self):
+        import pgserver
+
+        with tempfile.TemporaryDirectory(prefix="execution-db-test-") as directory:
+            database = pgserver.get_server(Path(directory) / "postgres", cleanup_mode="stop")
+            store = await Store.open(database.get_uri(), schema="execution_test")
+            try:
+                caps = Capabilities(runtime="cpu", vram_mib=0, kinds=["stub"])
+                await store.register("worker-a", "session-1", caps)
+                await store.register("worker-b", "session-b", caps)
+                spec = TaskSpec(
+                    id="tracked-task",
+                    job_id="test",
+                    kind="stub",
+                    payload={},
+                    requirements={"runtime": "cpu", "vram_mib": 0},
+                    max_attempts=3,
+                    timeout_seconds=60,
+                )
+                await store.submit([spec])
+                task = await store.claim("worker-a", "session-1")
+                await store.ack("worker-a", "session-1", task_ref(task))
+                batch = ExecutionBatch(
+                    taskId=spec.id,
+                    attempt=1,
+                    events=[
+                        {
+                            "sequence": 1,
+                            "at": datetime.now(UTC),
+                            "kind": "stdout",
+                            "data": {
+                                "text": "success output Bearer synthetic-secret",
+                                "token": "hidden",
+                            },
+                        }
+                    ],
+                )
+                with self.assertRaises(StaleAssignment):
+                    await store.append_execution_events("worker-b", "session-b", batch)
+                await store.append_execution_events("worker-a", "session-1", batch)
+                await store.append_execution_events("worker-a", "session-1", batch)
+                # Reconnect changes assignment state, but late diagnostics still belong to attempt 1.
+                await store.register("worker-a", "session-2", caps)
+                second = await store.claim("worker-a", "session-2")
+                await store.ack("worker-a", "session-2", task_ref(second))
+                batch.events[0].sequence = 2
+                batch.events[0].kind = "progress"
+                batch.events[0].data = {"percent": 99}
+                await store.append_execution_events("worker-a", "session-2", batch)
+                self.assertEqual((await store.task(spec.id)).progress, 0)
+                batch.attempt = 2
+                await store.append_execution_events("worker-a", "session-2", batch)
+                await store.heartbeat("worker-a", "session-2", [task_ref(second)], False)
+                self.assertEqual((await store.task(spec.id)).progress, 99)
+                rows = await store.execution_events(spec.id, worker_id="worker-a", attempt=1)
+                worker_rows = [r for r in rows if r["source"] == "worker"]
+                self.assertEqual(len(worker_rows), 2)
+                self.assertNotIn("synthetic-secret", str(worker_rows))
+                self.assertNotIn("hidden", str(worker_rows))
+                self.assertEqual(await store.execution_events(spec.id, worker_id="worker-b"), [])
+                self.assertEqual(
+                    await store.execution_events(spec.id, after=rows[-1]["id"], attempt=1), []
+                )
+                with self.assertRaises(StaleSession):
+                    await store.append_execution_events("worker-a", "session-1", batch)
+            finally:
+                await store.close()
+                database.cleanup()
+
     async def test_private_schema_shared_state_notifications_and_browser_denial(self):
         import pgserver
 
@@ -58,6 +128,7 @@ class PrivateDatabaseTests(unittest.IsolatedAsyncioTestCase):
                         "dwp_pair_codes",
                         "dwp_devices",
                         "dwp_assertions",
+                        "execution_events",
                     ):
                         self.assertFalse(
                             await admin.fetchval(

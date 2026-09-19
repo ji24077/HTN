@@ -36,6 +36,22 @@ CREATE TABLE IF NOT EXISTS events (
     new_state text NOT NULL,
     details jsonb NOT NULL
 );
+CREATE INDEX IF NOT EXISTS events_task_history ON events(entity, entity_id, id);
+
+CREATE TABLE IF NOT EXISTS execution_events (
+    id bigserial PRIMARY KEY,
+    task_id text NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    attempt integer NOT NULL,
+    worker_id text,
+    source text NOT NULL CHECK (source IN ('server', 'worker')),
+    sequence bigint NOT NULL,
+    kind text NOT NULL,
+    occurred_at timestamptz NOT NULL,
+    received_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+    data jsonb NOT NULL,
+    UNIQUE(task_id, attempt, source, sequence)
+);
+CREATE INDEX IF NOT EXISTS execution_events_task ON execution_events(task_id, id);
 
 -- Only credential digests are retained. Auth keys are returned once, never stored.
 CREATE TABLE IF NOT EXISTS worker_enrollments (

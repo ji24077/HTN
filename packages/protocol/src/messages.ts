@@ -94,12 +94,29 @@ export const ConsentUpdate = ConsentState
 
 // ------------------------------------------------------------ control → agent
 
+/** Public ingest configuration; no Sentry API token or backend credentials. */
+export const WorkerTelemetry = z.object({
+  dsn: z.string().max(2048).refine(value => {
+    try {
+      const url = new URL(value)
+      return url.protocol === 'https:' && /^https:\/\/[^/@:]+@/.test(value) && Boolean(url.hostname && url.username) && !url.password &&
+        !url.search && !url.hash && /\/\d+$/.test(url.pathname) && !/\s/.test(value)
+    } catch { return false }
+  }).nullable(),
+  environment: z.string().max(200).regex(/^[^\x00-\x1f]*$/),
+  release: z.string().max(200).regex(/^[^\x00-\x1f]*$/).nullable(),
+})
+export type WorkerTelemetry = z.infer<typeof WorkerTelemetry>
+
 export const HelloAck = z.object({
   hostId: z.string(),
   serverTime: z.string(),
   heartbeatSeconds: z.number(),
   /** The release the server is currently offering, so agents can notice they are behind. */
   releaseVersion: z.string().nullable().default(null),
+  // Validate independently: bad optional telemetry must not reject a working handshake.
+  telemetry: z.unknown().optional(),
+  executionEvents: z.boolean().optional(),
 })
 export const TaskOffer = z.object({
   taskId: z.string(),

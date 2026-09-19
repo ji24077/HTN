@@ -315,6 +315,45 @@ describe("dashboard interactions over pushed updates", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("shows successful execution output and keeps untrusted log text as text", async () => {
+    fetchMock.mockImplementation(async (path) => {
+      if (String(path).includes("/execution-events"))
+        return Response.json({
+          events: [
+            {
+              id: 1,
+              execution_id: "test-task:1",
+              task_id: "test-task",
+              attempt: 1,
+              worker_id: "worker-a",
+              source: "worker",
+              sequence: 1,
+              kind: "stdout",
+              occurred_at: "2026-09-19T12:00:00Z",
+              received_at: "2026-09-19T12:00:01Z",
+              data: {
+                text: "Successfully processed inputs <script>bad()</script>",
+              },
+            },
+          ],
+          next_cursor: 1,
+          has_more: false,
+        });
+      return Response.json({ status: "ok" });
+    });
+    const user = userEvent.setup();
+    const { stream } = await mount();
+    act(() => stream.snapshot(fleet([{ ...task(), state: "succeeded" }])));
+    await user.click(
+      screen.getByRole("button", { name: "View Live task details" }),
+    );
+    expect(
+      await screen.findByText(/Successfully processed inputs/),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Machine: worker-a")).toBeInTheDocument();
+    expect(document.querySelector("#result-dialog script")).toBeNull();
+  });
+
   it("recovers from stream disconnects without losing edits or fetching snapshots", async () => {
     const user = userEvent.setup();
     const { stream } = await mount();
