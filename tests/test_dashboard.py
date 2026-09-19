@@ -142,3 +142,27 @@ def test_quality_gate_rejects_a_regression():
     # Within tolerance is not a regression: generation is not bit-identical
     # across chips, and a migration landing inside noise did not break anything.
     assert _quality(good, {"json_parse_rate": 1.0, "exact_match_rate": 0.90})["status"] == "ok"
+
+
+def test_request_models_match_the_runner_signatures_they_splat_into():
+    """Every request field must be a real parameter of the function it feeds.
+
+    The routes call `generate(**req.model_dump())`, so an added field is a
+    TypeError at request time, not at import — and only on the route that was
+    not updated. That is exactly how `no_cache` shipped working on /api/generate
+    and broken on /api/generate/stream: same request model, two functions, one
+    of them forgotten. Pydantic cannot catch it and neither can a smoke test
+    that never loads a model, because both fail earlier with 409.
+    """
+    import inspect
+
+    from gpushare.dashboard.app import GenerateRequest, PrefixRequest
+
+    for model, func in [
+        (GenerateRequest, runner.generate),
+        (GenerateRequest, runner.generate_stream),
+        (PrefixRequest, runner.set_prefix),
+    ]:
+        params = inspect.signature(func).parameters
+        missing = sorted(set(model.model_fields) - set(params))
+        assert not missing, f"{func.__name__} is missing {missing}"

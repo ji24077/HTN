@@ -1239,7 +1239,9 @@ def start_inference_server(*, pod_id: str, model_id: str, dtype: str = "bf16") -
     return JOBS.create("serve-model", {"pod_id": pod_id, "model_id": model_id}, work)
 
 
-def generate_stream(*, sentence: str, max_new_tokens: int = 64, greedy: bool = True):
+def generate_stream(
+    *, sentence: str, max_new_tokens: int = 64, greedy: bool = True, no_cache: bool = False
+):
     """Proxy the pod's SSE stream through, one frame at a time.
 
     Every hop has to stay unbuffered or the feature is cosmetic: the pod sends
@@ -1259,12 +1261,19 @@ def generate_stream(*, sentence: str, max_new_tokens: int = 64, greedy: bool = T
     req = urllib.request.Request(
         f"http://127.0.0.1:{SERVE_PORT}/generate/stream",
         data=json.dumps(
-            {"sentence": sentence, "max_new_tokens": max_new_tokens, "greedy": greedy}
+            {
+                "sentence": sentence,
+                "max_new_tokens": max_new_tokens,
+                "greedy": greedy,
+                "no_cache": no_cache,
+            }
         ).encode(),
         headers={"Content-Type": "application/json"},
     )
     try:
-        with urllib.request.urlopen(req, timeout=180) as r:
+        # Matches the blocking path: a cache-bypassed long-context request
+        # re-runs the full prefill, which outlasts the old 180s budget.
+        with urllib.request.urlopen(req, timeout=300) as r:
             for raw in r:
                 line = raw.decode("utf-8", "replace").strip()
                 if line.startswith("data: "):
