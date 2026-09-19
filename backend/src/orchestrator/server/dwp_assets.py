@@ -189,7 +189,14 @@ async def join(request: Request):
     self_serve = "true" if request.app.state.config.self_serve_join else "false"
     return HTMLResponse(
         '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width">'
-        "<title>Connect a device · Dispatch</title><style>body{font:17px/1.6 system-ui;max-width:680px;margin:64px auto;padding:24px;color:#242621;background:#f7f7f2}code{word-break:break-all}a{color:inherit}</style>"
+        "<title>Connect a device · Dispatch</title><style>"
+        "body{font:17px/1.6 system-ui;max-width:680px;margin:64px auto;padding:24px;color:#242621;background:#f7f7f2}"
+        "code{word-break:break-all}a{color:inherit}"
+        "details{border-top:1px solid #dcdcd2;padding:10px 0}"
+        "details summary{cursor:pointer;font-weight:600;font-size:16px}"
+        "details p{margin:8px 0 0}"
+        "details pre{background:#ecece4;padding:12px;border-radius:8px;overflow-x:auto;white-space:pre-wrap;font-size:14px}"
+        "</style>"
         "<h1>Connect your device</h1>"
         # Docker first, and with the invite already in the command. Every other option on
         # this page asks the reader to fetch something and then find where to paste a
@@ -253,6 +260,72 @@ async def join(request: Request):
         + "<p>Separate commands, so they paste into any shell and run in order. Work in "
         + "flight is handed back to the network rather than lost, so this is safe to run on "
         + "a machine that is busy.</p>"
+        # Every entry here is something that actually happened while bringing machines
+        # onto this network, in the words the reader will see. A troubleshooting list
+        # written from imagination covers the failures that are easy to think of rather
+        # than the ones people hit, and the two sets barely overlap.
+        + "<h2>Didn\u2019t work?</h2>"
+        + "<p>The error you got is the heading.</p>"
+
+        + "<details><summary>Ports are not available: address already in use</summary>"
+        + "<p>Something already holds 43117 on that machine \u2014 usually an agent you "
+        + "installed earlier, under a different name. Either free the port with the middle "
+        + "line of the update command above, or leave it alone and put this machine on "
+        + "another port by changing the <em>first</em> number and making "
+        + "<code>DWP_GUI_PUBLIC_ORIGIN</code> match:</p>"
+        + "<pre>-p 127.0.0.1:43118:43117 -e DWP_GUI_PUBLIC_ORIGIN=\"http://127.0.0.1:43118\"</pre>"
+        + "<p>Two agents on one machine is fine. Each has its own identity, and both do work.</p>"
+        + "</details>"
+
+        + "<details><summary>The container name &quot;/dwp-agent&quot; is already in use</summary>"
+        + "<p>An earlier attempt left a container behind, stopped. Remove it and run the "
+        + "command again \u2014 this keeps the volume, so nothing is lost:</p>"
+        + "<pre>docker rm -f dwp-agent</pre></details>"
+
+        + "<details><summary>That invite was not accepted</summary>"
+        + "<p>Invites last ten minutes and work exactly once, so the usual cause is that it "
+        + "sat in a chat window too long, or the container was started twice with it. Get "
+        + "another from the top of this page \u2014 nothing needs undoing first.</p>"
+        + "<p>If a machine has already joined, it does not need an invite at all: its "
+        + "identity is in the volume. Use the update command instead.</p></details>"
+
+        + "<details><summary>The window shows &quot;not found&quot;, or nothing at all</summary>"
+        + "<p>Each agent has its own address and its own token, so a token from one will not "
+        + "open another. Ask the agent you mean for its address:</p>"
+        + "<pre>docker logs dwp-agent | grep Window</pre>"
+        + "<p>On Windows, <code>docker logs dwp-agent | findstr Window</code>.</p>"
+        + "<p>If it prints a port you did not publish, that is the container\u2019s own port, "
+        + "not the host\u2019s. Use the first number from your <code>-p</code> flag and keep "
+        + "the token unchanged. Setting <code>DWP_GUI_PUBLIC_ORIGIN</code>, as the commands "
+        + "above do, makes it print the right one.</p></details>"
+
+        + "<details><summary>How do I know it is actually working?</summary>"
+        + "<pre>docker logs dwp-agent</pre>"
+        + "<p>You want <code>enrol.joined</code> followed by <code>connect.established</code>. "
+        + "That second line means it is on the network and can be given work. "
+        + "<code>connect.retry_scheduled</code> over and over means it cannot reach the "
+        + "server \u2014 check the machine has internet, and that the address in the command "
+        + "is the one this page shows.</p>"
+        + "<p>The window\u2019s Status tab says the same thing in words, and Recent work "
+        + "lists what this machine has actually run.</p></details>"
+
+        + "<details><summary>It is connected but never does anything</summary>"
+        + "<p>Open the window and look at Status. If this machine is turning work down, it "
+        + "says so and why \u2014 a limit you set on the Limits tab, or Pause. If it says it "
+        + "is waiting for work, the network simply has none to give right now.</p></details>"
+
+        + "<details><summary>docker: denied, or manifest unknown</summary>"
+        + "<p>The image name is wrong, or the machine cannot reach the registry. Copy the "
+        + "command from this page rather than typing it \u2014 it carries the image this "
+        + "network actually publishes.</p></details>"
+
+        + "<details><summary>I want this machine off the network</summary>"
+        + "<p>Stopping the container is enough, and it keeps everything:</p>"
+        + "<pre>docker rm -f dwp-agent</pre>"
+        + "<p>To forget the network as well, remove the volume. That discards the machine\u2019s "
+        + "identity and its history, and rejoining will need a new invite:</p>"
+        + "<pre>docker volume rm dwp-agent-data</pre></details>"
+
         + "<h2>Desktop or iOS app</h2><p>Open the desktop worker or iOS app and paste the invite link from your fleet dashboard. Invitations expire after ten minutes and work once.</p>"
         + downloads
         + "<h2>From the repository</h2><p>Install dependencies with <code>pnpm install --frozen-lockfile</code>, then open <code>pnpm agent gui</code> and paste your invite link.</p>"
