@@ -17,7 +17,7 @@ import UIKit
  * suffix is deliberate: it distinguishes the two implementations in a handshake, so the
  * test compares only the numeric prefix.
  */
-public let agentVersion = "0.3.0-ios"
+public let agentVersion = "0.4.0-ios"
 
 /**
  * What this device is, and — the part that matters on a phone — what state it is in.

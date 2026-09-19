@@ -16,7 +16,8 @@
     "ios:build": "cd ios/DWPAgentKit && swift build",
     "ios:test": "cd ios/DWPAgentKit && swift test",
     "ios:conformance": "node ios/test/conformance.ts",
-    "ios:app": "cd ios && xcodegen generate && xcodebuild -project DWPAgent.xcodeproj -scheme DWPAgent -destination \"platform=iOS Simulator,name=iPhone 17 Pro\" -derivedDataPath .build-ios build"
+    "ios:app": "cd ios && xcodegen generate && xcodebuild -project DWPAgent.xcodeproj -scheme DWPAgent -destination \"platform=iOS Simulator,name=iPhone 17 Pro\" -derivedDataPath .build-ios build",
+    "check:gui": "node scripts/check-gui-page.ts"
   },
   "devDependencies": {
     "typescript": "7.0.2",

@@ -22,10 +22,11 @@ import { join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { createLogger } from '@dwp/protocol'
 import { AGENT_HOME, AGENT_VERSION, isCompiledBinary } from './paths.ts'
-import { isPaused, loadConfig, setPaused, type AgentConfig } from './config.ts'
+import { clearConfig, isPaused, loadConfig, setPaused, type AgentConfig } from './config.ts'
 import { ensureKeypair } from './keys.ts'
 import { pairHost } from './pair.ts'
 import { connect, type AgentHandle, type AgentState } from './transport.ts'
+import * as history from './history.ts'
 import { applyUpdate, completePendingInstall, restartIntoNewVersion } from './update.ts'
 import { installService, serviceStatus, uninstallService, type ServiceStatus } from './service.ts'
 import { availableAdapters } from './workloads.ts'
@@ -61,7 +62,16 @@ const PORT_TRIES = 20
 type Lock = { port: number; token: string; pid: number; startedAt: string; version: string }
 
 function readLock(): Lock | null {
-  try { return JSON.parse(readFileSync(LOCK_PATH, 'utf8')) as Lock } catch { return null }
+  let lock: Lock
+  try { lock = JSON.parse(readFileSync(LOCK_PATH, 'utf8')) as Lock } catch { return null }
+  // A lock outlives the process that wrote it. Trusting it blindly sends the window to a
+  // dead port, where the page sits on its placeholder forever with no way out from inside
+  // the app -- so check the recorded pid is actually alive first. Signal 0 tests for
+  // existence without delivering anything; EPERM means it exists under another user.
+  try { process.kill(lock.pid, 0) } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'EPERM') return null
+  }
+  return lock
 }
 
 function writeLock(lock: Lock): void {
@@ -236,9 +246,31 @@ function page(token: string): string {
     border: 1px solid var(--line); background: var(--bg); color: var(--ink); resize: vertical;
   }
   label.field { display: block; font-size: 12px; color: var(--dim); margin: 12px 0 5px; }
+  .check { display: flex; align-items: flex-start; gap: 9px; margin-top: 14px; cursor: pointer; }
+  .check input { width: auto; flex: none; margin: 2px 0 0; }
+  .check .label { display: block; font-size: 13px; }
+  .check .hint { display: block; color: var(--dim); font-size: 11.5px; margin-top: 2px; }
   .err { color: var(--bad); font-size: 12.5px; margin-top: 10px; white-space: pre-wrap; }
   .task { font-size: 12.5px; color: var(--dim); margin-top: 6px; white-space: pre-wrap; }
   .task code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink); }
+  /* Recent work. The strip lets flex shrink the bars, with a 4px floor, so thirty runs
+     always fit the card however long the longest one was. */
+  .strip { display: flex; align-items: stretch; gap: 2px; height: 24px; margin-top: 13px; overflow: hidden; }
+  .strip > div { flex: 0 1 auto; min-width: 4px; border-radius: 2px; background: var(--dim); }
+  .strip > div.ok { background: var(--ok); }
+  .strip > div.warn { background: var(--warn); }
+  .strip > div.bad { background: var(--bad); }
+  .runs { margin-top: 12px; font-size: 12.5px; }
+  .run { display: flex; align-items: baseline; gap: 8px; padding: 6px 0; border-top: 1px solid var(--line); }
+  .run:first-child { border-top: 0; }
+  .run code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink); }
+  .run .cost { color: var(--dim); overflow-wrap: anywhere; }
+  .run .when { color: var(--dim); margin-left: auto; flex: none; }
+  .run .mark { font-weight: 600; flex: none; }
+  .run .mark.ok { color: var(--ok); }
+  .run .mark.warn { color: var(--warn); }
+  .run .mark.bad { color: var(--bad); }
+  .adapters { margin-top: 11px; }
   footer { color: var(--dim); font-size: 11.5px; margin-top: 16px; text-align: center; }
   [hidden] { display: none !important; }
 </style>
@@ -256,6 +288,14 @@ function page(token: string): string {
       <textarea id="invite" rows="2" placeholder="https://example.com/join?code=ABCD-1234" autocomplete="off" spellcheck="false"></textarea>
       <label class="field" for="name">What should this computer be called? (optional)</label>
       <input id="name" placeholder="e.g. Sam's laptop" autocomplete="off">
+      <label class="check" for="runAtLogin">
+        <input type="checkbox" id="runAtLogin" checked>
+        <span>
+          <span class="label">Rejoin automatically after a restart</span>
+          <span class="hint">Otherwise this computer is only on the network while this app
+          is open — close it, log out or restart, and it stops contributing.</span>
+        </span>
+      </label>
       <div style="margin-top:14px"><button class="primary" id="joinBtn">Join</button></div>
       <div class="err" id="joinErr" hidden></div>
     </div>
@@ -270,6 +310,14 @@ function page(token: string): string {
       </div>
       <div class="task" id="tasks" hidden></div>
       <div class="advice" id="advice" hidden></div>
+    </div>
+
+    <div class="card">
+      <div class="headline">Recent work</div>
+      <div class="note" id="histSummary">Nothing has run on this computer yet.</div>
+      <div class="strip" id="histStrip" hidden></div>
+      <div class="runs" id="histRuns" hidden></div>
+      <div class="note adapters" id="histAdapters" hidden></div>
     </div>
 
     <div class="card">
@@ -313,6 +361,14 @@ function page(token: string): string {
       </div>
       <div class="row">
         <div>
+          <div class="label">Leave this network</div>
+          <div class="hint" id="leaveHint">Disconnects and forgets this network, so you can
+          join a different one. Your computer keeps its identity; nothing else is removed.</div>
+        </div>
+        <button class="danger" id="leaveBtn">Leave</button>
+      </div>
+      <div class="row">
+        <div>
           <div class="label">Stop the agent</div>
           <div class="hint">Closing this window leaves it running. This stops it until next login.</div>
         </div>
@@ -347,14 +403,25 @@ async function api(path, body) {
  * end — so say which copy it probably is, and give the command that ends it, for the
  * machine actually being looked at.
  */
+/**
+ * Careful with backslash escapes below this point.
+ *
+ * Everything from here to the end of the page script is inside a TypeScript template
+ * literal, so a \n written here is consumed at build time and emitted as a real
+ * newline in the page. In an ordinary JS string literal that is a syntax error, and one
+ * is enough to stop the entire inline script parsing -- which does not look like a
+ * syntax error to a user. It
+ * looks like an app frozen on "starting…", because no script ran at all to replace the
+ * placeholder. Write \\n to emit an escape rather than a line break.
+ */
 function stoodDownHelp(platform) {
   if (platform === 'win32') return 'It is most likely one installed from PowerShell, at ' +
     '%USERPROFILE%\\.dwp\\bin\\dwp-agent.exe, started by a logon task. To hand over to this app, ' +
-    'run these two lines in PowerShell and open this app again:\n\n' +
-    '    schtasks /Delete /F /TN "DWP Agent"\n' +
+    'run these two lines in PowerShell and open this app again:\\n\\n' +
+    '    schtasks /Delete /F /TN "DWP Agent"\\n' +
     '    Stop-Process -Name dwp-agent -Force'
   if (platform === 'darwin') return 'It is most likely one installed from a terminal, at ' +
-    '~/.dwp/bin/dwp-agent. To hand over to this app, run this and open this app again:\n\n' +
+    '~/.dwp/bin/dwp-agent. To hand over to this app, run this and open this app again:\\n\\n' +
     '    ~/.dwp/bin/dwp-agent uninstall-service; pkill -f dwp-agent'
   return 'It is most likely one installed from a terminal, at ~/.dwp/bin/dwp-agent. ' +
     'Stop that one, then open this app again.'
@@ -364,12 +431,115 @@ function describe(s) {
   if (s.stoodDown) return ['warn', 'Stopped — another copy is running',
     'Another agent on this computer already has this identity, so this one stood down ' +
     'rather than fight it for the connection. Your computer is still doing the work — ' +
-    'the other copy is doing it, so nothing is broken.\n\n' + stoodDownHelp(s.platform)]
+    'the other copy is doing it, so nothing is broken.\\n\\n' + stoodDownHelp(s.platform)]
   if (s.paused) return ['warn', 'Paused', 'No work will be accepted until you resume.']
   if (s.connection === 'online' && s.running.length > 0) return ['busy', 'Working', null]
   if (s.connection === 'online') return ['ok', 'Connected', 'Waiting for work. Nothing to do right now.']
   if (s.connection === 'connecting') return ['wait', s.attempt > 1 ? 'Reconnecting…' : 'Connecting…', null]
   return ['bad', 'Offline', s.lastLostReason ? 'Last seen: ' + s.lastLostReason : 'Not connected.']
+}
+
+/** Durations people read at a glance: milliseconds, seconds, then minutes. */
+function dur(ms) {
+  if (!(ms > 0)) return '0 s'
+  if (ms < 1000) return Math.round(ms) + ' ms'
+  if (ms < 60000) return (ms / 1000).toFixed(1) + ' s'
+  if (ms < 3600000) return Math.round(ms / 60000) + ' min'
+  return (ms / 3600000).toFixed(1) + ' h'
+}
+
+function ago(at) {
+  const secs = Math.max(0, Math.round((Date.now() - at) / 1000))
+  if (secs < 60) return secs + 's ago'
+  if (secs < 3600) return Math.round(secs / 60) + ' min ago'
+  if (secs < 86400) return Math.round(secs / 3600) + ' h ago'
+  return Math.round(secs / 86400) + ' d ago'
+}
+
+/** Reuse the status dot's three colours rather than invent a fourth vocabulary. */
+function outcomeKind(outcome) {
+  if (outcome === 'ok') return 'ok'
+  if (outcome === 'error') return 'bad'
+  return 'warn'
+}
+
+function outcomeWord(outcome) {
+  if (outcome === 'result_too_large') return 'too large'
+  return outcome
+}
+
+/**
+ * Everything in here is built with createElement and textContent, never innerHTML.
+ * Adapter names, task ids and adapter error messages all arrive from the network, and
+ * this page's whole job is to display them.
+ */
+function mk(tag, cls, text) {
+  const node = document.createElement(tag)
+  if (cls) node.className = cls
+  if (text !== undefined) node.textContent = text
+  return node
+}
+
+function renderHistory(s) {
+  const h = s.history || { recent: [], summary: null }
+  const runs = h.recent || []
+  const sum = h.summary || { runs: 0, failed: 0, busyMs: 0, byAdapter: {} }
+  const strip = $('histStrip')
+  const list = $('histRuns')
+  const adapters = $('histAdapters')
+
+  if (sum.runs === 0) {
+    $('histSummary').textContent = 'Nothing has run on this computer yet.'
+    show(strip, false)
+    show(list, false)
+    show(adapters, false)
+    return
+  }
+
+  const parts = [sum.runs + (sum.runs === 1 ? ' run' : ' runs')]
+  if (sum.failed > 0) parts.push(sum.failed + ' failed')
+  parts.push(dur(sum.busyMs) + ' busy')
+  // lastRunAt belongs to this process, so it is null for the whole of the first poll
+  // after a restart even though the history is right there. Fall back to the newest
+  // record rather than drop the clause until the next task arrives.
+  const last = s.lastRunAt || (runs[0] ? Date.parse(runs[0].finishedAt) : 0)
+  if (last) parts.push('last ' + ago(last))
+  $('histSummary').textContent = parts.join(' · ')
+
+  // Oldest on the left, newest on the right; recent() hands them over newest first.
+  const ordered = runs.slice().reverse()
+  let longest = 0
+  for (const r of ordered) if (r.durationMs > longest) longest = r.durationMs
+  strip.textContent = ''
+  for (const r of ordered) {
+    const bar = mk('div', outcomeKind(r.outcome))
+    const share = longest > 0 ? Math.max(1, (r.durationMs / longest) * 25) : 1
+    bar.style.width = share.toFixed(2) + '%'
+    bar.title = r.adapter + ' · ' + dur(r.durationMs) + ' · ' + outcomeWord(r.outcome)
+    strip.appendChild(bar)
+  }
+  show(strip, true)
+
+  list.textContent = ''
+  for (const r of runs.slice(0, 10)) {
+    const row = mk('div', 'run')
+    row.appendChild(mk('code', null, r.adapter))
+    row.appendChild(mk('span', 'mark ' + outcomeKind(r.outcome), outcomeWord(r.outcome)))
+    let cost = dur(r.durationMs) + ' · cpu ' + dur(r.cpuMs) + ' · ' + Math.round(r.rssMb) + ' MB'
+    if (r.shared) cost += ' (shared)'
+    row.appendChild(mk('span', 'cost', cost))
+    row.appendChild(mk('span', 'when', ago(Date.parse(r.finishedAt))))
+    if (r.message) row.title = r.message
+    list.appendChild(row)
+  }
+  show(list, true)
+
+  const names = Object.keys(sum.byAdapter)
+  names.sort((a, b) => sum.byAdapter[b].runs - sum.byAdapter[a].runs)
+  adapters.textContent = names.map(name =>
+    name + ': ' + sum.byAdapter[name].runs + (sum.byAdapter[name].runs === 1 ? ' run, ' : ' runs, ') +
+    dur(sum.byAdapter[name].busyMs)).join(' · ')
+  show(adapters, names.length > 0)
 }
 
 function render(s) {
@@ -401,7 +571,13 @@ function render(s) {
   $('adapters').textContent = s.adapters.join(', ')
   $('version').textContent = 'v' + s.version + (s.pinnedKey ? ' — updates verified' : ' — updates unsigned, manual only')
 
+  renderHistory(s)
+
   show($('retryRow'), s.stoodDown)
+  // Concatenation, not a template literal: this whole script sits inside one, so a
+  // substitution written here would be resolved by the compiler, not the browser.
+  $('leaveHint').textContent = 'Disconnects and forgets ' + s.server +
+    ', so you can join a different network. Your computer keeps its identity; nothing else is removed.'
   $('pauseLabel').textContent = s.paused ? 'Paused' : 'Accepting work'
   $('pauseBtn').textContent = s.paused ? 'Resume' : 'Pause'
   $('loginBtn').textContent = s.runsAtLogin ? 'Turn off' : 'Turn on'
@@ -411,16 +587,29 @@ function render(s) {
   $('updateHint').textContent = s.updating ? 'Installing an update. It will restart itself.' : s.updateNote
 }
 
+let rendered = false
+let misses = 0
 async function tick() {
   if (quitting) return
   try {
     render(await api('state'))
+    rendered = true
+    misses = 0
     show($('footer'), true)
     $('footer').textContent = 'Closing this window does not stop the agent.'
   } catch {
-    // A restart after an update lands here for a second or two. Say so rather than
-    // showing an error that looks like a crash.
+    // A restart after an update lands here for a second or two, so the first few
+    // failures are not worth alarming anyone about. But if render() has never run, the
+    // page is still showing its "starting…" placeholder and will show it forever --
+    // which is indistinguishable from a hang. Say what happened and what to do.
+    misses += 1
     $('footer').textContent = 'Reconnecting to the agent…'
+    if (!rendered && misses >= 5) {
+      $('sub').textContent = 'cannot reach the agent'
+      show($('footer'), true)
+      $('footer').textContent =
+        'The agent is not responding on this address. Close this window and open DWP Agent again.'
+    }
   }
 }
 
@@ -438,12 +627,35 @@ async function act(btn, fn) {
 $('joinBtn').onclick = () => act($('joinBtn'), async () => {
   show($('joinErr'), false)
   try {
-    await api('pair', { invite: $('invite').value, label: $('name').value })
+    const r = await api('pair', {
+      invite: $('invite').value,
+      label: $('name').value,
+      runAtLogin: $('runAtLogin').checked,
+    })
+    // Joined, but not durably. Say so once here rather than leave the difference to be
+    // noticed the next time this computer is restarted and does not come back.
+    if (r && r.serviceError) {
+      $('actionErr').textContent = 'Joined, but could not set it to rejoin after a restart:\\n' +
+        r.serviceError + '\\n\\nTurn it on below once that is sorted.'
+      show($('actionErr'), true)
+    }
   } catch (err) {
     $('joinErr').textContent = err.message
     show($('joinErr'), true)
   }
 })
+let leaveArmed = false
+$('leaveBtn').onclick = () => {
+  if (!leaveArmed) {
+    leaveArmed = true
+    $('leaveBtn').textContent = 'Really leave?'
+    setTimeout(() => { leaveArmed = false; $('leaveBtn').textContent = 'Leave' }, 4000)
+    return
+  }
+  leaveArmed = false
+  $('leaveBtn').textContent = 'Leave'
+  act($('leaveBtn'), () => api('leave', {}))
+}
 $('retryBtn').onclick = () => act($('retryBtn'), () => api('retry', {}))
 $('pauseBtn').onclick = () => act($('pauseBtn'), () => api('pause', { paused: $('pauseBtn').textContent === 'Pause' }))
 $('loginBtn').onclick = () => act($('loginBtn'), () => api('login-at-start', { enabled: $('loginBtn').textContent === 'Turn on' }))
@@ -501,7 +713,7 @@ export async function runGui(opts: GuiOptions): Promise<void> {
   let config: AgentConfig | null = loadConfig()
   let state: AgentState = {
     connection: 'offline', attempt: 0, connectedSince: null, running: [],
-    lastLostReason: null, advice: null, stoodDown: false, updating: false,
+    lastLostReason: null, advice: null, stoodDown: false, updating: false, lastRunAt: null,
   }
   let service: ServiceStatus = { installed: false, platform: platform() }
   const refreshService = async (): Promise<void> => {
@@ -601,7 +813,17 @@ export async function runGui(opts: GuiOptions): Promise<void> {
     if (req.method === 'GET' && route === 'api/state') {
       send(res, 200, {
         dwp: true,
-        version: AGENT_VERSION,
+        /**
+         * The installed *release*, falling back to the compile-time stamp.
+         *
+         * These differ, and showing only the stamp made "Check now" look broken: a
+         * binary is built with package.json's version (0.4.0) while the release that
+         * carries it is 0.4.0+<hash>, so a successful update left the screen unchanged
+         * and the button appeared to do nothing. update.ts already compares the full
+         * release string, so the agent knew -- only the display was behind.
+         */
+        version: config?.installedRelease ?? AGENT_VERSION,
+        buildVersion: AGENT_VERSION,
         paired: config !== null,
         label: config?.label ?? null,
         hostId: config?.hostId ?? null,
@@ -622,6 +844,15 @@ export async function runGui(opts: GuiOptions): Promise<void> {
         advice: state.advice,
         stoodDown: state.stoodDown,
         updating: state.updating,
+        lastRunAt: state.lastRunAt,
+        /**
+         * What this machine has run before now.
+         *
+         * Answered from the in-memory array, so polling this every second costs a JSON
+         * encode and nothing else. Thirty records is more than the page draws in its
+         * list, because the timeline strip shows the lot.
+         */
+        history: { recent: history.recent(30), summary: history.summary() },
       })
       return
     }
@@ -646,7 +877,31 @@ export async function runGui(opts: GuiOptions): Promise<void> {
       config = loadConfig()
       log.info('gui.paired', { hostId: outcome.hostId, label: outcome.label })
       if (config) void startConnection(config)
-      send(res, 200, { ok: true })
+
+      /**
+       * Register the login task as part of joining, not as a setting to find later.
+       *
+       * The toggle below has always existed and was the only place this surfaced, which
+       * meant the ordinary path through this window produced an agent that lived exactly
+       * as long as the window did. Anyone who does not want that unticks the box; the
+       * default is the one that makes the machine a worker rather than a visitor.
+       *
+       * A failure here does not fail the join. The computer has enrolled either way, and
+       * losing a successful pairing over a Scheduled Task would be a far worse trade —
+       * so it is reported as something that did not happen, and the toggle is left
+       * showing the truth.
+       */
+      let serviceError: string | null = null
+      if (body.runAtLogin !== false && config) {
+        try {
+          await installService('gui')
+        } catch (err) {
+          serviceError = err instanceof Error ? err.message : String(err)
+          log.warn('gui.login_task_failed', { detail: serviceError })
+        }
+        await refreshService()
+      }
+      send(res, 200, { ok: true, runsAtLogin: service.installed, serviceError })
       return
     }
 
@@ -654,6 +909,35 @@ export async function runGui(opts: GuiOptions): Promise<void> {
       if (!agent) { send(res, 400, { error: 'Join a network first.' }); return }
       agent.retryNow()
       log.info('gui.retry_requested')
+      send(res, 200, { ok: true })
+      return
+    }
+
+    /**
+     * Leave the network this computer joined, so it can join a different one.
+     *
+     * Without this the only way out was deleting ~/.dwp/config.json by hand, because
+     * pairing refuses once a config exists — so a machine pointed at the wrong network
+     * could not be moved by the person sitting in front of it. Changing networks is a
+     * different operation from `set-server`, which only follows an address a network
+     * already known to this machine has moved to: a different network has never seen
+     * this host's key, so it must be joined from scratch.
+     */
+    if (route === 'api/leave') {
+      if (!config) { send(res, 400, { error: 'This computer has not joined a network.' }); return }
+      const was = config.server
+      agent?.stop()
+      agent = null
+      connected = false
+      clearConfig()
+      config = null
+      state = {
+        connection: 'offline', attempt: 0, connectedSince: null, running: [],
+        lastLostReason: null, advice: null, stoodDown: false, updating: false,
+        // Leaving forgets a network, not what this computer has done.
+        lastRunAt: state.lastRunAt,
+      }
+      log.info('gui.left_network', { was })
       send(res, 200, { ok: true })
       return
     }

@@ -94,5 +94,17 @@ export async function pair(server: string, code: string, label?: string): Promis
   console.log(result.pinnedKey
     ? `  updates : signed releases, key pinned`
     : `  updates : this server offers no signed releases, so updates stay manual`)
-  console.log(`\nStart it with:  ${invocation()} run`)
+  /**
+   * Offer the durable option first, and the terminal one second.
+   *
+   * This line used to say only "Start it with: <exe> run", and that is how a Windows
+   * laptop came to be joined to the network by a PowerShell window — which its owner
+   * then closed. The agent's whole lifetime was that window's, and nothing anywhere in
+   * the flow mentioned that `install-service` existed. Whichever line someone copies,
+   * they should be told there is a version of this that survives a restart.
+   */
+  console.log(`\nStart it now:            ${invocation()} run`)
+  console.log(`Or have it start itself: ${invocation()} install-service`)
+  console.log(`\n  install-service rejoins after every restart, with no window left open.`)
+  console.log(`  Without it, this computer is on the network only while that command is running.\n`)
 }

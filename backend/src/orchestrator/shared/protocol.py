@@ -33,9 +33,23 @@ def json_loads(value: str | bytes) -> object:
     return json.loads(value, parse_constant=reject_constant)
 
 
+class JsonTooLarge(ValueError):
+    """One payload or result is over JSON_LIMIT.
+
+    Still a ValueError, so every caller that already rejects oversized JSON keeps doing
+    so. A distinct type because the size of *one task's result* is a fact about that
+    task, and the connection handlers need to be able to tell it apart from the frame
+    being malformed. Reading it as the latter is what made a single oversized result
+    close the WebSocket, which marked the worker unhealthy and re-queued the slice onto
+    the next machine, which produced the same oversized result, and so on across the
+    fleet.
+    """
+
+
 def bounded_json(value: JsonValue) -> JsonValue:
-    if len(json_text(value).encode()) > JSON_LIMIT:
-        raise ValueError("JSON payload/result must be at most 64 KiB")
+    size = len(json_text(value).encode())
+    if size > JSON_LIMIT:
+        raise JsonTooLarge(f"JSON payload/result must be at most {JSON_LIMIT} bytes, got {size}")
     return value
 
 
@@ -67,8 +81,33 @@ class TaskSpec(Model):
         return bounded_json(value)
 
 
+class Machine(Model):
+    """What a worker *is*, as opposed to what it can run.
+
+    Every field here already crossed the wire before this model existed — the agent has
+    always reported them and the server discarded them, so a scheduler could tell an
+    8-core laptop from a 15-core desktop only by watching how fast work came back. None
+    of this is load-bearing for correctness: it exists so allocation can be better than
+    round-robin, and every field is optional because a client that predates it, or a
+    platform that cannot answer, must still be able to register.
+    """
+
+    os: str | None = Field(default=None, max_length=32)
+    arch: str | None = Field(default=None, max_length=32)
+    cpu_model: str | None = Field(default=None, max_length=128)
+    logical_cores: int | None = Field(default=None, ge=1, le=4096)
+    total_ram_mb: int | None = Field(default=None, ge=0)
+    agent_version: str | None = Field(default=None, max_length=64)
+    #: What the owner consented to run at once. Not a hardware fact, and deliberately
+    #: lower than the core count on machines someone is sitting in front of.
+    max_concurrency: int | None = Field(default=None, ge=1, le=1024)
+
+
 class Capabilities(Requirements):
     kinds: list[Identifier] = Field(min_length=1, max_length=32)
+    #: Optional because rows written before this field existed must still load, and
+    #: because `extra="forbid"` would otherwise reject them outright.
+    machine: Machine | None = None
 
 
 class Task(Model):

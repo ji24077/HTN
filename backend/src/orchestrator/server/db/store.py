@@ -38,6 +38,19 @@ from .connection import connection_options
 # A reservation older than this never receives its provider key; the reconciler closes it.
 PENDING_ENROLLMENT_SECONDS = 300
 
+#: Every task column except the two heavy ones, for listings.
+#:
+#: `result` and `attestation` hold whatever the adapter returned, and a walker slice
+#: returns tens of kilobytes. Five hundred of those is a reply of tens of megabytes, which
+#: the dashboard stream re-reads on *every* change notification — and a worker heartbeat
+#: is a change, so an idle fleet alone kept a core busy serializing results nobody asked
+#: for. A server with no spare CPU is slow to hand out work, which looks like a scheduler
+#: problem and is really this. Read one task by id when the result itself is wanted.
+TASK_SUMMARY_COLUMNS = (
+    "id,spec,state,generation,worker_id,session_id,lease_until,deadline,"
+    "failure,created_at,progress,started_at"
+)
+
 
 class Conflict(Exception):
     pass
@@ -342,7 +355,9 @@ class Store:
         return task_from_row(row)
 
     async def tasks(self) -> list[Task]:
-        rows = await self.pool.fetch("SELECT * FROM tasks ORDER BY created_at DESC,id LIMIT 500")
+        rows = await self.pool.fetch(
+            f"SELECT {TASK_SUMMARY_COLUMNS} FROM tasks ORDER BY created_at DESC,id LIMIT 500"
+        )
         return [task_from_row(row) for row in rows]
 
     async def execution_events(

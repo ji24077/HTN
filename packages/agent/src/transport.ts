@@ -1,7 +1,7 @@
 import { freemem } from 'node:os'
 import WebSocket from 'ws'
 import {
-  decode, envelope, mintAssertion, signAttestation, hashOutput,
+  decode, envelope, mintAssertion, signAttestation, hashOutput, resultTooLarge, JSON_LIMIT,
   TaskOffer, HelloAck, Revoked,
 } from '@dwp/protocol'
 import type { KeyObject } from 'node:crypto'
@@ -9,17 +9,18 @@ import { createLogger } from '@dwp/protocol'
 import { diagnoseOrigin } from '@dwp/protocol'
 import { fallbackLookup, dnsFallbackEnabled, installDnsFallback, directDial } from './resolver.ts'
 import { applyUpdate, restartIntoNewVersion } from './update.ts'
-import { isCompiledBinary } from './paths.ts'
+import { AGENT_VERSION, isCompiledBinary } from './paths.ts'
 import { probe } from './capability.ts'
 import { isPaused, type AgentConfig } from './config.ts'
 import { runEcho } from './adapters/echo.ts'
 import { runInference } from './adapters/inference.ts'
 import { runWalker } from './adapters/walker.ts'
 import { SupersessionPolicy } from './supersession.ts'
+import * as history from './history.ts'
+import type { RunRecord } from './history.ts'
 import { captureWorkloadFailure } from './telemetry.ts'
 import { applyManagedTelemetry } from './managed-telemetry.ts'
 import { ExecutionJournal } from './execution.ts'
-import { AGENT_VERSION } from './paths.ts'
 
 const log = createLogger({ component: 'agent' })
 
@@ -86,12 +87,20 @@ export type AgentState = {
   /** Another agent holds this host's identity, so this one has stood down. */
   stoodDown: boolean
   updating: boolean
+  /**
+   * When this machine last finished a task, so a window can say "last run 4 min ago"
+   * without reading the history file. Everything else about past runs comes from the
+   * history module directly.
+   */
+  lastRunAt: number | null
 }
 
-/** Enough of a handle for a window to ask for another attempt. */
+/** Enough of a handle for a window to steer the connection. */
 export type AgentHandle = {
   /** Try now rather than waiting out the stand-down delay. */
   retryNow(): void
+  /** Stop for good: no more work, no reconnection. Used when leaving a network. */
+  stop(): void
 }
 
 export function connect(
@@ -122,7 +131,7 @@ export function connect(
 
   const state: AgentState = {
     connection: 'offline', attempt: 0, connectedSince: null, running: [],
-    lastLostReason: null, advice: null, stoodDown: false, updating: false,
+    lastLostReason: null, advice: null, stoodDown: false, updating: false, lastRunAt: null,
   }
   /** Derive the task list from the live map rather than maintaining a second copy. */
   const notify = (patch: Partial<AgentState> = {}): void => {
@@ -131,6 +140,9 @@ export function connect(
       ({ taskId, adapter: r.adapter, startedAt: r.startedAt }))
     observe?.({ ...state, running: [...state.running] })
   }
+
+  /** The socket currently in hand, so the caller can close it deliberately. */
+  let current: WebSocket | null = null
 
   const open = (): void => {
     if (stopped) return
@@ -167,6 +179,7 @@ export function connect(
       // connected rather than failing on the very next dial.
       ...(dnsFallbackEnabled() ? { lookup: fallbackLookup } : {}),
     })
+    current = ws
     let heartbeat: NodeJS.Timeout | undefined
     let heartbeatMs = DEFAULT_HEARTBEAT_MS
     let pauseWas = isPaused()
@@ -446,6 +459,19 @@ export function connect(
 
         const startedAt = new Date().toISOString()
         const t0 = performance.now()
+        const cpu0 = history.cpuStart()
+        /**
+         * Whether anything else was already running when this started.
+         *
+         * `process.cpuUsage()` is process-wide, so with two tasks in flight the figure
+         * recorded against each is really both of them. Noting it costs one boolean and
+         * lets the window say "(shared)" rather than quietly overstate one task's cost.
+         */
+        const overlapped = running.size > 1
+        let outcome: RunRecord['outcome'] = 'error'
+        let errorClass: string | undefined
+        let message: string | undefined
+        let outputBytes: number | undefined
         journal.emit(offer.taskId, offer.attempt, 'started', {
           adapter: offer.adapter, job_id: offer.jobId, agent_version: AGENT_VERSION,
           runtime: process.versions.bun ? `bun ${process.versions.bun}` : `node ${process.version}`,
@@ -468,7 +494,34 @@ export function connect(
           .then(output => {
             if (controller.signal.aborted) return
             const finishedAt = new Date().toISOString()
+            /**
+             * Say so here rather than shipping a result the server will not store.
+             *
+             * The server refuses an oversized result, and used to refuse it by closing
+             * the connection — which marked this host unhealthy, re-queued the slice, and
+             * handed the same too-big slice to the next machine to fail the same way.
+             * Reporting it as this task's error keeps the failure where it belongs and
+             * puts the real reason on the task instead of `worker_reconnected`.
+             */
+            if (resultTooLarge(output)) {
+              hostLog.error('task.result_too_large', {
+                taskId: offer.taskId, adapter: offer.adapter, limitBytes: JSON_LIMIT,
+                note: 'this slice produced more output than one result may carry — split it',
+              })
+              outcome = 'result_too_large'
+              errorClass = 'result_too_large'
+              message = `result exceeds the ${JSON_LIMIT}-byte limit; submit this work in smaller slices`
+              send('task.error', {
+                taskId: offer.taskId,
+                leaseId: offer.leaseId,
+                errorClass: 'result_too_large',
+                message,
+              })
+              return
+            }
             const outputHash = hashOutput(output)
+            outcome = 'ok'
+            try { outputBytes = Buffer.byteLength(JSON.stringify(output) ?? '') } catch { /* unmeasurable */ }
             report.progress(1, 1)
             finishTracking('succeeded', { output_hash: outputHash, result_url: `/v1/tasks/${offer.taskId}` })
             send('task.result', {
@@ -500,10 +553,13 @@ export function connect(
                 jobId: offer.jobId,
               })
             }
+            outcome = controller.signal.aborted ? 'aborted' : 'error'
+            errorClass = controller.signal.aborted ? 'aborted' : 'adapter_error'
+            message = (err instanceof Error ? err.message : String(err)).slice(0, 200)
             send('task.error', {
               taskId: offer.taskId,
               leaseId: offer.leaseId,
-              errorClass: controller.signal.aborted ? 'aborted' : 'adapter_error',
+              errorClass,
               message: err instanceof Error ? err.message : String(err),
             })
           })
@@ -511,7 +567,27 @@ export function connect(
             clearTimeout(wallClock)
             clearInterval(renew)
             running.delete(offer.taskId)
-            notify()
+            // Before notify(), so the window's very next poll already sees this run.
+            // record() swallows its own failures; nothing here can throw.
+            const finishedAt = Date.now()
+            history.record({
+              taskId: offer.taskId,
+              jobId: offer.jobId,
+              adapter: offer.adapter,
+              attempt: offer.attempt,
+              startedAt,
+              finishedAt: new Date(finishedAt).toISOString(),
+              durationMs: Number((performance.now() - t0).toFixed(3)),
+              outcome,
+              ...(errorClass === undefined ? {} : { errorClass }),
+              ...(message === undefined ? {} : { message: message.slice(0, 200) }),
+              cpuMs: history.cpuMsSince(cpu0),
+              rssMb: history.rssMb(),
+              shared: overlapped || running.size > 0,
+              ...(outputBytes === undefined ? {} : { outputBytes }),
+              agentVersion: cfg.installedRelease ?? AGENT_VERSION,
+            })
+            notify({ lastRunAt: finishedAt })
           })
       }
     })
@@ -649,6 +725,11 @@ export function connect(
   }
 
   return {
+    stop: () => {
+      stopped = true
+      notify({ connection: 'offline', connectedSince: null })
+      try { current?.close(1000, 'left the network') } catch {}
+    },
     retryNow: () => {
       if (!stopped || !state.stoodDown) return
       supersession.reset()

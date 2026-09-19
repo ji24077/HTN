@@ -179,7 +179,7 @@ class FakeStore:
         if task_ref(current) != ref or current.state != "running":
             raise StaleAssignment("cancelled")
         current.state = "queued" if failure and retryable else "succeeded"
-        self.finished.append((ref, result, failure, attestation))
+        self.finished.append((ref, result, failure, attestation, retryable))
 
     async def disconnect(self, worker_id, session):
         self.disconnected.append(session)
@@ -249,8 +249,8 @@ class GatewayTests(unittest.TestCase):
     def ref(self, offer):
         return {"taskId": offer["taskId"], "leaseId": offer["leaseId"]}
 
-    def result(self, offer):
-        output = {"nonce": 1, "value": 0.0000001, "label": "東京"}
+    def result(self, offer, output=None):
+        output = {"nonce": 1, "value": 0.0000001, "label": "東京"} if output is None else output
         encoded = json.dumps(output, ensure_ascii=False, separators=(",", ":"))
         digest = hashlib.sha256(encoded.encode()).hexdigest()
         start, end = "2026-09-19T12:00:00.000Z", "2026-09-19T12:00:00.001Z"
@@ -368,7 +368,7 @@ class GatewayTests(unittest.TestCase):
             self.assertEqual(next_offer["type"], "task.offer")
             self.assertEqual(next_offer["payload"]["taskId"], "task-2")
         self.assertEqual(len(self.store.renewals), 1)
-        _, output, failure, proof = self.store.finished[0]
+        _, output, failure, proof, _ = self.store.finished[0]
         self.assertEqual(output["label"], "東京")
         self.assertEqual(failure, "")
         self.assertEqual(proof["hostId"], self.store.worker_id)
@@ -392,6 +392,50 @@ class GatewayTests(unittest.TestCase):
                     with self.assertRaises(WebSocketDisconnect):
                         socket.receive_json()
                 self.assertEqual(self.store.finished, [])
+
+    def test_oversized_result_fails_one_task_and_keeps_the_connection(self):
+        """A slice too big to report must cost that slice, not the host.
+
+        Refusing it by closing the socket is what made a fleet flap: the worker was
+        marked unhealthy, everything it held was cancelled as `worker_reconnected`, and
+        the slice was re-queued onto the next machine to be refused there too.
+        """
+        big = {"results": ["x" * 512 for _ in range(200)]}
+        with self.connect() as socket:
+            offer = self.start(socket)
+            socket.send_json(frame("task.accept", self.ref(offer)))
+            self.send_result(socket, self.result(offer, output=big))
+            # Still talking, and already being given the next piece of work.
+            self.assertEqual(socket.receive_json()["type"], "task.cancel")
+            following = socket.receive_json()
+            self.assertEqual(following["type"], "task.offer")
+            self.assertEqual(following["payload"]["taskId"], "task-2")
+        ref, stored, failure, proof, retryable = self.store.finished[0]
+        self.assertEqual(ref.task_id, "task-1")
+        self.assertEqual(failure, "result_too_large")
+        self.assertIsNone(stored)
+        self.assertIsNone(proof)
+        # Deterministic adapters reproduce the same oversized output everywhere, so a
+        # retry only moves the failure to the next machine.
+        self.assertFalse(retryable)
+
+    def test_device_reporting_result_too_large_is_not_retried(self):
+        """An agent that measures its own output first gets the same verdict."""
+        with patch("sentry_sdk.capture_message") as capture:
+            with self.connect() as socket:
+                offer = self.start(socket)
+                socket.send_json(frame("task.accept", self.ref(offer)))
+                socket.send_json(
+                    frame(
+                        "task.error",
+                        {**self.ref(offer), "errorClass": "result_too_large", "message": "too big"},
+                    )
+                )
+                self.assertEqual(socket.receive_json()["type"], "task.offer")
+            self.assertEqual(self.store.finished[0][2], "result_too_large")
+            self.assertFalse(self.store.finished[0][4])
+            # Nothing is broken; this is a job that was split too coarsely.
+            capture.assert_not_called()
 
     def test_cancelled_assignment_is_cancelled_on_device_and_cannot_finish(self):
         with self.connect() as socket:

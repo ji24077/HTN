@@ -10,6 +10,7 @@ from pydantic import ValidationError
 
 from ..shared.protocol import Identifier, Submission, Task, TaskSpec, Worker, json_loads, json_text
 from .auth import require_admin
+from .db.store import TASK_SUMMARY_COLUMNS
 
 router = APIRouter(prefix="/v1", dependencies=[Depends(require_admin)])
 
@@ -20,7 +21,11 @@ async def read_snapshot(request: Request):
     async with store.pool.acquire() as conn:
         async with conn.transaction(isolation="repeatable_read", readonly=True):
             workers = await conn.fetch("SELECT * FROM workers ORDER BY id LIMIT 500")
-            tasks = await conn.fetch("SELECT * FROM tasks WHERE spec->>'kind' != 'python_project' ORDER BY created_at DESC,id LIMIT 500")
+            tasks = await conn.fetch(
+                f"SELECT {TASK_SUMMARY_COLUMNS} FROM tasks "
+                "WHERE spec->>'kind' != 'python_project' "
+                "ORDER BY created_at DESC,id LIMIT 500"
+            )
             events = await conn.fetch("SELECT * FROM events ORDER BY id DESC LIMIT 40")
     return {
         "workers": [dict(w) for w in workers],
