@@ -41,7 +41,9 @@ rocm = [
     # torch+rocm depends on this and it only exists on the ROCm index, so it
     # needs both a listing here and a [tool.uv.sources] entry below. Without
     # it the lock fails on EVERY machine, not just the AMD box.
-    "pytorch-triton-rocm; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    # NOTE the name: rocm7.0 ships "triton-rocm"; older indices called the same
+    # thing "pytorch-triton-rocm". Changing the index URL means changing this.
+    "triton-rocm; sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]
 # Ji: pure Python, no heavy deps. Dashboard is static HTML served by the server.
 agent = []
@@ -67,24 +69,33 @@ conflicts = [
 ]
 
 [[tool.uv.index]]
-name = "pytorch-cu124"
-url = "https://download.pytorch.org/whl/cu124"
+# RunPod hosts offer CUDA 12.8 / 13.x -- 12.4 is not available on most of them
+# (checked against the live catalog: RTX 4090 reports 12.4 as unavailable).
+# cu128 wheels run on 12.8 and the 13.x drivers; cu124 is a gamble we don't need.
+# Verify on the actual pod with `make check` before trusting this.
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
 explicit = true
 
 [[tool.uv.index]]
+# rocm6.2 caps torch at 2.5.1 while the CUDA side is on 2.11 -- too wide a gap
+# for the cross-vendor migration experiment. rocm7.0 gives 2.10.0, near parity.
+# UNVERIFIED against a real MI300X pod: ROCm wheels must match the host driver.
+# Gate: launch an MI300X pod, run `make setup-rocm && make check`. If `available`
+# is False, read the host's ROCm version and move this URL to match it.
 name = "pytorch-rocm"
-url = "https://download.pytorch.org/whl/rocm6.2"
+url = "https://download.pytorch.org/whl/rocm7.0"
 explicit = true
 
 [tool.uv.sources]
 torch = [
-    { index = "pytorch-cu124", extra = "cuda" },
+    { index = "pytorch-cu128", extra = "cuda" },
     { index = "pytorch-rocm",  extra = "rocm" },
 ]
 # torch+rocm pulls this in, and it only exists on the ROCm index. The index is
 # explicit=true, so without this line uv looks on PyPI and the whole lock fails
 # — on every machine, not just the AMD one.
-pytorch-triton-rocm = [
+triton-rocm = [
     { index = "pytorch-rocm", extra = "rocm" },
 ]
 
