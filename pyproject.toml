@@ -1,0 +1,105 @@
+[project]
+name = "gpushare"
+version = "0.1.0"
+requires-python = ">=3.11"
+
+# Everyone gets these. No torch here — see extras.
+dependencies = [
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "websockets>=13",
+    "rich>=13",            # the stage terminal has to look clean (N-5)
+]
+
+[project.optional-dependencies]
+# Jack: server hub + worker daemon. No torch on the server box.
+server = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "aiosqlite>=0.20",
+    "python-multipart>=0.0.12",   # checkpoint upload
+    "httpx>=0.27",
+]
+# Worker daemon needs GPU introspection but not the full trainer.
+worker = [
+    "httpx>=0.27",
+    "nvidia-ml-py>=12.560",       # pynvml; skip on AMD boxes
+]
+# Ethan: NVIDIA training box.
+cuda = [
+    "torch>=2.5",
+    "safetensors>=0.4.5",
+    "numpy>=2.0",
+    # torchft: fill in after T-2a. It ships nightly-only — if the verdict is
+    # "works", pin the exact wheel here and add its index below.
+]
+# AMD box. Same code, different wheel.
+rocm = [
+    "torch>=2.5",
+    "safetensors>=0.4.5",
+    "numpy>=2.0",
+    # torch+rocm depends on this and it only exists on the ROCm index, so it
+    # needs both a listing here and a [tool.uv.sources] entry below. Without
+    # it the lock fails on EVERY machine, not just the AMD box.
+    "pytorch-triton-rocm; sys_platform == 'linux' and platform_machine == 'x86_64'",
+]
+# Ji: pure Python, no heavy deps. Dashboard is static HTML served by the server.
+agent = []
+
+dev = [
+    "ruff>=0.7",
+    "pytest>=8",
+]
+
+[project.scripts]
+gpushare-server  = "gpushare.server.main:main"
+gpushare-worker  = "gpushare.worker.daemon:main"
+gpushare-cli     = "gpushare.worker.cli:main"
+gpushare-trainer = "gpushare.trainer.loop:main"
+gpushare-mock    = "gpushare.agent.mock:main"
+
+# ── uv ────────────────────────────────────────────────────────────────────────
+# cuda and rocm can never be installed together. uv will refuse to resolve a
+# single lock that contains both, so declare the conflict explicitly.
+[tool.uv]
+conflicts = [
+    [{ extra = "cuda" }, { extra = "rocm" }],
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-rocm"
+url = "https://download.pytorch.org/whl/rocm6.2"
+explicit = true
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cu124", extra = "cuda" },
+    { index = "pytorch-rocm",  extra = "rocm" },
+]
+# torch+rocm pulls this in, and it only exists on the ROCm index. The index is
+# explicit=true, so without this line uv looks on PyPI and the whole lock fails
+# — on every machine, not just the AMD one.
+pytorch-triton-rocm = [
+    { index = "pytorch-rocm", extra = "rocm" },
+]
+
+# ── tooling ───────────────────────────────────────────────────────────────────
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gpushare"]
