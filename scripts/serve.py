@@ -38,9 +38,12 @@ from gpushare.agent.task import MODEL_ID, PROMPT, parse_output
 DTYPES = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}
 STATE: dict = {}
 
-# Tail appended after the dynamic part. Short on purpose: anything after the
-# dynamic text cannot be cached, so every token here is paid on every request.
-SUFFIX = "\nJSON:\n"
+# Nothing is appended after the dynamic text. It used to be "\nJSON:\n", which
+# silently forced one output shape: the same cached policy has to serve both a
+# short deterministic benchmark answer and a long structured report, and the
+# instruction that picks between them belongs to the caller. It is ~40 tokens
+# against a 30,875-token prefix, so leaving it uncached costs nothing.
+SUFFIX = ""
 
 
 class PrefixCache:
@@ -245,6 +248,14 @@ class TokenStreamer:
         if delta:
             self._q.put(delta)
 
+    def ids_seen(self) -> list[int]:
+        """Token count for the report panel — the length of what was generated.
+
+        Counted from ids rather than from the decoded string: one token is not
+        one character, and a "300-token report" claim has to come from tokens.
+        """
+        return self._ids
+
     def end(self) -> None:
         self._q.put(None)
 
@@ -311,6 +322,7 @@ def generate_stream(sentence: str, *, max_new: int, greedy: bool, no_cache: bool
     yield {
         "done": True,
         "raw_output": raw,
+        "new_tokens": len(streamer.ids_seen()),
         "parsed": parsed.model_dump() if parsed else None,
         "parsed_ok": parsed is not None,
         # ttft is prefill plus one decode step, not prefill alone. Naming it
@@ -380,8 +392,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def _prefix(self, req: dict) -> None:
         text = req.get("prefix")
+        # Drop the old cache BEFORE building the new one. Holding both is two
+        # multi-GB KV tensors plus the new prefill's activations, which OOMs on
+        # a 24 GB card — reloading the policy, the most ordinary thing to do
+        # twice, was killing the server.
+        STATE.pop("prefix", None)
+        torch.cuda.empty_cache()
         if not text:
-            STATE.pop("prefix", None)
             self._send(200, {"prefix_tokens": 0, "cleared": True})
             return
         pc = PrefixCache(STATE["model"], STATE["tok"], str(text))

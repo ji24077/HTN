@@ -319,19 +319,36 @@
         <div><div class="eyebrow">Step 6 · Long context</div><h2>같은 문서를 매번 다시 읽지 않기</h2></div>
         <p class="hint">prefill을 없애면 남는 것은 decode뿐입니다.</p>
       </div>
-      <div class="charts">
-        <article class="card">
-          <div class="eyebrow">정적 정책 문서</div>
-          <p class="hint" style="margin:8px 0 12px">프롬프트의 <b>앞</b>에 놓입니다. 어텐션이 causal이라 앞이 고정일 때만 재사용됩니다.</p>
+      <article class="card">
+        <div class="eyebrow">정적 정책 문서</div>
+        <p class="hint" style="margin:8px 0 12px">프롬프트의 <b>앞</b>에 놓입니다. 어텐션이 causal이라 앞이 고정일 때만 재사용됩니다.</p>
+        <div class="btnrow">
           <button id="loadPolicy" class="btn blue">정책 로드 · 캐시 구축</button>
-          <div id="policyStat" class="callout" style="margin-top:10px">아직 로드 안 됨</div>
-          <button id="clearPolicy" class="btn secondary" style="margin-top:8px">캐시 해제</button>
+          <button id="clearPolicy" class="btn secondary">캐시 해제</button>
+          <span id="policyStat" class="hint">아직 로드 안 됨</span>
+        </div>
+        <textarea id="event" style="width:100%;min-height:52px;margin:12px 0">An employee uploaded credentials to an unknown website.</textarea>
+      </article>
+
+      <div class="charts" style="margin-top:16px">
+        <article class="card">
+          <div class="eyebrow">A · Prefill 벤치마크</div>
+          <h3 style="margin:6px 0 4px">반복되는 정책 prefill</h3>
+          <p class="hint">짧고 결정적인 출력으로 고정해 <b>prefill만</b> 남깁니다. 배수 주장은 여기서만 나옵니다.</p>
+          <button id="runAb" class="btn" style="margin-top:10px">벤치마크 실행 (각 3회)</button>
+          <div id="abDiag" style="margin-top:14px"></div>
         </article>
         <article class="card">
-          <div class="eyebrow">이벤트 (동적 · 매 요청 변경)</div>
-          <textarea id="event" style="width:100%;min-height:64px;margin:10px 0">An employee uploaded credentials to an unknown website.</textarea>
-          <button id="runAb" class="btn">A/B 실행 — 캐시 끔 → 캐시 켬</button>
-          <div id="abDiag" style="margin-top:14px"></div>
+          <div class="eyebrow">B · 사고 보고서 (스트리밍)</div>
+          <h3 style="margin:6px 0 4px">모델이 판단을 설명합니다</h3>
+          <p class="hint">5개 섹션의 구조화된 보고서를 실시간 생성합니다. <b>속도 주장에는 쓰지 않습니다.</b></p>
+          <button id="runReport" class="btn blue" style="margin-top:10px">보고서 생성</button>
+          <div class="btnrow" style="margin-top:12px">
+            <span class="pill">TTFT <b id="rTtft">—</b></span>
+            <span class="pill">총 <b id="rTotal">—</b></span>
+            <span class="pill">출력 <b id="rTokens">—</b></span>
+          </div>
+          <div id="reportOut" class="code" style="margin-top:12px;min-height:150px;max-height:340px;overflow:auto;white-space:pre-wrap">—</div>
         </article>
       </div>
     </section>
@@ -581,7 +598,7 @@
     });
 
 
-    // ── long-context prefix cache ─────────────────────────────────────────
+    // ── long-context: benchmark and report are separate on purpose ────────
     const POLICY_SECTION = "Section {n}. Access control and credential handling. Employees must not transmit "
       + "credentials, API keys, or private tokens to any system that has not been approved by the "
       + "security review board. Approved destinations are listed in the internal registry and are "
@@ -592,103 +609,198 @@
       + "notification of the data protection officer. Contractors are held to the same standard as "
       + "full time staff. Repeated violations escalate to account suspension pending review. ";
 
+    // The POLICY alone is the cached prefix. The instruction is deliberately
+    // NOT in it: one cache serves both a short benchmark answer and a long
+    // report, and the instruction is what picks between them. ~40 tokens
+    // against 30,875 cached, so recomputing it per request is free.
     function policyText() {
       let out = '';
       for (let i = 1; i <= 215; i++) out += POLICY_SECTION.replace('{n}', i);
-      // The instruction is part of the STATIC head, not the dynamic tail. Put it
-      // after the event and it stops being cacheable — same tokens, no reuse.
-      return out + "\n\nApply the policy above. For the event below return only "
-                 + "JSON with keys risk, severity, action.\n\nEvent:\n";
+      // Qwen's user-turn opener belongs at the head of the cached prefix. See
+      // TURN_END for why the chat markers matter at all.
+      return "<|im_start|>user\n" + out + "\n\n---\n";
     }
 
+    // Closes the user turn and opens the assistant's. Without it an instruct
+    // model fed raw text behaves like a base model: measured on the report
+    // prompt it ignored the five sections, invented facts the event did not
+    // contain, repeated itself and slipped into "We are given a policy...".
+    // With it, the same model and the same prompt produced the sections. Short
+    // JSON hid this, because continuing a document happens to produce JSON.
+    const TURN_END = "<|im_end|>\n<|im_start|>assistant\n";
+
+    // Short and deterministic. The benchmark has to isolate prefill, so decode
+    // is held to a few dozen greedy tokens — otherwise the ratio measures
+    // generation length as much as it measures caching.
+    const BENCH_INSTRUCTION =
+      "Apply the policy above. For the event below return only JSON with keys "
+      + "risk, severity, action.\n\nEvent:\n";
+
+    const REPORT_INSTRUCTION =
+      "Apply the policy above. Return a structured incident report with these sections:\n"
+      + "1. Risk classification\n2. Evidence\n3. Recommended actions\n"
+      + "4. Escalation criteria\n5. Uncertainty\n"
+      + "Be specific but do not provide harmful operational details.\n\nEvent:\n";
+
     async function loadPolicy(text) {
-      const el = el('policyStat');
-      el.className = 'validation'; el.textContent = text ? '프리필 계산 중… (cold 경로, 수 초)' : '해제 중…';
+      const box = el('policyStat');
+      box.textContent = text ? '프리필 계산 중… (cold 경로)' : '해제 중…';
       try {
         const r = await api('/api/prefix', {method:'POST', body: JSON.stringify({prefix: text})});
-        if (!text || r.cleared) { el.className='validation warn'; el.textContent='캐시 해제됨 — 모든 요청이 cold'; return; }
-        // build_s is the cold prefill, measured on this GPU right now. The
-        // speedup below is stated against it rather than against a remembered number.
-        el.className = 'validation ok';
-        el.textContent = `${r.prefix_tokens.toLocaleString()} 토큰 캐시됨 · cold prefill ${r.build_s.toFixed(2)}s`;
-        window.__coldPrefill = r.build_s;
-      } catch (err) { el.className='validation warn'; el.textContent = String(err.message || err); }
+        if (!text || r.cleared) { box.textContent = '캐시 해제됨 — 모든 요청이 cold'; return; }
+        box.textContent = r.prefix_tokens.toLocaleString() + ' 토큰 캐시됨 · cold prefill ' + r.build_s.toFixed(2) + 's';
+      } catch (err) { box.textContent = String(err.message || err); }
     }
 
     function abChart(host, rows) {
       host.innerHTML = '';
-      const W = Math.max(300, host.clientWidth || 460);
-      const padL = 74, padR = 56, padT = 4, padB = 22, BAR = 16, GAP = 14;
+      const W = Math.max(280, host.clientWidth || 420);
+      const padL = 78, padR = 58, padT = 4, padB = 20, BAR = 16, GAP = 14;
       const H = padT + rows.length*(BAR+GAP) + padB;
       const max = Math.max(...rows.map(r => r.prefill + r.decode)) * 1.02 || 1;
       const sx = v => (W - padL - padR) * (v / max);
-      const svg = svgEl('svg', {class:'chart', width:W, height:H, viewBox:`0 0 ${W} ${H}`,
+      const svg = svgEl('svg', {class:'chart', width:W, height:H, viewBox:'0 0 ' + W + ' ' + H,
                                role:'img', 'aria-label':'캐시 미스 대 적중 지연시간 분해'});
       rows.forEach((r, i) => {
         const y = padT + i*(BAR+GAP);
         const lab = svgEl('text', {class:'ax', x:padL-10, y:y+BAR-3, 'text-anchor':'end'});
         lab.textContent = r.label; svg.appendChild(lab);
         let x = padL;
-        for (const [key, colour, name] of [['prefill','var(--s-before)','prefill'], ['decode','var(--s-after)','decode']]) {
-          const w = sx(r[key]);
-          // 2px surface gap so the two segments read as two, not one long bar.
+        for (const seg of [['prefill','var(--s-before)'], ['decode','var(--s-after)']]) {
+          const w = sx(r[seg[0]]);
           if (w > 0.5) {
-            svg.appendChild(svgEl('path', {d: barPath(x, y, Math.max(w-2, 0.5), BAR, 4), fill: colour}));
-            const hit = svgEl('rect', {class:'hit', x, y, width:Math.max(w,2), height:BAR});
-            hit.addEventListener('mousemove', ev => tipShow(ev, `<u>${r.label} · ${name}</u>${r[key].toFixed(2)}s`));
+            // 2px surface gap so the segments read as two, not one long bar.
+            svg.appendChild(svgEl('path', {d: barPath(x, y, Math.max(w-2, 0.5), BAR, 4), fill: seg[1]}));
+            const hit = svgEl('rect', {class:'hit', x:x, y:y, width:Math.max(w,2), height:BAR});
+            hit.addEventListener('mousemove', ev => tipShow(ev, '<u>' + r.label + ' · ' + seg[0] + '</u>' + r[seg[0]].toFixed(2) + 's'));
             hit.addEventListener('mouseleave', tipHide);
             svg.appendChild(hit);
           }
           x += w;
         }
         const tot = svgEl('text', {class:'val', x:x+7, y:y+BAR-3});
-        tot.textContent = `${(r.prefill+r.decode).toFixed(2)}s`; svg.appendChild(tot);
+        tot.textContent = (r.prefill+r.decode).toFixed(2) + 's'; svg.appendChild(tot);
       });
       host.appendChild(svg);
     }
 
+    const pctile = (xs, q) => { const a = xs.slice().sort((m,n)=>m-n);
+      return a[Math.min(a.length-1, Math.floor(q*(a.length-1)+0.5))]; };
+    const REPEATS = 3;
+
     async function runAb() {
       const box = el('abDiag');
-      const sentence = el('event').value.trim();
-      if (!sentence) { toast('이벤트를 입력하세요', true); return; }
-      box.innerHTML = '<div class="empty-note">캐시 끈 상태로 실행 중… (cold, 수 초)</div>';
+      const ev = el('event').value.trim();
+      if (!ev) { toast('이벤트를 입력하세요', true); return; }
+      const body = (no_cache) => JSON.stringify({
+        sentence: BENCH_INSTRUCTION + ev + TURN_END, max_new_tokens: 48, greedy: true, no_cache: no_cache});
       try {
-        const off = await api('/api/generate', {method:'POST', body: JSON.stringify({sentence, max_new_tokens:48, no_cache:true})});
-        box.innerHTML = '<div class="empty-note">캐시 켠 상태로 실행 중…</div>';
-        const on  = await api('/api/generate', {method:'POST', body: JSON.stringify({sentence, max_new_tokens:48})});
-        const same = (off.raw_output || '') === (on.raw_output || '');
-        const cold = window.__coldPrefill ?? Math.max(off.latency_s - (on.latency_s || 0), 0);
-        const rows = [
-          {label:'캐시 미스', prefill: Math.max(off.latency_s - on.latency_s, 0), decode: on.latency_s},
-          {label:'캐시 적중', prefill: 0, decode: on.latency_s},
-        ];
-        // floor, not round: 30,875/30,886 rounds to "100.0%", which reads as
-        // "nothing is recomputed" when 11 tokens still are. Never round a
-        // fraction up to a whole in a claim about what was skipped.
-        const reuse = on.prompt_tokens
-          ? (Math.floor(on.prefix_tokens / on.prompt_tokens * 1000) / 10) : 0;
-        box.innerHTML = `
-          <div class="legend" style="margin-bottom:10px">
-            <span><i style="background:var(--s-before)"></i>prefill</span>
-            <span><i style="background:var(--s-after)"></i>decode</span>
-          </div>
-          <div id="abPlot"></div>
-          <div class="validation ${same ? 'ok' : 'warn'}" style="margin-top:12px">
-            ${same ? '출력 동일 — 속도만 바뀜' : '출력 불일치 — 최적화가 아니라 버그입니다'}
-          </div>
-          <table class="dv" style="margin-top:12px"><tbody>
-            <tr><td>입력 토큰</td><td>${on.prompt_tokens?.toLocaleString() ?? '—'}</td></tr>
-            <tr><td>재사용된 prefix</td><td>${on.prefix_tokens?.toLocaleString() ?? '—'} (${reuse.toFixed(1)}%)</td></tr>
-            <tr><td>동적 토큰</td><td>${on.dynamic_tokens ?? '—'}</td></tr>
-            <tr><td>캐시 미스 (cold)</td><td>${off.latency_s.toFixed(2)}s</td></tr>
-            <tr><td>캐시 적중 (warm)</td><td>${on.latency_s.toFixed(2)}s</td></tr>
-            <tr><td>배수</td><td>${(off.latency_s / on.latency_s).toFixed(1)}x</td></tr>
-          </tbody></table>
-          <div class="caveat">첫 요청은 반드시 miss입니다. 서버 재시작이나 캐시 축출 뒤에도 다시 cold가 됩니다 —
-            "항상 ${on.latency_s.toFixed(1)}초"가 아니라 "warm일 때 ${on.latency_s.toFixed(1)}초"입니다.</div>
-          <div class="code" style="margin-top:12px">${esc(on.raw_output || '')}</div>`;
-        abChart(el('abPlot'), rows);
-      } catch (err) { box.innerHTML = `<div class="empty-note">${esc(String(err.message || err))}</div>`; }
+        // Warm-up, discarded. The first call after a load pays one-off CUDA and
+        // allocator costs that belong to neither arm; counting it as cache-miss
+        // latency would inflate the ratio.
+        box.innerHTML = '<div class="empty-note">워밍업 (측정에서 제외)…</div>';
+        await api('/api/generate', {method:'POST', body: body(true)});
+
+        const off = [], on = [], offOut = [], onOut = [];
+        let last = null;
+        for (let i = 0; i < REPEATS; i++) {
+          box.innerHTML = '<div class="empty-note">캐시 끔 ' + (i+1) + '/' + REPEATS + '…</div>';
+          const a = await api('/api/generate', {method:'POST', body: body(true)});
+          box.innerHTML = '<div class="empty-note">캐시 켬 ' + (i+1) + '/' + REPEATS + '…</div>';
+          const b = await api('/api/generate', {method:'POST', body: body(false)});
+          off.push(a.latency_s); on.push(b.latency_s);
+          offOut.push(a.raw_output || ''); onOut.push(b.raw_output || '');
+          last = b;
+        }
+        // Three separate questions, and only the first two are guarantees.
+        //
+        // Each arm must be self-consistent: greedy decoding on one path has to
+        // repeat exactly, or the benchmark is measuring noise.
+        //
+        // Across arms it is NOT guaranteed and must not be claimed. Uncached
+        // prefills 30,892 tokens in one pass; cached prefills 30,857 earlier
+        // and appends 35. Different shapes pick different kernels and reduction
+        // orders, so at bf16 a near-tie can flip — measured here as "high" vs
+        // "High" at character 14, with each arm reproducing itself exactly.
+        const detOff = offOut.every(o => o === offOut[0]);
+        const detOn  = onOut.every(o => o === onOut[0]);
+        const identical = offOut[0] === onOut[0];
+        let diverge = '';
+        if (!identical) {
+          let k = 0; while (k < offOut[0].length && offOut[0][k] === onOut[0][k]) k++;
+          diverge = '문자 ' + k + ': 끔 ' + JSON.stringify(offOut[0].slice(k, k+14))
+                  + ' vs 켬 ' + JSON.stringify(onOut[0].slice(k, k+14));
+        }
+        const offP50 = pctile(off,.5), onP50 = pctile(on,.5);
+        const offP95 = pctile(off,.95), onP95 = pctile(on,.95);
+        const info = last.b;
+        const reuse = info.prompt_tokens ? Math.floor(info.prefix_tokens / info.prompt_tokens * 1000) / 10 : 0;
+        box.innerHTML =
+          '<div class="legend" style="margin-bottom:10px">'
+          + '<span><i style="background:var(--s-before)"></i>prefill</span>'
+          + '<span><i style="background:var(--s-after)"></i>decode</span></div>'
+          + '<div id="abPlot"></div>'
+          + '<div class="callout" style="margin-top:12px"><strong>'
+          + (detOff && detOn ? '각 경로는 결정적 — ' + REPEATS + '회 반복이 모두 동일'
+                             : '경로가 재현되지 않음 — 측정이 노이즈입니다')
+          + '</strong>' + (identical
+              ? '캐시 유무와 무관하게 출력도 byte 동일했습니다.'
+              : '단, 두 경로의 출력이 byte 동일하지는 않습니다. ' + esc(diverge))
+          + '</div>'
+          + '<table class="dv" style="margin-top:12px"><tbody>'
+          + '<tr><td>입력 토큰</td><td>' + (info.prompt_tokens || 0).toLocaleString() + '</td></tr>'
+          + '<tr><td>재사용된 prefix</td><td>' + (info.prefix_tokens || 0).toLocaleString() + ' (' + reuse.toFixed(1) + '%)</td></tr>'
+          + '<tr><td>캐시 미스 p50 / p95</td><td>' + offP50.toFixed(2) + 's / ' + offP95.toFixed(2) + 's</td></tr>'
+          + '<tr><td>캐시 적중 p50 / p95</td><td>' + onP50.toFixed(2) + 's / ' + onP95.toFixed(2) + 's</td></tr>'
+          + '<tr><td>배수 (p50)</td><td>' + (offP50/onP50).toFixed(1) + 'x</td></tr>'
+          + '</tbody></table>'
+          + (identical ? '' : '<div class="caveat">byte 동일이 <b>보장되지는 않습니다</b>. '
+            + '캐시 없는 경로는 전체를 한 번에 prefill하고, 캐시 경로는 미리 채운 뒤 나머지만 붙입니다 — '
+            + '텐서 모양이 다르면 커널과 리덕션 순서가 달라지고 bf16에서 거의 동률인 토큰의 argmax가 뒤집힙니다. '
+            + '각 경로가 스스로를 정확히 재현한다는 것이 여기서 보장되는 전부입니다.</div>')
+          + '<div class="caveat">이 배수는 <b>반복되는 정책 prefix의 prefill</b>에 대한 것입니다. '
+          + '모델이 5배 빨라진 것이 아니고, 오른쪽 보고서 생성이 5배 빨라지는 것도 아닙니다. '
+          + '첫 요청은 반드시 miss이고, 서버 재시작 뒤에도 다시 cold가 됩니다.</div>';
+        abChart(el('abPlot'), [
+          {label:'캐시 미스', prefill: Math.max(offP50 - onP50, 0), decode: onP50},
+          {label:'캐시 적중', prefill: 0, decode: onP50}
+        ]);
+      } catch (err) { box.innerHTML = '<div class="empty-note">' + esc(String(err.message || err)) + '</div>'; }
+    }
+
+    async function runReport() {
+      const out = el('reportOut'), ev = el('event').value.trim();
+      if (!ev) { toast('이벤트를 입력하세요', true); return; }
+      out.textContent = '';
+      el('rTtft').textContent = el('rTotal').textContent = el('rTokens').textContent = '…';
+      const t0 = performance.now();
+      let first = null, text = '';
+      try {
+        const res = await fetch('/api/generate/stream', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({sentence: REPORT_INSTRUCTION + ev + TURN_END, max_new_tokens: 256, greedy: true})});
+        const reader = res.body.getReader(), dec = new TextDecoder();
+        let buf = '';
+        for (;;) {
+          const r = await reader.read();
+          if (r.done) break;
+          buf += dec.decode(r.value, {stream:true});
+          const lines = buf.split('\n\n'); buf = lines.pop();
+          for (const ln of lines) {
+            if (ln.indexOf('data: ') !== 0) continue;
+            const f = JSON.parse(ln.slice(6));
+            if (f.error) { out.textContent += '\n[' + f.error + ']'; continue; }
+            if (f.token) {
+              if (first === null) { first = performance.now() - t0; el('rTtft').textContent = (first/1000).toFixed(2) + 's'; }
+              text += f.token; out.textContent = text; out.scrollTop = out.scrollHeight;
+            }
+            if (f.done) {
+              el('rTotal').textContent = ((performance.now()-t0)/1000).toFixed(2) + 's';
+              el('rTokens').textContent = (f.new_tokens == null ? '—' : f.new_tokens) + ' tok';
+            }
+          }
+        }
+      } catch (err) { out.textContent += '\n[' + String(err.message || err) + ']'; }
     }
 
     function renderQualityTiles(x) {
@@ -713,6 +825,7 @@
     el('loadPolicy').addEventListener('click', () => loadPolicy(policyText()));
     el('clearPolicy').addEventListener('click', () => loadPolicy(''));
     el('runAb').addEventListener('click', runAb);
+    el('runReport').addEventListener('click', runReport);
 
     function renderFlow() {
       const baselineReady = Boolean(appState && appState.experiment && appState.experiment.after);
