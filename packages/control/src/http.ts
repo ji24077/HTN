@@ -97,9 +97,13 @@ export function buildServer(): FastifyInstance {
     // whole number of seconds and never finer than one second.
     const bucketSeconds = Math.max(1, Math.round((minutes * 60) / 120))
 
-    const { rows } = await pool.query<{ bucket: string; label: string; n: number }>(
+    // Group by host id, not label. Labels are not unique: re-enrolling a machine makes a
+    // second host row with the same name, and grouping by name silently merges two
+    // identities into one line — which is exactly what happened to "iPhone" after the
+    // move to a permanent address, blending its pre-migration work into its post-.
+    const { rows } = await pool.query<{ bucket: string; host_id: string; label: string; n: number }>(
       `select to_timestamp(floor(extract(epoch from t.finished_at) / $2) * $2) as bucket,
-              h.label, count(*)::int as n
+              h.id as host_id, h.label, count(*)::int as n
          from tasks t
          join hosts h on h.id = t.assigned_host_id
          join jobs j on j.id = t.job_id
@@ -107,19 +111,35 @@ export function buildServer(): FastifyInstance {
           and t.state = 'succeeded'
           and h.owner_id = $3
           and ($4::text is null or j.adapter = $4)
-        group by 1, 2
+        group by 1, 2, 3
         order by 1`,
       [minutes, bucketSeconds, user.id, adapter ?? null])
 
+    // Only hosts that actually completed work in the window appear at all, so revoked and
+    // long-dead test enrolments drop out without needing to be filtered by name.
+    const ids = [...new Set(rows.map(r => r.host_id))]
+    const labelOf = new Map(rows.map(r => [r.host_id, r.label]))
+    const timesSeen = new Map<string, number>()
+    for (const id of ids) {
+      const l = labelOf.get(id) ?? id
+      timesSeen.set(l, (timesSeen.get(l) ?? 0) + 1)
+    }
+
     // Pivot here rather than in the browser: the client wants one series per host, and
     // every series must cover every bucket or a stacked chart will not line up.
-    const labels = [...new Set(rows.map(r => r.label))].sort()
     const buckets = [...new Set(rows.map(r => new Date(r.bucket).toISOString()))].sort()
-    const index = new Map(rows.map(r => [`${new Date(r.bucket).toISOString()}|${r.label}`, r.n]))
-    const series = labels.map(label => ({
-      label,
-      points: buckets.map(b => index.get(`${b}|${label}`) ?? 0),
-    }))
+    const index = new Map(rows.map(r => [`${new Date(r.bucket).toISOString()}|${r.host_id}`, r.n]))
+    const series = ids
+      .map(id => {
+        const label = labelOf.get(id) ?? id
+        return {
+          hostId: id,
+          // Disambiguate only when a name really is shared, so the common case stays clean.
+          label: (timesSeen.get(label) ?? 0) > 1 ? `${label} (${id.slice(0, 4)})` : label,
+          points: buckets.map(b => index.get(`${b}|${id}`) ?? 0),
+        }
+      })
+      .sort((a, b) => a.label.localeCompare(b.label))
 
     return { bucketSeconds, minutes, buckets, series }
   })
@@ -267,7 +287,8 @@ export function buildServer(): FastifyInstance {
    */
   app.get('/join', async (req, reply) => {
     const { code } = z.object({ code: z.string().max(32).optional() }).parse(req.query ?? {})
-    return reply.type('text/html; charset=utf-8').send(joinPage(config.publicOrigin, code))
+    return reply.type('text/html; charset=utf-8')
+      .send(joinPage(config.publicOrigin, code))
   })
 
   /**
