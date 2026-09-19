@@ -784,7 +784,7 @@
     // The earlier three-numbered-buttons version put the state change and the
     // run in the same press, which made it impossible to type a prompt, run
     // it, change the state, and run THE SAME prompt again — the whole point.
-    let optimized = false, policyBuild = null, runNo = 0;
+    let optimized = false, policyBuild = null, runNo = 0, ptokEst = null;
 
     function paintState(note) {
       el('optState').innerHTML = optimized
@@ -799,11 +799,12 @@
     // the optimization already happened, and is how this was misread once.
     async function ensurePolicy() {
       const st = (await api('/api/models')).serving || {};
-      if (st.prefix_tokens) { policyBuild = st.prefix_build_s; return true; }
+      if (st.prefix_tokens) { policyBuild = st.prefix_build_s; ptokEst = st.prefix_tokens.toLocaleString(); return true; }
       paintState('정책 문서를 올리는 중…');
       try {
         const r = await api('/api/prefix', {method:'POST', body: JSON.stringify({prefix: policyText()})});
         policyBuild = r.build_s;
+        ptokEst = r.prefix_tokens.toLocaleString();
         el('policyStat').textContent = r.prefix_tokens.toLocaleString() + ' 토큰 · 한 번 계산에 ' + r.build_s.toFixed(2) + 's';
         return true;
       } catch (err) { paintState(esc(String(err.message || err))); return false; }
@@ -848,6 +849,14 @@
       out.textContent = '';
       const t0 = performance.now();
       let first = null, text = '', tokens = null, ptok = 0, cache = '';
+      // Count the wait out loud. Unoptimised, nothing arrives for about nine
+      // seconds; a blank box for that long reads as a hang rather than as the
+      // cost being demonstrated. The timer stops the moment text starts.
+      const waiting = setInterval(() => {
+        if (first !== null) return;
+        out.textContent = '첫 토큰 대기 ' + ((performance.now()-t0)/1000).toFixed(1) + 's'
+          + (wasOptimized ? '' : ' — 정책 ' + (ptokEst || '30,000') + ' 토큰을 처음부터 읽는 중');
+      }, 100);
       try {
         const res = await fetch('/api/generate/stream', {
           method:'POST', headers:{'Content-Type':'application/json'},
@@ -865,13 +874,14 @@
             const f = JSON.parse(ln.slice(6));
             if (f.error) { out.textContent += '\n[' + f.error + ']'; continue; }
             if (f.token) {
-              if (first === null) first = performance.now() - t0;
+              if (first === null) { first = performance.now() - t0; clearInterval(waiting); }
               text += f.token; out.textContent = text; out.scrollTop = out.scrollHeight;
             }
             if (f.done) { tokens = f.new_tokens; ptok = f.prompt_tokens; cache = f.cache; }
           }
         }
-      } catch (err) { out.textContent += '\n[' + String(err.message || err) + ']'; return; }
+      } catch (err) { clearInterval(waiting); out.textContent = '[' + String(err.message || err) + ']'; return; }
+      clearInterval(waiting);
       if (first === null) return;
       addRow(wasOptimized ? '최적화 후' : '최적화 전',
              first/1000, (performance.now()-t0)/1000, tokens, ptok, cache);
