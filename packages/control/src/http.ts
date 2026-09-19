@@ -42,6 +42,13 @@ export function buildServer(): FastifyInstance {
     return user
   }
 
+  /**
+   * Pasting the bare address into a browser is the first thing anyone does, and it
+   * previously returned a bare 404 that looks like the server is broken. Send it
+   * somewhere useful instead.
+   */
+  app.get('/', async (_req, reply) => reply.redirect('/join', 302))
+
   app.get('/health', async () => ({ ok: true, publicOrigin: config.publicOrigin }))
 
   /**
@@ -229,6 +236,20 @@ export function buildServer(): FastifyInstance {
          from run_events e join jobs j on j.id = e.job_id
         where e.job_id = $1 and j.owner_id = $2 order by e.seq`, [id, user.id])
     return { events: rows }
+  })
+
+  app.setNotFoundHandler(async (req, reply) => {
+    const wantsHtml = (req.headers.accept ?? '').includes('text/html')
+    if (!wantsHtml) return reply.code(404).send({ error: 'not-found' })
+    return reply.code(404).type('text/html; charset=utf-8').send(
+      `<!doctype html><meta charset="utf-8">` +
+      `<meta name="viewport" content="width=device-width,initial-scale=1">` +
+      `<title>Not found</title>` +
+      `<body style="margin:0;font:16px/1.6 ui-sans-serif,system-ui,sans-serif;` +
+      `display:grid;place-items:center;min-height:100vh;padding:24px;text-align:center">` +
+      `<div><h1 style="font-size:20px;margin:0 0 8px">Nothing here</h1>` +
+      `<p style="color:#667;margin:0 0 20px">There is no page at <code>${req.url.replace(/[<>&"]/g, '')}</code>.</p>` +
+      `<a href="/join" style="color:#0b6e8c">Go to the join page</a></div></body>`)
   })
 
   app.setErrorHandler((err: unknown, req, reply) => {
