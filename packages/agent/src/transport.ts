@@ -228,7 +228,7 @@ export function connect(
         ...(sleptForMs > 0 ? { afterSuspensionMs: Math.round(sleptForMs) } : {}),
       })
       send('hello', {
-        capability: probe(availableAdapters()),
+        capability: probe(availableAdapters(), cfg.installedRelease),
         consent: consent(),
         ...(sleptForMs > 0 ? { afterSuspensionMs: Math.round(sleptForMs) } : {}),
       })

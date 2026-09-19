@@ -21,7 +21,7 @@ import { platform } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { createLogger } from '@dwp/protocol'
-import { AGENT_HOME, AGENT_VERSION, isCompiledBinary } from './paths.ts'
+import { AGENT_HOME, AGENT_VERSION, invocation, isCompiledBinary } from './paths.ts'
 import { clearConfig, isPaused, loadConfig, setPaused, type AgentConfig } from './config.ts'
 import { ensureKeypair } from './keys.ts'
 import { pairHost } from './pair.ts'
@@ -833,9 +833,20 @@ export async function runGui(opts: GuiOptions): Promise<void> {
         platform: platform(),
         adapters: availableAdapters(),
         runsAtLogin: service.installed,
+        /**
+         * Say which of the two it is, because they need different people to act.
+         *
+         * This used to read "This network offers no signed releases", which points at
+         * the server when the truth is local: the network does publish signed releases,
+         * and this computer simply joined before it did, so it pinned no key and refuses
+         * every update. Blaming the network meant nobody ever ran the one command that
+         * fixes it, on the one machine that can.
+         */
         updateNote: config?.releaseKey
           ? 'Installed automatically, verified against the key this computer pinned when it joined.'
-          : 'This network offers no signed releases, so updates stay manual.',
+          : 'This computer joined before the network signed its releases, so it pinned no key '
+            + 'and cannot verify an update. Run  ' + invocation() + ' trust-updates  here to '
+            + 'review the key and turn automatic updates back on.',
         connection: state.connection,
         attempt: state.attempt,
         connectedSince: state.connectedSince,
