@@ -1,0 +1,17 @@
+{
+  "vendor": "amd",
+  "passed": true,
+  "python_executable": "/opt/venv/bin/python3",
+  "visibility_env": {},
+  "torch_version": "2.10.0+rocm7.1.1.gitd9556b05",
+  "cuda": null,
+  "hip": "7.1.52802",
+  "torch_file": "/opt/venv/lib/python3.12/site-packages/torch/__init__.py",
+  "visible_device_count": 1,
+  "gpu": "AMD Instinct MI300X",
+  "free_memory_bytes": 39210450944,
+  "total_memory_bytes": 206141652992,
+  "compiler": "/opt/rocm/bin/hipcc",
+  "peak_allocated_bytes": 159400960,
+  "peak_reserved_bytes": 161480704
+}

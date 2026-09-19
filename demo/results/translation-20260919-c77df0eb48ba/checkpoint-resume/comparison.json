@@ -1,0 +1,33 @@
+{
+  "status": "passed",
+  "atol": 1e-05,
+  "rtol": 0.0001,
+  "identity_mismatches": [],
+  "verification_scope": "Comparison of supplied reports, not a new GPU execution",
+  "warnings": [
+    "Timing is diagnostic, not a benchmark.",
+    "Cross-GPU comparison makes no optimization or speedup claim."
+  ],
+  "predictions": {
+    "passed": true,
+    "count": 128,
+    "mismatch_count": 0,
+    "max_abs_error": 3.5762786865234375e-07,
+    "difference_overflow": false
+  },
+  "loss_history": {
+    "passed": true,
+    "count": 4,
+    "mismatch_count": 0,
+    "max_abs_error": 0.0,
+    "difference_overflow": false
+  },
+  "comparison_scope": "final predictions and loss history over the same step range",
+  "timing": {
+    "comparable": false,
+    "reasons": [
+      "different GPU or vendor"
+    ],
+    "speedup": null
+  }
+}

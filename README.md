@@ -135,6 +135,11 @@ The daemon skips unparseable lines rather than crashing — one stray warning sh
 
 ## Commands
 
+For the skill-guided CUDA/HIP code translation demo, see the
+[demo instructions](demo/README.md) and [real GPU results](demo/RUN_RESULTS.md).
+The demo verifies both translation directions and checkpoint continuation;
+its benchmark does not establish a general training speedup.
+
 For the checkpointed NVIDIA-to-AMD experiment, see the
 [migration runbook](docs/nvidia-amd-migration.md). It covers the approved rental,
 SSH setup, preserved training state, prediction gates, and cleanup limits.
