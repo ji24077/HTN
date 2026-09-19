@@ -29,9 +29,19 @@ export const walkerHtml = (): string => `<!doctype html>
   .kpi .l{font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--ink3);margin-top:3px}
   h2{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink3);margin:24px 0 8px}
   .chart{background:var(--card);border:1px solid var(--rule);border-radius:10px;padding:12px}
-  .hosts{display:flex;flex-wrap:wrap;gap:8px}
-  .host{background:var(--card);border:1px solid var(--rule);border-radius:99px;padding:5px 13px;font-size:13px}
+  .hosts{display:flex;flex-direction:column;gap:9px}
+  .host{background:var(--card);border:1px solid var(--rule);border-radius:9px;padding:9px 12px;font-size:13px}
   .host b{font-family:ui-monospace,monospace}
+  .hrow{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:6px}
+  .hname{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .hos{font-size:11px;opacity:.65;margin-left:6px;text-transform:uppercase;letter-spacing:.04em}
+  .hbar{height:7px;border-radius:99px;background:var(--rule);overflow:hidden}
+  .hbar i{display:block;height:100%;border-radius:99px;background:currentColor}
+  .h-darwin{color:#5b9dff}.h-win32{color:#46c08a}.h-ios{color:#c07ae0}.h-other{color:#9aa4b2}
+  .legend{display:flex;flex-wrap:wrap;gap:14px;margin-top:10px}
+  .lg{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--ink2)}
+  .sw{width:11px;height:11px;border-radius:3px;flex:none}
+  .lg b{font-family:ui-monospace,monospace;color:var(--ink)}
   .wait{padding:50px 20px;text-align:center;color:var(--ink3)}
   code{background:var(--bg);padding:2px 6px;border-radius:4px;font-size:13px}
 </style></head><body><main>
@@ -49,7 +59,14 @@ export const walkerHtml = (): string => `<!doctype html>
 <div class="chart"><canvas id="chart" width="1000" height="180"></canvas></div>
 
 <h2>Who evaluated this generation</h2>
+<p class="sub">Share of the population each machine scored in the latest generation.</p>
 <div class="hosts" id="hosts"></div>
+
+<h2>Contribution over time</h2>
+<p class="sub">Tasks completed per machine, accumulating across every run — not just this one.
+  <span id="contribWindow"></span></p>
+<div class="chart"><canvas id="contrib" width="1000" height="220"></canvas></div>
+<div class="legend" id="contribLegend"></div>
 
 </main>
 <script type="module">
@@ -186,10 +203,21 @@ async function poll () {
       ['Elapsed', (s.elapsedSeconds ?? 0) + 's'],
     ].map(([l, v]) => '<div class="kpi"><div class="v">' + v + '</div><div class="l">' + l + '</div></div>').join('')
 
-    document.getElementById('hosts').innerHTML =
-      Object.entries(s.hosts ?? {}).map(([k, v]) =>
-        '<div class="host">' + k.replace(/[<>&]/g, '') + ' <b>' + v + '</b> gaits</div>').join('')
-        || '<div class="host">waiting…</div>'
+    const split = Object.entries(s.hosts ?? {}).sort((a, b) => b[1] - a[1])
+    const total = split.reduce((n, [, v]) => n + v, 0)
+    document.getElementById('hosts').innerHTML = split.map(([k, v]) => {
+      // The OS is not in this payload, so infer it from the label the host chose.
+      // Wrong guesses only mistint a bar; the counts stay whatever the server said.
+      const os = /iphone|ipad/i.test(k) ? 'ios'
+        : /laptop-|desktop-|win/i.test(k) ? 'win32'
+        : /mac|darwin|\.local|campus|eduroam/i.test(k) ? 'darwin' : 'other'
+      const pct = total ? (100 * v / total) : 0
+      return '<div class="host h-' + os + '">' +
+        '<div class="hrow"><span class="hname">' + k.replace(/[<>&]/g, '') +
+        '<span class="hos">' + os.replace('win32', 'windows').replace('darwin', 'macos') + '</span></span>' +
+        '<span><b>' + v + '</b> gaits · ' + pct.toFixed(0) + '%</span></div>' +
+        '<div class="hbar"><i style="width:' + pct.toFixed(1) + '%"></i></div></div>'
+    }).join('') || '<div class="host">waiting…</div>'
 
     drawChart(s.history)
   } catch {
@@ -197,7 +225,86 @@ async function poll () {
   }
 }
 
+// ---------------------------------------------------------- contribution chart
+const PALETTE = ['#5b9dff', '#46c08a', '#c07ae0', '#e0a23a', '#e06a6a', '#3ac0c0', '#9aa4b2']
+const ccv = document.getElementById('contrib')
+const ctx2 = ccv.getContext('2d')
+
+function drawContribution (data) {
+  const w = ccv.width, h = ccv.height, padL = 46, padR = 12, padT = 12, padB = 24
+  ctx2.clearRect(0, 0, w, h)
+  const css = getComputedStyle(document.body)
+  const ink3 = css.getPropertyValue('--ink3') || '#8a93a0'
+  const rule = css.getPropertyValue('--rule') || '#2a2f3a'
+
+  const series = data?.series ?? []
+  const n = data?.buckets?.length ?? 0
+  if (!series.length || !n) {
+    ctx2.fillStyle = ink3; ctx2.font = '13px system-ui'; ctx2.textAlign = 'center'
+    ctx2.fillText('no completed work in this window yet', w / 2, h / 2)
+    return
+  }
+
+  // Accumulate each series, then stack them. Cumulative is the point: a machine that
+  // stops working should flatten, not vanish.
+  const cum = series.map(s => { let t = 0; return s.points.map(v => (t += v)) })
+  const stack = []
+  for (let i = 0; i < cum.length; i++) {
+    stack.push(cum[i].map((v, j) => v + (i ? stack[i - 1][j] : 0)))
+  }
+  const top = stack[stack.length - 1]
+  const max = Math.max(1, ...top)
+
+  const x = i => padL + (w - padL - padR) * (n === 1 ? 0.5 : i / (n - 1))
+  const y = v => h - padB - (h - padT - padB) * (v / max)
+
+  // Horizontal guides, labelled with real totals.
+  ctx2.strokeStyle = rule; ctx2.fillStyle = ink3
+  ctx2.font = '11px ui-monospace,monospace'; ctx2.textAlign = 'right'; ctx2.lineWidth = 1
+  for (let g = 0; g <= 2; g++) {
+    const v = Math.round((max / 2) * g), yy = Math.round(y(v)) + 0.5
+    ctx2.beginPath(); ctx2.moveTo(padL, yy); ctx2.lineTo(w - padR, yy); ctx2.stroke()
+    ctx2.fillText(v.toLocaleString(), padL - 6, yy + 4)
+  }
+
+  // Paint top-down so each band sits over the one beneath it.
+  for (let i = stack.length - 1; i >= 0; i--) {
+    ctx2.beginPath()
+    ctx2.moveTo(x(0), y(0))
+    for (let j = 0; j < n; j++) ctx2.lineTo(x(j), y(stack[i][j]))
+    ctx2.lineTo(x(n - 1), y(0))
+    ctx2.closePath()
+    ctx2.fillStyle = PALETTE[i % PALETTE.length] + '55'
+    ctx2.fill()
+    ctx2.beginPath()
+    for (let j = 0; j < n; j++) j ? ctx2.lineTo(x(j), y(stack[i][j])) : ctx2.moveTo(x(j), y(stack[i][j]))
+    ctx2.strokeStyle = PALETTE[i % PALETTE.length]; ctx2.lineWidth = 1.5; ctx2.stroke()
+  }
+
+  const first = new Date(data.buckets[0]), last = new Date(data.buckets[n - 1])
+  const hhmm = d => String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0')
+  ctx2.fillStyle = ink3; ctx2.font = '11px system-ui'
+  ctx2.textAlign = 'left'; ctx2.fillText(hhmm(first), padL, h - 7)
+  ctx2.textAlign = 'right'; ctx2.fillText(hhmm(last), w - padR, h - 7)
+
+  document.getElementById('contribLegend').innerHTML = series.map((s, i) => {
+    const total = cum[i][n - 1]
+    return '<span class="lg"><span class="sw" style="background:' + PALETTE[i % PALETTE.length] +
+      '"></span>' + s.label.replace(/[<>&]/g, '').slice(0, 34) + ' <b>' + total.toLocaleString() + '</b></span>'
+  }).join('')
+}
+
+async function pollContribution () {
+  try {
+    const res = await fetch('/contribution?minutes=180', { credentials: 'same-origin' })
+    if (!res.ok) return
+    drawContribution(await res.json())
+    document.getElementById('contribWindow').textContent = 'Last 3 hours.'
+  } catch { /* leave the last good chart on screen */ }
+}
+
 drawWaiting('waiting for the first generation…')
 poll(); setInterval(poll, 1500)
+pollContribution(); setInterval(pollContribution, 5000)
 setInterval(draw, 1000 / 40)
 </script></body></html>`

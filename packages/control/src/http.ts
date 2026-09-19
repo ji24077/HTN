@@ -73,6 +73,57 @@ export function buildServer(): FastifyInstance {
     return { name, ...rows[0] }
   })
 
+  /**
+   * Who has done how much work, over time.
+   *
+   * The per-generation split answers "who is busy right now" and is gone the moment the
+   * next generation starts. This answers the different question of what each machine has
+   * actually contributed, which only shows up cumulatively — a phone that takes one task
+   * per generation still adds up to something over an hour, and a laptop that drops off
+   * campus wifi shows as a line that stops climbing rather than as nothing at all.
+   *
+   * Bucketed server-side because the browser should not pull 24k task rows to draw a
+   * chart, and the bucket width is chosen from the window so the shape stays readable
+   * whether you ask for ten minutes or a week.
+   */
+  app.get('/contribution', async req => {
+    const user = await requireUser(req)
+    const { minutes, adapter } = z.object({
+      minutes: z.coerce.number().int().min(5).max(43_200).default(120),
+      adapter: z.string().max(64).optional(),
+    }).parse(req.query)
+
+    // Aim for roughly 120 buckets across whatever window was asked for, rounded to a
+    // whole number of seconds and never finer than one second.
+    const bucketSeconds = Math.max(1, Math.round((minutes * 60) / 120))
+
+    const { rows } = await pool.query<{ bucket: string; label: string; n: number }>(
+      `select to_timestamp(floor(extract(epoch from t.finished_at) / $2) * $2) as bucket,
+              h.label, count(*)::int as n
+         from tasks t
+         join hosts h on h.id = t.assigned_host_id
+         join jobs j on j.id = t.job_id
+        where t.finished_at > now() - make_interval(mins => $1::int)
+          and t.state = 'succeeded'
+          and h.owner_id = $3
+          and ($4::text is null or j.adapter = $4)
+        group by 1, 2
+        order by 1`,
+      [minutes, bucketSeconds, user.id, adapter ?? null])
+
+    // Pivot here rather than in the browser: the client wants one series per host, and
+    // every series must cover every bucket or a stacked chart will not line up.
+    const labels = [...new Set(rows.map(r => r.label))].sort()
+    const buckets = [...new Set(rows.map(r => new Date(r.bucket).toISOString()))].sort()
+    const index = new Map(rows.map(r => [`${new Date(r.bucket).toISOString()}|${r.label}`, r.n]))
+    const series = labels.map(label => ({
+      label,
+      points: buckets.map(b => index.get(`${b}|${label}`) ?? 0),
+    }))
+
+    return { bucketSeconds, minutes, buckets, series }
+  })
+
   app.post('/experiments/:name', async req => {
     const user = await requireUser(req)
     const { name } = z.object({ name: z.string().max(64) }).parse(req.params)
@@ -256,13 +307,21 @@ export function buildServer(): FastifyInstance {
    * One source of truth: a replay drawn by a second implementation would diverge from
    * the run that was actually scored.
    */
-  app.get('/walker.js', async (_req, reply) => {
-    const path = new URL('../../protocol/src/walker.js', import.meta.url)
-    const { readFile } = await import('node:fs/promises')
-    return reply.type('application/javascript; charset=utf-8')
-      .header('cache-control', 'no-cache')
-      .send(await readFile(path, 'utf8'))
-  })
+  /**
+   * The physics, served to the browser so the replay runs the identical file the agents
+   * scored with. `walker.js` imports `./dmath.js`, so both must be reachable at the paths
+   * the import statement names — miss the second and the page loads, fetches the first,
+   * and then silently draws nothing.
+   */
+  for (const name of ['walker.js', 'dmath.js']) {
+    app.get(`/${name}`, async (_req, reply) => {
+      const path = new URL(`../../protocol/src/${name}`, import.meta.url)
+      const { readFile } = await import('node:fs/promises')
+      return reply.type('application/javascript; charset=utf-8')
+        .header('cache-control', 'no-cache')
+        .send(await readFile(path, 'utf8'))
+    })
+  }
 
   app.get('/walker', async (req, reply) => {
     const user = await userForToken(cookie(req, SESSION_COOKIE))
