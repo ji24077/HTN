@@ -1609,18 +1609,12 @@ def available_models() -> list[dict[str, Any]]:
                 "detail": "trained from this dashboard",
             }
         )
-    else:
-        # The first real 4090 experiment predates the UI and lives outside it.
-        out.append(
-            {
-                "id": "finetuned",
-                "label": "fine-tuned (first 4090 experiment)",
-                "ref": "/workspace/gpushare/ckpt/run",
-                "kind": "finetuned",
-                "legacy": True,
-                "detail": "500 steps, json_parse_rate 1.000 / exact_match 0.910",
-            }
-        )
+    # No fallback entry. There used to be one pointing at the first
+    # experiment's path, which exists on no pod that did not run it — and a
+    # missing local path is read by transformers as a Hugging Face repo id, so
+    # the failure arrived minutes later as "Repo id must be in the form
+    # 'namespace/repo_name'". Offering nothing is what lets the UI say there is
+    # nothing to serve until something is trained.
 
     agent_job = next(
         (

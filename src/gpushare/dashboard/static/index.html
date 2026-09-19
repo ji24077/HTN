@@ -17,6 +17,24 @@
       --s-before:#0089ea; --s-after:#00a05b;
     }
     .charts { display:grid; grid-template-columns:1.05fr .95fr; gap:16px; }
+    /* Fixed, because the job panel is at the bottom of a long page: while the
+       agent works you are usually looking at something else, and "is it still
+       going?" should never require scrolling. */
+    .agentBar { position:fixed; left:0; right:0; top:0; z-index:70; display:none;
+                background:linear-gradient(180deg, rgba(8,17,15,.97), rgba(8,17,15,.90));
+                border-bottom:1px solid var(--line); padding:10px 20px; backdrop-filter:blur(6px); }
+    .agentBar.on { display:block; }
+    .agentBar .row { display:flex; align-items:center; gap:12px; max-width:1460px; margin:0 auto; }
+    .agentBar b { font-size:13px; letter-spacing:-.01em; }
+    .agentBar small { color:var(--muted); font-size:12px; }
+    .agentBar .track { flex:1; height:4px; background:var(--panel2); border-radius:999px; overflow:hidden; }
+    .agentBar .fill { height:100%; background:var(--mint); transition:width .4s ease; }
+    .pulse { width:9px; height:9px; border-radius:50%; background:var(--mint); flex:none;
+             animation:pulse 1.2s ease-in-out infinite; }
+    @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.35;transform:scale(.7)} }
+    .agentBar .tail { color:var(--muted); font:11px/1.3 ui-monospace,SFMono-Regular,Menlo,monospace;
+                      max-width:1460px; margin:6px auto 0; white-space:nowrap; overflow:hidden;
+                      text-overflow:ellipsis; }
     .gpuPicker { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
     .gpuChip { border:1px solid var(--line); background:var(--panel2); color:var(--ink);
                border-radius:12px; padding:8px 12px; cursor:pointer; text-align:left; line-height:1.35; }
@@ -410,6 +428,17 @@
       <details style="margin-top:12px"><summary>상세 로그 보기</summary><pre id="jobLog">No active job.</pre></details>
     </section>
   </main>
+  <div id="agentBar" class="agentBar">
+    <div class="row">
+      <span class="pulse"></span>
+      <b id="agentWhat">에이전트 작업 중</b>
+      <small id="agentStage"></small>
+      <div class="track"><div id="agentFill" class="fill" style="width:0%"></div></div>
+      <small id="agentTime"></small>
+      <button id="agentStop" class="btn danger" style="padding:4px 10px;font-size:12px">중지</button>
+    </div>
+    <div id="agentTail" class="tail"></div>
+  </div>
   <div id="toast" class="toast"></div>
 
   <div id="chartTip" class="chart-tip"></div>
@@ -1125,7 +1154,40 @@
         : '<strong>비교 준비 중</strong>일반 학습 후 두 에이전트를 실행하면 같은 조건의 결과가 채워집니다.';
     }
 
+    // Names the jobs say in terms of what the agent is doing, not the internal
+    // kind. "optimize-inference-speed" is a function name; "추론 최적화" is what
+    // someone watching is being told is happening.
+    const AGENT_WHAT = {
+      'train-and-evaluate': '학습 + 자동 평가',
+      'optimize-training-speed': '학습 설정 최적화',
+      'optimize-inference-speed': '추론 처리량 최적화',
+      'migrate-nextgen': '세대 간 마이그레이션',
+      'migrate-amd-nvidia': 'AMD → NVIDIA 마이그레이션',
+      'migrate-nvidia-amd': 'NVIDIA → AMD 마이그레이션',
+      'serve-model': '모델 적재',
+      'generate-data': '학습 데이터 생성',
+    };
+
+    function renderAgentBar(job) {
+      const bar = el('agentBar');
+      if (!bar) return;
+      const live = job && ['queued', 'running', 'cancelling'].includes(job.status);
+      bar.className = 'agentBar' + (live ? ' on' : '');
+      document.body.style.paddingTop = live ? '62px' : '';
+      if (!live) return;
+      el('agentWhat').textContent = (AGENT_WHAT[job.kind] || job.kind) + ' 진행 중';
+      el('agentStage').textContent = job.stage || '';
+      el('agentFill').style.width = (job.progress || 0) + '%';
+      const elapsed = job.started_at ? (Date.now() / 1000 - job.started_at) : 0;
+      el('agentTime').textContent = Math.floor(elapsed / 60) + '분 ' + Math.floor(elapsed % 60) + '초';
+      // The last log line is the only thing that moves second to second. A
+      // progress number that sits at 45% for two minutes reads as a hang.
+      const logs = job.logs || [];
+      el('agentTail').textContent = logs.length ? String(logs[logs.length - 1]).slice(0, 220) : '';
+    }
+
     function renderJob(job) {
+      renderAgentBar(job);
       if (!job) {
         el('jobTitle').textContent = '대기 중'; el('progressBar').style.width = '0%';
         el('jobSummary').className = 'callout'; el('jobSummary').textContent = '실행을 시작하면 단계와 시간이 여기에 표시됩니다.';
@@ -1257,6 +1319,9 @@
     el('inferAgentBtn').onclick = () => start('/api/jobs/action/optimize-inference',{pod_id:el('trainPod').value});
     el('dataBtn').onclick = () => start('/api/jobs/data',{total:+el('dataTotal').value,heldout:+el('dataHeld').value,workers:8});
     el('migrateBtn').onclick = () => start('/api/jobs/action/migrate-nextgen',{source_pod_id:el('migrationSource').value,target_pod_id:el('migrationTarget').value});
+    el('agentStop').onclick = () => el('cancelBtn').click();
+    // Clicking the bar jumps to the full log rather than duplicating it up top.
+    el('agentBar').onclick = (e) => { if (e.target.id !== 'agentStop') el('jobPanel').scrollIntoView({behavior:'smooth'}); };
     el('cancelBtn').onclick = async () => { if (activeJob) await api('/api/jobs/'+activeJob+'/cancel',{method:'POST'}); };
     load();
   </script>
