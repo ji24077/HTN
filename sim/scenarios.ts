@@ -305,9 +305,20 @@ export const scenarios: Scenario[] = [
       const jobId = await ctx.h.submitJob({ adapter: 'echo', mode: 'each', count: 1, sleepMs: 20 })
       await ctx.h.waitFor('every computer takes work again', () => allSucceeded(ctx.h, jobId), 60_000)
       const view = await ctx.h.job(jobId)
+      const distinct = new Set(view.tasks.map(t => t.host_label)).size
+      // Report the task count alongside, because two very different faults both show up
+      // here as "fewer than six" and only this number tells them apart. 'each' mode pins
+      // one task per host that is online *at the moment the job is submitted*, so:
+      //   N distinct across N tasks  -> the online set shrank between the wait above and
+      //     the submit. Agents that miss a heartbeat under load drop out in that gap; it
+      //     is a timing artifact, and it is what you see when two suites run at once.
+      //   N distinct across 6 tasks  -> six tasks existed and the work did not spread.
+      //     That is the real defect this scenario exists to catch.
+      // Keep the assertion at six either way. Relaxing it to hide the first case would
+      // throw away the only check that catches the second.
       ctx.check('all six computers accept work after recovery',
-        new Set(view.tasks.map(t => t.host_label)).size === 6,
-        `${new Set(view.tasks.map(t => t.host_label)).size} distinct hosts`)
+        distinct === 6,
+        `${distinct} distinct hosts across ${view.job.total_items} tasks`)
     },
   },
 
