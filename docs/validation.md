@@ -127,3 +127,24 @@ PostgreSQL integration checks cover approval, private credential storage,
 cross-process authorization, request replay, quotas, failure cleanup, and route
 isolation. Desktop packaging and a separate-machine onboarding trial remain
 outstanding.
+
+A follow-up review of the enrollment change fixed the worker profile format (it
+was JSON-escaped, which `uv run --env-file` rejects for non-ASCII paths), a
+cleanup path that could strand a pending reservation, the CLI mislabeling a
+database outage as "not configured", and enrollment audit events rendering as
+task events. It also added expiry of stale reservations, a provisioning
+deadline, OAuth token reuse during key revocation, a startup warning for a
+combined server with no worker credentials, and withdrawal of an enrollment
+whose network join failed. A second verification pass then tightened the
+reaper to a single statement, made a failed key revocation retryable through
+repeated withdrawal, kept static `WORKER_TOKENS` precedence over enrollment
+history, validated local paths before enrolling, and made the CLI's cleanup
+hold SIGINT so real repeated Ctrl-C presses cannot abort it, keep the profile
+when withdrawal does not complete (even after a failed write, writing only
+through the descriptor reserved at the start and never by pathname), and record
+an unrevoked key on an already-expired reservation. 66 Python unit tests pass,
+including a round trip of awkward profile values through `uv --env-file` and a
+subprocess that receives two real SIGINTs under `asyncio.run`; the optional
+PostgreSQL integration test passes with expiry, key retention, withdrawal retry,
+and post-withdrawal registration checks; 19 frontend tests, TypeScript,
+Prettier, and ruff pass.

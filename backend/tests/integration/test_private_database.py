@@ -10,9 +10,9 @@ from uuid import uuid4
 
 import asyncpg
 
-from orchestrator.server.db.store import Conflict, EnrollmentLimit, Store
+from orchestrator.server.db.store import Conflict, EnrollmentLimit, NotFound, StaleSession, Store
 from orchestrator.server.updates import ChangeFeed
-from orchestrator.shared.protocol import TaskSpec
+from orchestrator.shared.protocol import Capabilities, TaskSpec
 
 
 @unittest.skipUnless(
@@ -107,6 +107,64 @@ class PrivateDatabaseTests(unittest.IsolatedAsyncioTestCase):
                     return_exceptions=True,
                 )
                 self.assertEqual(sum(isinstance(x, EnrollmentLimit) for x in attempts), 3)
+
+                # A stale reservation is expired by reconciliation and can no longer activate.
+                owner = str(uuid4())
+                await first.reserve_enrollment("stale-worker", str(uuid4()), owner, "Test", token)
+                await first.pool.execute(
+                    """UPDATE worker_enrollments SET created_at=created_at-interval '1 hour'
+                       WHERE worker_id='stale-worker'"""
+                )
+                await second.reconcile()
+                self.assertFalse(await first.finish_enrollment("stale-worker", "late-key"))
+                # A key that then fails revocation is still recorded on the expired row.
+                self.assertFalse(
+                    await first.finish_enrollment("stale-worker", None, retain_key="late-key")
+                )
+                self.assertEqual(await first.cancel_enrollment("stale-worker", owner), "late-key")
+                self.assertEqual(
+                    await first.pool.fetchval(
+                        "SELECT state FROM worker_enrollments WHERE worker_id='stale-worker'"
+                    ),
+                    "failed",
+                )
+                self.assertEqual(
+                    [
+                        row["details"]
+                        for row in await first.pool.fetch(
+                            "SELECT details FROM events WHERE entity='enrollment' AND entity_id='stale-worker'"
+                        )
+                    ],
+                    [{"reason": "expired"}],
+                )
+                # Withdrawal is owner-checked, idempotent, and refused once the worker registered.
+                self.assertTrue(await first.has_active_enrollments())
+                with self.assertRaises(NotFound):
+                    await first.cancel_enrollment("enrolled-worker", str(uuid4()))
+                self.assertEqual(
+                    await first.cancel_enrollment("enrolled-worker", user_id), "test-key-id"
+                )
+                # Until revocation is confirmed, repeating returns the same key to retry.
+                self.assertEqual(
+                    await first.cancel_enrollment("enrolled-worker", user_id), "test-key-id"
+                )
+                await first.clear_enrollment_key("enrolled-worker")
+                self.assertIsNone(await first.cancel_enrollment("enrolled-worker", user_id))
+                self.assertFalse(
+                    await second.worker_authorized("enrolled-worker", f"Bearer {token}")
+                )
+                capabilities = Capabilities(runtime="cpu", vram_mib=0, kinds=["stub"])
+                with self.assertRaises(StaleSession):
+                    await second.register(
+                        "enrolled-worker", "session-1", capabilities, enrolled=True
+                    )
+                # A static WORKER_TOKENS credential for that ID is unaffected by the withdrawal.
+                await second.register("enrolled-worker", "session-static", capabilities)
+                await first.reserve_enrollment("joined-worker", str(uuid4()), owner, "Test", token)
+                self.assertTrue(await first.finish_enrollment("joined-worker", "joined-key"))
+                await second.register("joined-worker", "session-2", capabilities, enrolled=True)
+                with self.assertRaises(Conflict):
+                    await first.cancel_enrollment("joined-worker", owner)
             finally:
                 if feed:
                     await feed.close()

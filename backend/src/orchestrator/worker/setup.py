@@ -3,10 +3,10 @@
 import argparse
 import asyncio
 import getpass
-import json
 import logging
 import os
 import shutil
+import signal
 import socket
 import ssl
 import sys
@@ -41,7 +41,36 @@ def https_origin(value):
     return value.rstrip("/")
 
 
+def dotenv_quote(value):
+    """Quote for uv's --env-file parser: raw UTF-8, escaping only backslash, quote, and dollar."""
+    if any(ch in value for ch in "\r\n\0"):
+        raise SetupError("Worker configuration values cannot contain line breaks")
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"').replace("$", "\\$")
+    return '"' + escaped + '"'
+
+
+def enrollment_error(response):
+    messages = {
+        401: "Session expired; sign in again",
+        403: "This account is not approved to enroll workers",
+        409: "Enrollment request already used; start a new setup attempt",
+        429: "Enrollment limit reached; contact the fleet administrator",
+    }
+    if response.status_code == 503:
+        # The backend also answers 503 while its database is unreachable; only the
+        # explicit code means enrollment is switched off.
+        try:
+            code = response.json()["detail"]["code"]
+        except (ValueError, KeyError, TypeError):
+            code = None
+        if code == "enrollment_not_configured":
+            return "Automatic enrollment is not configured on this backend yet"
+        return "Backend is temporarily unavailable; try again later"
+    return messages.get(response.status_code, "Enrollment failed; check the backend configuration")
+
+
 async def login_and_enroll(client, origin, email, password, name, request_id):
+    """Sign in and enroll; returns the enrollment data and the session used, for cleanup."""
     response = await client.get(origin + "/auth/config")
     if response.status_code != 200:
         raise SetupError("Cannot load sign-in configuration from this website")
@@ -67,18 +96,95 @@ async def login_and_enroll(client, origin, email, password, name, request_id):
         headers={"Authorization": f"Bearer {access_token}"},
         json={"request_id": request_id, "name": name},
     )
-    messages = {
-        401: "Session expired; sign in again",
-        403: "This account is not approved to enroll workers",
-        409: "Enrollment request already used; start a new setup attempt",
-        429: "Enrollment limit reached; contact the fleet administrator",
-        503: "Automatic enrollment is not configured on this backend yet",
-    }
     if response.status_code != 201:
-        raise SetupError(
-            messages.get(response.status_code, "Enrollment failed; check the backend configuration")
+        raise SetupError(enrollment_error(response))
+    return response.json(), access_token
+
+
+async def withdraw_enrollment(client, origin, session, worker_id):
+    """Best effort: release an enrollment this computer could not use, then tell the user."""
+    try:
+        response = await client.delete(
+            origin + "/v1/worker-enrollments/" + worker_id,
+            headers={"Authorization": f"Bearer {session}"},
         )
-    return response.json()
+        released = response.status_code == 204
+    except httpx.HTTPError:
+        released = False
+    if released:
+        print(
+            "Setup failed after enrolling; the unused enrollment was withdrawn. "
+            "Re-run setup to try again.",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            f"Setup failed after enrolling, and enrollment {worker_id} could not be withdrawn.",
+            file=sys.stderr,
+        )
+    return released
+
+
+async def finish_cleanup(coro, seconds=15):
+    """Run cleanup to completion despite further Ctrl-C presses, but never beyond the bound."""
+    loop = asyncio.get_running_loop()
+    task = loop.create_task(coro)
+    deadline = loop.time() + seconds
+
+    def interrupted(*_):
+        print("Finishing cleanup; please wait…", file=sys.stderr, flush=True)
+
+    # asyncio.run turns the first Ctrl-C into task cancellation but raises KeyboardInterrupt
+    # on the second, which would tear the loop down mid-request; hold SIGINT until done.
+    try:
+        previous = signal.signal(signal.SIGINT, interrupted)
+    except ValueError:
+        previous = None  # Not the main thread: only task cancellation can arrive.
+    try:
+        while not task.done():
+            try:
+                await asyncio.wait_for(asyncio.shield(task), max(0.0, deadline - loop.time()))
+            except asyncio.CancelledError:
+                # Absorb a cancellation; the caller re-raises its original interruption
+                # once cleanup settles, and the count must match what asyncio.run expects.
+                asyncio.current_task().uncancel()
+            except TimeoutError:
+                task.cancel()
+                break
+    finally:
+        if previous is not None:
+            signal.signal(signal.SIGINT, previous)
+    if not task.done() or task.cancelled() or task.exception() is not None:
+        return False
+    return task.result()
+
+
+def keep_profile(fd, output, profile, worker_id):
+    """Withdrawal did not complete, so keep the credential rather than lose it."""
+    try:
+        # Write only through the descriptor reserved with O_EXCL, never by pathname, and
+        # only while that pathname still names the reserved file.
+        reserved, current = os.fstat(fd), os.lstat(output)
+        if (current.st_dev, current.st_ino) != (reserved.st_dev, reserved.st_ino):
+            raise OSError("worker profile path was replaced")
+        os.ftruncate(fd, 0)
+        os.lseek(fd, 0, os.SEEK_SET)
+        with os.fdopen(os.dup(fd), "w", encoding="utf-8") as stream:
+            stream.write(profile)
+    except OSError:
+        print(
+            f"Could not keep {output}; note worker {worker_id} for an administrator.",
+            file=sys.stderr,
+        )
+        return False
+    print(
+        f"Kept {output} because withdrawing worker {worker_id} did not complete, so it may "
+        "still be enrolled. Running orchestrator-worker with this profile retries the join "
+        "(Tailscale will show a sign-in link) if it is; otherwise ask a fleet administrator "
+        "to check that worker.",
+        file=sys.stderr,
+    )
+    return True
 
 
 def worker_environment(data, directory, helper):
@@ -119,6 +225,9 @@ async def setup(args):
         raise SetupError(
             "Worker config already exists; choose a new --output or run the existing worker"
         )
+    # Refuse local paths the profile cannot hold before enrolling anything.
+    for local in (str(Path(helper).resolve()), str(output.parent.resolve())):
+        dotenv_quote(local)
     output.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     # Reserve the file before creating an enrollment; never overwrite an existing identity.
     fd = os.open(output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -130,29 +239,43 @@ async def setup(args):
         if args.ca_file:
             context.load_verify_locations(cafile=args.ca_file)
         async with httpx.AsyncClient(verify=context, follow_redirects=False, timeout=60) as client:
-            data = await login_and_enroll(client, origin, email, password, args.name, str(uuid4()))
-        password = None
-        env = worker_environment(data, output.parent.resolve(), helper)
-        # Scope the auth key to initial enrollment; don't save it in the profile.
-        previous = {k: os.environ.get(k) for k in [*env, "TS_AUTHKEY"]}
-        os.environ.update(env, TS_AUTHKEY=data["tailscale_auth_key"])
-        try:
-            config = WorkerConfig.from_env("stub")
-            print("Enrolling this computer into the private worker network…", flush=True)
-            async with EmbeddedTunnel(config):
-                pass
-        finally:
-            for k, v in previous.items():
-                if v is None:
-                    os.environ.pop(k, None)
-                else:
-                    os.environ[k] = v
-        data.clear()
-        with os.fdopen(fd, "w") as stream:
-            fd = None
-            for k, v in env.items():
-                stream.write(k + "=" + json.dumps(v) + "\n")
-        saved = True
+            data, session = await login_and_enroll(
+                client, origin, email, password, args.name, str(uuid4())
+            )
+            password = None
+            env = worker_environment(data, output.parent.resolve(), helper)
+            profile = None
+            try:
+                profile = "".join(k + "=" + dotenv_quote(v) + "\n" for k, v in env.items())
+                # Scope the auth key to initial enrollment; don't save it in the profile.
+                previous = {k: os.environ.get(k) for k in [*env, "TS_AUTHKEY"]}
+                os.environ.update(env, TS_AUTHKEY=data["tailscale_auth_key"])
+                try:
+                    config = WorkerConfig.from_env("stub")
+                    print("Enrolling this computer into the private worker network…", flush=True)
+                    async with EmbeddedTunnel(config):
+                        pass
+                finally:
+                    for k, v in previous.items():
+                        if v is None:
+                            os.environ.pop(k, None)
+                        else:
+                            os.environ[k] = v
+                data.clear()
+                # Keep the reserved descriptor itself for recovery; write through a duplicate.
+                with os.fdopen(os.dup(fd), "w", encoding="utf-8") as stream:
+                    stream.write(profile)
+                saved = True
+            except BaseException:
+                # The backend already activated this identity and a node that never joined
+                # cannot retry from the profile alone, so release it while still signed in.
+                released = await finish_cleanup(
+                    withdraw_enrollment(client, origin, session, env["WORKER_ID"])
+                )
+                if not released and profile is not None:
+                    saved = keep_profile(fd, output, profile, env["WORKER_ID"])
+                raise
+            session = None
         print(f"Enrolled {env['WORKER_ID']}. Saved private worker configuration to {output}.")
         if not args.no_start:
             from .agent import run_worker
@@ -164,10 +287,19 @@ async def setup(args):
             )
             await run_worker()
     finally:
-        if fd is not None:
+        try:
+            if not saved:
+                # A failed recovery may have detected a replacement. Only remove the
+                # file we reserved, and keep its descriptor open until after the check.
+                try:
+                    reserved, current = os.fstat(fd), os.lstat(output)
+                except OSError:
+                    pass  # If ownership cannot be established, leave the path alone.
+                else:
+                    if (current.st_dev, current.st_ino) == (reserved.st_dev, reserved.st_ino):
+                        output.unlink(missing_ok=True)
+        finally:
             os.close(fd)
-        if not saved:
-            output.unlink(missing_ok=True)
 
 
 def main():
