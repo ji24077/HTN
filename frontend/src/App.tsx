@@ -12,6 +12,7 @@ import type { Task, TaskSpec } from "./api/types";
 import { ActivityFeed } from "./components/ActivityFeed";
 import { ChatPanel } from "./components/ChatPanel";
 import { DeviceInvite } from "./components/DeviceInvite";
+import { GpuLab } from "./components/GpuLab";
 import { Login } from "./components/Login";
 import { SimulationComposer } from "./components/SimulationComposer";
 import { TaskComposer } from "./components/TaskComposer";
@@ -117,7 +118,7 @@ function FleetApp({
   const { snapshot, status, updatedAt } = useFleet();
   const [selected, setSelected] = useState("");
   const [view, setView] = useState<
-    "Jobs" | "Workers" | "Activity" | "Assistant"
+    "Jobs" | "Workers" | "Activity" | "Assistant" | "GPU Lab"
   >("Jobs");
   const [composeOpen, setComposeOpen] = useState(false);
   const [composeMode, setComposeMode] = useState("upload");
@@ -230,6 +231,8 @@ function FleetApp({
     Workers: "Manage the machines that run your jobs.",
     Activity: "A live record of assignments, retries, and fleet changes.",
     Assistant: "Inspect your fleet and dispatch supported workloads.",
+    "GPU Lab":
+      "Chat with the model on your GPU and measure what the agents change.",
   };
   return (
     <>
@@ -254,6 +257,7 @@ function FleetApp({
               ["Workers", "workers"],
               ["Activity", "activity"],
               ["Assistant", "assistant"],
+              ["GPU Lab", "chip"],
             ] as const
           ).map(([label, icon]) => (
             <button
@@ -427,6 +431,9 @@ function FleetApp({
               key={remote ? email : "demo"}
               scope={remote ? email : "demo"}
             />
+          </div>
+          <div hidden={view !== "GPU Lab"}>
+            <GpuLab active={view === "GPU Lab"} />
           </div>
           <footer className="footer">
             <span>

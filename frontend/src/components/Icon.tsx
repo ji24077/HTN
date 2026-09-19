@@ -4,6 +4,7 @@ const paths = {
   workers: "M4 3h16v7H4zM4 14h16v7H4zM7 6.5h5M7 17.5h5M16 6.5h1M16 17.5h1",
   activity: "M3 12h4l3-8 4 16 3-8h4",
   assistant: "M9 3h6M12 3v3M4 6h16v13H4zM8 11h.01M16 11h.01M8 15h8",
+  chip: "M7 7h10v10H7zM10 10h4v4h-4zM9 3v4M15 3v4M9 17v4M15 17v4M3 9h4M3 15h4M17 9h4M17 15h4",
   plus: "M12 5v14M5 12h14",
   search: "M21 21l-5-5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0",
   arrow: "M5 12h14M13 6l6 6-6 6",
