@@ -1,0 +1,44 @@
+[project]
+name = "gpu-orchestration-prototype"
+version = "0.1.0"
+description = "An async Python control plane and outbound worker with a stub executor"
+requires-python = ">=3.12,<3.15"
+dependencies = [
+  "asyncpg>=0.30,<1",
+  "fastapi>=0.115,<1",
+  "httpx>=0.28,<1",
+  "pydantic>=2.10,<3",
+  "PyJWT[crypto]>=2.10,<3",
+  "redis>=5.2,<7",
+  "uvicorn[standard]>=0.34,<1",
+  "websockets>=15,<16",
+]
+
+[project.scripts]
+orchestrator-server = "orchestrator.server.app:main"
+orchestrator-public = "orchestrator.server.app:public_main"
+orchestrator-worker-gateway = "orchestrator.server.app:worker_main"
+orchestrator-worker = "orchestrator.worker.agent:main"
+orchestrator-demo = "orchestrator.demo:main"
+orchestrator = "orchestrator.client.cli:main"
+
+[project.optional-dependencies]
+demo = ["pgserver==0.1.4; python_version == '3.12'"]
+
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/orchestrator"]
+
+# Include generated UI assets once in both direct wheels and wheels built from an sdist.
+[tool.hatch.build]
+artifacts = ["src/orchestrator/server/web/**"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint.isort]
+known-first-party = ["orchestrator"]
