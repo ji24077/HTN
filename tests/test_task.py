@@ -166,3 +166,92 @@ def test_tolerance_is_explicit():
     """tol is a stated floor on what we call 'unchanged', not a hidden fudge —
     a caller can tighten it and the gate must obey."""
     assert base(exact=0.89).regressed_against(base(exact=0.90), tol=0.0)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Nulls: the failure the first version could not see
+# ─────────────────────────────────────────────────────────────────────────────
+PARTIAL = Record(name="Ji", age=None, org=None, role="computer science student", year=None)
+PARTIAL_SENT = "Ji is university student, studying compsci"
+
+
+def partial(raw: str) -> Sample:
+    return Sample(sentence=PARTIAL_SENT, expected=PARTIAL, raw_output=raw, parsed=parse_output(raw))
+
+
+def test_correct_abstention_is_correct():
+    """The sentence gives no age and no year. Returning null for both is the
+    right answer, not a missing one."""
+    s = partial(PARTIAL.canonical())
+    assert s.parsed_ok
+    assert s.wrong_fields() == []
+    assert s.hallucinated_fields() == []
+    assert score([s]).exact_match_rate == 1.0
+
+
+def test_the_exact_failure_that_forced_this_change():
+    """Measured on the real fine-tuned model before nulls existed: asked about
+    a sentence with no age and no year, it returned age 21 and year 2020, and
+    invented an org. json_parse_rate scored that 1.000 because it was valid
+    JSON with every key. The metric was blind by construction."""
+    invented = (
+        '{"name":"Ji","age":21,"org":"University of CompSci","role":"compsci student","year":2020}'
+    )
+    s = partial(invented)
+    assert s.parsed_ok
+    assert set(s.hallucinated_fields()) == {"age", "org", "year"}
+
+    r = score([s])
+    assert r.json_parse_rate == 1.0  # still valid JSON — that was the trap
+    assert r.hallucination_rate == 1.0  # and now it is counted
+    assert "hallucination 1.000" in r.summary()
+
+
+def test_omission_is_tracked_apart_from_hallucination():
+    """Leaving out a stated fact is the opposite failure and must not be
+    reported as making something up."""
+    s = Sample(
+        sentence=SENT,
+        expected=TRUTH,
+        raw_output='{"name":"Sarah Chen","age":null,"org":"Anthropic",'
+        '"role":"research engineer","year":2023}',
+        parsed=parse_output(
+            '{"name":"Sarah Chen","age":null,"org":"Anthropic",'
+            '"role":"research engineer","year":2023}'
+        ),
+    )
+    assert s.omitted_fields() == ["age"]
+    assert s.hallucinated_fields() == []
+    assert score([s]).omission_rate == 1.0
+
+
+def test_hallucination_is_rated_over_nullable_cases_only():
+    """Dividing by every sample would let a held-out set with few missing facts
+    report a flattering rate that says nothing about the behaviour."""
+    clean = [sample(TRUTH.canonical()) for _ in range(9)]  # no nulls to get wrong
+    bad = partial('{"name":"Ji","age":21,"org":"X","role":"compsci student","year":2020}')
+    r = score(clean + [bad])
+    assert r.n_nullable == 1
+    assert r.hallucination_rate == 1.0  # 1 of 1 nullable case, not 1 of 10
+
+
+def test_none_is_not_compared_as_the_string_none():
+    """str(None).lower() is 'none', so a model literally emitting the text
+    "None" would otherwise score as a correct abstention."""
+    s = partial(
+        '{"name":"Ji","age":null,"org":"None","role":"computer science student","year":null}'
+    )
+    assert "org" in s.wrong_fields()
+    assert "org" in s.hallucinated_fields()
+
+
+def test_rising_hallucination_is_a_regression_even_when_accuracy_holds():
+    """A model that starts inventing facts got worse in the way this task cares
+    about most, and the gate has to see that."""
+    before = EvalResult(
+        n=100, json_parse_rate=1.0, field_accuracy={}, exact_match_rate=0.9, hallucination_rate=0.02
+    )
+    after = EvalResult(
+        n=100, json_parse_rate=1.0, field_accuracy={}, exact_match_rate=0.9, hallucination_rate=0.40
+    )
+    assert after.regressed_against(before)

@@ -43,11 +43,21 @@ SYSTEM = """You generate training data for an information-extraction model.
 
 Return JSON: {"records": [{"sentence": <string>, "record": {...}}, ...]}
 
-Each `record` has exactly these keys: name (string), age (integer),
-org (string), role (string), year (integer).
+Each `record` has exactly these keys: name, age (integer), org, role,
+year (integer). Any of them may be null.
 
-The `sentence` must state every one of those five facts, and the record must
-match it exactly.
+A field is null when the sentence DOES NOT STATE that fact. The record must
+match the sentence exactly: never fill in a value the sentence does not give,
+and never leave null a value it does give.
+
+A SMALL MINORITY of records should be missing a fact — the user message says
+exactly how many. Do not exceed it: over-weighting absence teaches the model to
+abstain on facts that ARE stated, which is the opposite failure and just as
+wrong. Vary WHICH fact is missing — age, year, org, and combinations. Write
+those sentences naturally; do not signal the gap.
+Example: "Ji is a university student studying computer science."
+  -> {"name":"Ji","age":null,"org":null,"role":"computer science student",
+      "year":null}
 
 VARY EVERY BATCH. Across the records you return, change:
   - clause order (age first, role first, org first, year first)
@@ -61,7 +71,9 @@ VARY EVERY BATCH. Across the records you return, change:
 Do NOT reuse a sentence template within a batch. Do not number them.
 Do not wrap the JSON in prose or code fences."""
 
-USER = """Generate {n} records.
+USER = """Generate {n} records. EXACTLY {missing} of them must have at least one
+null field (about half of those missing one fact, half missing two). The other {full}
+must state all five facts.
 
 Seed for variety (ignore its meaning, use it only to diverge from other
 batches): {seed}
@@ -89,11 +101,16 @@ def _batch(client, model: str, n: int, seed: int, avoid: list[str]) -> list[dict
     resp = client.chat.completions.create(
         model=model,
         messages=[
+            # SYSTEM is NOT passed through .format(): it contains literal JSON
+            # braces, which str.format reads as field names and rejects. The
+            # per-batch counts live in USER, which has no literal braces.
             {"role": "system", "content": SYSTEM},
             {
                 "role": "user",
                 "content": USER.format(
                     n=n,
+                    missing=6,
+                    full=n - 4,
                     seed=seed,
                     avoid="\n".join(f"  - {a}" for a in avoid) or "  (none yet)",
                 ),
@@ -116,20 +133,29 @@ def _batch(client, model: str, n: int, seed: int, avoid: list[str]) -> list[dict
             s = str(it["sentence"]).strip()
         except (ValidationError, KeyError, TypeError):
             continue
-        if s and _mentions_all(s, rec):
+        if s and _faithful(s, rec):
             out.append({"sentence": s, "record": rec.model_dump()})
     return out
 
 
-def _mentions_all(sentence: str, rec: Record) -> bool:
-    """Reject pairs whose sentence doesn't actually contain the answer.
+def _faithful(sentence: str, rec: Record) -> bool:
+    """A non-null number must actually appear in the sentence.
 
-    Without this the student is trained to hallucinate: the label says the year
-    is 2019 but the sentence never mentions 2019, so the only way to fit the
-    data is to guess. Checks the two unambiguous fields; names and free-text
-    roles are too paraphrasable to check this way.
+    Without this the student is trained to hallucinate: the label says 2019 but
+    the sentence never mentions 2019, so the only way to fit the data is to
+    guess. Only the two unambiguous fields are checkable — names and free-text
+    roles are too paraphrasable.
+
+    Nulls are SKIPPED rather than rejected, which is the whole point of this
+    revision. The earlier version required both numbers to be present and so
+    threw away every example of an absent fact, leaving the model no way to
+    learn that a fact can be missing. Asked about a sentence with no age, it
+    invented one.
     """
-    return str(rec.age) in sentence and str(rec.year) in sentence
+    for value in (rec.age, rec.year):
+        if value is not None and str(value) not in sentence:
+            return False
+    return True
 
 
 def _shape(sentence: str) -> str:
@@ -157,6 +183,7 @@ def main() -> None:
     records: list[dict] = []
     shapes: Counter[str] = Counter()
     dropped = 0
+    nulls = 0
 
     with ThreadPoolExecutor(max_workers=a.workers) as pool:
         futures = {
@@ -177,6 +204,7 @@ def main() -> None:
                 print(f"  call failed ({type(e).__name__}) — continuing", file=sys.stderr)
                 continue
             dropped += PER_CALL - len(got)
+            nulls += sum(1 for r in got if any(r["record"][f] is None for f in REQUIRED_FIELDS))
             for r in got:
                 shapes[_shape(r["sentence"])] += 1
             records.extend(got)
@@ -220,7 +248,21 @@ def main() -> None:
             file=sys.stderr,
         )
 
-    print(f"\nfields: {', '.join(REQUIRED_FIELDS)}", file=sys.stderr)
+    # The share with a missing fact is the number this revision exists for. Too
+    # low and the model never learns to abstain; too high and it starts
+    # abstaining on facts the sentence does state.
+    with_null = sum(1 for r in uniq if any(r["record"][f] is None for f in REQUIRED_FIELDS))
+    print(
+        f"\nrecords with a missing fact: {with_null}/{len(uniq)} ({with_null / len(uniq):.0%})",
+        file=sys.stderr,
+    )
+    if not 0.12 <= with_null / len(uniq) <= 0.40:
+        print(
+            "  WARNING: outside the 12-40% band the generator was asked for. Too few and "
+            "the model cannot learn to abstain; too many and it abstains on stated facts.",
+            file=sys.stderr,
+        )
+    print(f"fields: {', '.join(REQUIRED_FIELDS)}", file=sys.stderr)
 
 
 if __name__ == "__main__":

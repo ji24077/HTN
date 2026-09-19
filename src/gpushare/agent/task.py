@@ -13,14 +13,27 @@ right?". A loss curve cannot answer that; a human has to squint at it and take
 your word. `json_parse_rate` can: the output either parses and carries every
 required key, or it does not.
 
-TWO METRICS, AND THE DIFFERENCE MATTERS
-  json_parse_rate   did the model learn the FORMAT
-  field_accuracy    did it get the CONTENT right
+THREE METRICS, AND THE DIFFERENCES MATTER
+  json_parse_rate     did the model learn the FORMAT
+  field_accuracy      did it get the CONTENT right
+  hallucination_rate  did it invent facts the sentence never stated
 
-A model that emits {"name":"","age":0,"org":"","role":"","year":0} every time
-scores 1.00 on the first and ~0 on the second. Reporting only parse rate is
-exactly how you would fool yourself here, so both are always returned together
-and `EvalResult.summary()` prints both.
+A model that emits {"name":null,...} every time scores 1.00 on the first and
+~0 on the second. Reporting only parse rate is exactly how you would fool
+yourself here, so all three are always returned together and
+`EvalResult.summary()` prints them.
+
+NULLS EXIST BECAUSE OF A REAL FAILURE. The first version made all five fields
+required, and the generator dropped any pair whose sentence did not contain
+the answer — a good filter with a bad side effect: not one training example
+showed a fact being absent. Asked "Ji is university student, studying compsci",
+the model returned age 21 and year 2020. Both invented. json_parse_rate scored
+that 1.000, because it was valid JSON with every key, and the held-out set
+could not catch it either since every held-out sentence also stated all five
+facts. The metric was blind by construction.
+
+A field the sentence does not state must be null, and producing a value there
+is now a counted failure rather than an invisible one.
 """
 
 from __future__ import annotations
@@ -52,11 +65,14 @@ class Record(BaseModel):
 
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    name: str
-    age: int
-    org: str
-    role: str
-    year: int
+    # Every field is nullable: null means "the sentence does not say".
+    # strict=True still rejects "34" for age — a quoted number is a format
+    # miss, and null is not a way around that.
+    name: str | None
+    age: int | None
+    org: str | None
+    role: str | None
+    year: int | None
 
     def canonical(self) -> str:
         """The exact string used as a training target. Fixed key order, no
@@ -121,15 +137,44 @@ class Sample:
         return [
             f
             for f in REQUIRED_FIELDS
-            if _norm(getattr(self.parsed, f)) != _norm(getattr(self.expected, f))
+            if not _same(getattr(self.parsed, f), getattr(self.expected, f))
+        ]
+
+    def hallucinated_fields(self) -> list[str]:
+        """Fields the sentence never stated, that the model filled in anyway.
+
+        Tracked apart from `wrong_fields` because inventing a plausible age is
+        a different failure from copying the wrong one, and it is the failure
+        this task is most likely to be caught on by someone typing their own
+        sentence."""
+        if self.parsed is None:
+            return []
+        return [
+            f
+            for f in REQUIRED_FIELDS
+            if getattr(self.expected, f) is None and getattr(self.parsed, f) is not None
+        ]
+
+    def omitted_fields(self) -> list[str]:
+        """The opposite: stated in the sentence, left null by the model."""
+        if self.parsed is None:
+            return []
+        return [
+            f
+            for f in REQUIRED_FIELDS
+            if getattr(self.expected, f) is not None and getattr(self.parsed, f) is None
         ]
 
 
-def _norm(v) -> str:
-    """Compare case- and whitespace-insensitively. "Research Engineer" and
-    "research engineer" are the same extraction; scoring them apart would
-    measure capitalisation luck."""
-    return str(v).strip().lower()
+def _same(got, want) -> bool:
+    """Case- and whitespace-insensitive, and None-aware.
+
+    None is compared by identity, never stringified: `str(None).lower()` is
+    "none", so a model that literally emitted the text "None" would otherwise
+    score as a correct abstention."""
+    if got is None or want is None:
+        return got is None and want is None
+    return str(got).strip().lower() == str(want).strip().lower()
 
 
 @dataclass(frozen=True)
@@ -140,6 +185,12 @@ class EvalResult:
     json_parse_rate: float
     field_accuracy: dict[str, float]
     exact_match_rate: float  # every field right, the strict bar
+    # Share of cases where the model filled in at least one field the sentence
+    # never stated. The claim "it does not make things up" is only checkable
+    # because this number exists; before nulls there was no way to express it.
+    hallucination_rate: float = 0.0
+    omission_rate: float = 0.0
+    n_nullable: int = 0  # cases that actually had a null to get right
     held_out_loss: float | None = None  # secondary; None if not computed
     samples: list[Sample] = field(default_factory=list)
 
@@ -149,6 +200,9 @@ class EvalResult:
         return (
             f"n={self.n}  json_parse_rate {self.json_parse_rate:.3f}  "
             f"exact_match {self.exact_match_rate:.3f}  held_out_loss {loss}\n"
+            f"  hallucination {self.hallucination_rate:.3f}  "
+            f"omission {self.omission_rate:.3f}  "
+            f"(over {self.n_nullable} cases with a missing fact)\n"
             f"  per-field: {fields}"
         )
 
@@ -163,6 +217,10 @@ class EvalResult:
         return (
             self.json_parse_rate < before.json_parse_rate - tol
             or self.exact_match_rate < before.exact_match_rate - tol
+            # Hallucination going UP is a regression even when accuracy holds:
+            # a model that starts inventing facts got worse in the way this
+            # task cares about most.
+            or self.hallucination_rate > before.hallucination_rate + tol
         )
 
 
@@ -178,11 +236,25 @@ def score(
         f: sum(1 for s in samples if s.parsed_ok and f not in s.wrong_fields()) / len(samples)
         for f in REQUIRED_FIELDS
     }
+    # Rated against cases that HAD a null to get right. Dividing by all samples
+    # would let a held-out set with few missing facts report a flattering
+    # hallucination rate that says nothing about the behaviour.
+    nullable = [s for s in samples if any(getattr(s.expected, f) is None for f in REQUIRED_FIELDS)]
+    stated = [
+        s for s in samples if any(getattr(s.expected, f) is not None for f in REQUIRED_FIELDS)
+    ]
     return EvalResult(
         n=len(samples),
         json_parse_rate=len(parsed) / len(samples),
         field_accuracy=per_field,
         exact_match_rate=sum(1 for s in samples if not s.wrong_fields()) / len(samples),
+        hallucination_rate=(
+            sum(1 for s in nullable if s.hallucinated_fields()) / len(nullable) if nullable else 0.0
+        ),
+        omission_rate=(
+            sum(1 for s in stated if s.omitted_fields()) / len(stated) if stated else 0.0
+        ),
+        n_nullable=len(nullable),
         held_out_loss=held_out_loss,
         # Keep failures first: 20 correct samples tell you nothing you didn't
         # already know from the rate, and the failures are where the work is.
