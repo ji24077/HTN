@@ -24,7 +24,10 @@ import { createLogger } from '@dwp/protocol'
 import { AGENT_HOME, AGENT_VERSION, invocation, isCompiledBinary } from './paths.ts'
 import { clearConfig, isPaused, loadConfig, setPaused, type AgentConfig } from './config.ts'
 import { ensureKeypair } from './keys.ts'
-import { pairHost } from './pair.ts'
+import { pairHost, parseInvite, autoEnrol } from './pair.ts'
+import {
+  containerIdentity, guiBindHost, guiPort, hostAllowed, isContainer, shouldOpenWindow, supervisorNote,
+} from './runtime.ts'
 import { connect, type AgentHandle, type AgentState } from './transport.ts'
 import * as history from './history.ts'
 import { applyUpdate, completePendingInstall, restartIntoNewVersion } from './update.ts'
@@ -114,6 +117,16 @@ async function probe(port: number, token: string): Promise<boolean> {
  * not shipping a runtime.
  */
 function openWindow(url: string): void {
+  /**
+   * A container has no display, no browser and nobody in front of it. Spawning xdg-open
+   * there is not merely useless: it is a missing binary, and the ENOENT from an unhandled
+   * spawn takes the whole agent down on start — which is how the first containerised
+   * agent managed to exit before it had finished joining.
+   */
+  if (!shouldOpenWindow()) {
+    console.log(`\n  Open this from a browser on the host:\n  ${url}\n`)
+    return
+  }
   const chromium = platform() === 'win32'
     ? [
         join(process.env['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)', 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
@@ -146,28 +159,6 @@ function openWindow(url: string): void {
       : ['xdg-open', [url]]
   const child = spawn(cmd, args, { detached: true, stdio: 'ignore' })
   child.unref()
-}
-
-/** Accept either a full invite link or a bare code, and say which fields are missing. */
-function parseInvite(text: string, fallbackServer?: string): { server: string; code: string } | { error: string } {
-  const trimmed = text.trim()
-  if (trimmed === '') return { error: 'Paste the invite link you were sent.' }
-
-  if (/^https?:\/\//i.test(trimmed)) {
-    let url: URL
-    try { url = new URL(trimmed) } catch { return { error: 'That does not look like a link. Paste the whole thing, starting with https://' } }
-    const code = url.searchParams.get('code')
-    if (!code) {
-      return { error: 'That link has no invite code in it. It should end with ?code=SOMETHING' }
-    }
-    return { server: url.origin, code }
-  }
-
-  // A bare code is only usable if we already know where to send it.
-  if (!fallbackServer) {
-    return { error: 'That looks like just the code. Paste the whole invite link instead, so this computer knows which network to join.' }
-  }
-  return { server: fallbackServer, code: trimmed }
 }
 
 // ----------------------------------------------------------------- the page
@@ -326,6 +317,7 @@ function page(token: string): string {
         <dt>Network</dt><dd id="server">—</dd>
         <dt>Can run</dt><dd id="adapters">—</dd>
         <dt>Version</dt><dd id="version">—</dd>
+        <dt id="runsInLabel" hidden>Runs in</dt><dd id="runsIn" hidden>—</dd>
       </dl>
     </div>
 
@@ -347,7 +339,7 @@ function page(token: string): string {
       </div>
       <div class="row">
         <div>
-          <div class="label">Start automatically when I log in</div>
+          <div class="label" id="loginLabel">Start automatically when I log in</div>
           <div class="hint" id="loginHint">—</div>
         </div>
         <button id="loginBtn">—</button>
@@ -370,7 +362,7 @@ function page(token: string): string {
       <div class="row">
         <div>
           <div class="label">Stop the agent</div>
-          <div class="hint">Closing this window leaves it running. This stops it until next login.</div>
+          <div class="hint" id="quitHint">Closing this window leaves it running. This stops it until next login.</div>
         </div>
         <button class="danger" id="quitBtn">Quit</button>
       </div>
@@ -569,7 +561,14 @@ function render(s) {
   $('label').textContent = s.label
   $('server').textContent = s.server
   $('adapters').textContent = s.adapters.join(', ')
-  $('version').textContent = 'v' + s.version + (s.pinnedKey ? ' — updates verified' : ' — updates unsigned, manual only')
+  /**
+   * "updates verified" is a promise about a mechanism a container does not use, so in a
+   * container the version says where the version comes from instead: the image tag.
+   */
+  var rtEarly = s.runtime || { container: false }
+  $('version').textContent = 'v' + s.version + (rtEarly.container
+    ? ' — from the image'
+    : (s.pinnedKey ? ' — updates verified' : ' — updates unsigned, manual only'))
 
   renderHistory(s)
 
@@ -580,11 +579,33 @@ function render(s) {
     ', so you can join a different network. Your computer keeps its identity; nothing else is removed.'
   $('pauseLabel').textContent = s.paused ? 'Paused' : 'Accepting work'
   $('pauseBtn').textContent = s.paused ? 'Resume' : 'Pause'
-  $('loginBtn').textContent = s.runsAtLogin ? 'Turn off' : 'Turn on'
-  $('loginHint').textContent = s.runsAtLogin
-    ? 'On. It joins by itself after a restart, with no window open.'
-    : 'Off. It only runs while this app is open.'
+  /**
+   * Three of these rows ask a question a container cannot answer, so in a container they
+   * state the answer instead. The alternative -- hiding them -- leaves an operator
+   * hunting for controls that are simply somewhere else now.
+   */
+  var rt = rtEarly
+  show($('runsInLabel'), Boolean(rt.container))
+  show($('runsIn'), Boolean(rt.container))
+  if (rt.container) $('runsIn').textContent = (rt.image ? rt.image + ' — ' : '') + 'container ' + (rt.id || '?')
+
+  show($('loginBtn'), !rt.container)
+  $('loginLabel').textContent = rt.container ? 'Restarting' : 'Start automatically when I log in'
+  if (rt.container) {
+    $('loginHint').textContent = rt.supervisor
+  } else {
+    $('loginBtn').textContent = s.runsAtLogin ? 'Turn off' : 'Turn on'
+    $('loginHint').textContent = s.runsAtLogin
+      ? 'On. It joins by itself after a restart, with no window open.'
+      : 'Off. It only runs while this app is open.'
+  }
+
+  show($('updateBtn'), !rt.container)
   $('updateHint').textContent = s.updating ? 'Installing an update. It will restart itself.' : s.updateNote
+
+  $('quitHint').textContent = rt.container
+    ? 'Stops the agent inside this container. Whether it comes back is your restart policy.'
+    : 'Closing this window leaves it running. This stops it until next login.'
 }
 
 let rendered = false
@@ -775,14 +796,16 @@ export async function runGui(opts: GuiOptions): Promise<void> {
      * Two guards, both necessary, neither sufficient alone.
      *
      * The Host check stops DNS rebinding: a name the attacker controls that resolves to
-     * 127.0.0.1 would otherwise let a page in their browser drive this server. The token
-     * in the path stops any other local process or page that has not read a file only
-     * this user can read — and anything that *can* read it could already read the agent's
-     * private key sitting beside it, so this grants nothing new.
+     * an address reaching this server would otherwise let a page in their browser drive
+     * it. It matches on the name alone (see `hostAllowed`), because the port is not a
+     * secret and requiring a particular one broke every published container whose host
+     * port differs from its container port. The token in the path stops any other local
+     * process or page that has not read a file only this user can read — and anything
+     * that *can* read it could already read the agent's private key sitting beside it,
+     * so this grants nothing new.
      */
-    const host = req.headers.host ?? ''
     const port = (server.address() as { port: number } | null)?.port
-    if (host !== `127.0.0.1:${port}` && host !== `localhost:${port}`) {
+    if (!hostAllowed(req.headers.host)) {
       send(res, 403, { error: 'wrong host' })
       return
     }
@@ -834,6 +857,21 @@ export async function runGui(opts: GuiOptions): Promise<void> {
         adapters: availableAdapters(),
         runsAtLogin: service.installed,
         /**
+         * How this agent is packaged and who restarts it.
+         *
+         * The window has three rows that only make sense on a laptop — start at login,
+         * install an update, quit until next login — and all three are actively
+         * misleading in a container, where the answer to every one of them is "the
+         * container runtime decides". Rather than hide them and leave an operator
+         * wondering where the controls went, the page swaps in what is true here.
+         */
+        runtime: {
+          container: isContainer(),
+          supervisor: supervisorNote(),
+          /** The container's own id and image, so one window is identifiably one agent. */
+          ...(containerIdentity() ?? {}),
+        },
+        /**
          * Say which of the two it is, because they need different people to act.
          *
          * This used to read "This network offers no signed releases", which points at
@@ -842,11 +880,15 @@ export async function runGui(opts: GuiOptions): Promise<void> {
          * every update. Blaming the network meant nobody ever ran the one command that
          * fixes it, on the one machine that can.
          */
-        updateNote: config?.releaseKey
-          ? 'Installed automatically, verified against the key this computer pinned when it joined.'
-          : 'This computer joined before the network signed its releases, so it pinned no key '
-            + 'and cannot verify an update. Run  ' + invocation() + ' trust-updates  here to '
-            + 'review the key and turn automatic updates back on.',
+        updateNote: isContainer()
+          ? 'This agent is the image it was started from. Update it by pulling a newer '
+            + 'image and recreating the container — nothing here rewrites itself, so what '
+            + 'the registry holds and what is running can never drift apart.'
+          : config?.releaseKey
+            ? 'Installed automatically, verified against the key this computer pinned when it joined.'
+            : 'This computer joined before the network signed its releases, so it pinned no key '
+              + 'and cannot verify an update. Run  ' + invocation() + ' trust-updates  here to '
+              + 'review the key and turn automatic updates back on.',
         connection: state.connection,
         attempt: state.attempt,
         connectedSince: state.connectedSince,
@@ -961,6 +1003,13 @@ export async function runGui(opts: GuiOptions): Promise<void> {
     }
 
     if (route === 'api/login-at-start') {
+      if (isContainer()) {
+        send(res, 400, {
+          error: 'There is no login inside a container. Whether this agent comes back is '
+            + 'your container runtime\'s restart policy — set `restart: unless-stopped`.',
+        })
+        return
+      }
       try {
         if (body.enabled === true) {
           if (!config) { send(res, 400, { error: 'Join a network first.' }); return }
@@ -980,6 +1029,21 @@ export async function runGui(opts: GuiOptions): Promise<void> {
     }
 
     if (route === 'api/update') {
+      /**
+       * Refuse here as well as in update.ts, and say the same thing.
+       *
+       * An update inside a container writes into a layer that the next `docker run`
+       * throws away, so it would appear to work, survive a restart of the process, and
+       * vanish on a recreate — leaving the running version and the image's version
+       * permanently disagreeing with no way to tell which one you are looking at.
+       */
+      if (isContainer()) {
+        send(res, 200, {
+          message: 'Updates arrive as images here. Run  docker compose pull && docker compose up -d  '
+            + 'on this host to move to a newer agent.',
+        })
+        return
+      }
       if (!config) { send(res, 400, { error: 'Join a network first.' }); return }
       const { privateKey } = ensureKeypair()
       const result = await applyUpdate(config, privateKey, { force: false })
@@ -1021,6 +1085,7 @@ export async function runGui(opts: GuiOptions): Promise<void> {
    * socket can be a few hundred milliseconds from being free. Falling straight through to
    * another port would work but would break the window that is open on the old one.
    */
+  const bindHost = guiBindHost()
   const listenOn = (port: number): Promise<boolean> => new Promise(resolve => {
     const onError = (err: NodeJS.ErrnoException): void => {
       server.removeListener('error', onError)
@@ -1028,34 +1093,69 @@ export async function runGui(opts: GuiOptions): Promise<void> {
       else resolve(false)
     }
     server.once('error', onError)
-    server.listen(port, '127.0.0.1', () => {
+    server.listen(port, bindHost, () => {
       server.removeListener('error', onError)
       resolve(true)
     })
   })
 
   let bound = 0
-  const preferred = existing?.port ?? PORT_BASE
-  const waitForPreferred = supersedingParent ? 12 : 1
-  for (let i = 0; i < waitForPreferred && bound === 0; i += 1) {
-    if (await listenOn(preferred)) bound = preferred
-    else if (i + 1 < waitForPreferred) await sleep(250)
-  }
-  for (let i = 0; bound === 0 && i < PORT_TRIES; i += 1) {
-    if (await listenOn(PORT_BASE + i)) bound = PORT_BASE + i
-  }
-  if (bound === 0) {
-    console.error(`\n  Could not open a local port in ${PORT_BASE}–${PORT_BASE + PORT_TRIES - 1}.\n` +
-      `  Something else is using all of them.\n`)
-    process.exit(1)
+  /**
+   * A pinned port is taken or the agent stops, rather than quietly moving.
+   *
+   * Walking the range is right on a laptop, where the alternative is refusing to start
+   * because something unrelated holds 43117. It is wrong in a container: the port is
+   * already written down in the operator's `-p 43117:43117`, nothing else in that
+   * namespace can be holding it, and landing on 43118 publishes a port with nothing
+   * behind it — a window that shows "cannot reach the agent" forever while the agent is
+   * perfectly healthy two ports away.
+   */
+  const pinned = guiPort()
+  if (pinned !== null) {
+    for (let i = 0; i < 20 && bound === 0; i += 1) {
+      if (await listenOn(pinned)) bound = pinned
+      else await sleep(250)
+    }
+    if (bound === 0) {
+      console.error(`\n  Could not open port ${pinned} on ${bindHost}. Something else is holding it.\n`)
+      process.exit(1)
+    }
+  } else {
+    const preferred = existing?.port ?? PORT_BASE
+    const waitForPreferred = supersedingParent ? 12 : 1
+    for (let i = 0; i < waitForPreferred && bound === 0; i += 1) {
+      if (await listenOn(preferred)) bound = preferred
+      else if (i + 1 < waitForPreferred) await sleep(250)
+    }
+    for (let i = 0; bound === 0 && i < PORT_TRIES; i += 1) {
+      if (await listenOn(PORT_BASE + i)) bound = PORT_BASE + i
+    }
+    if (bound === 0) {
+      console.error(`\n  Could not open a local port in ${PORT_BASE}–${PORT_BASE + PORT_TRIES - 1}.\n` +
+        `  Something else is using all of them.\n`)
+      process.exit(1)
+    }
   }
 
   writeLock({ port: bound, token, pid: process.pid, startedAt: new Date().toISOString(), version: AGENT_VERSION })
   const url = `http://127.0.0.1:${bound}/${token}/`
-  log.info('gui.listening', { port: bound, hidden: opts.hidden, paired: config !== null })
+  log.info('gui.listening', { port: bound, bindHost, container: isContainer(), hidden: opts.hidden, paired: config !== null })
 
   for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     process.on(signal, () => process.exit(0))
+  }
+
+  /**
+   * Join from the environment before connecting, for a machine with nobody at it.
+   *
+   * Deliberately after the window is listening: if the invite turns out to be spent or
+   * the address wrong, the operator can open the page and see exactly that, instead of
+   * the container exiting and taking the explanation with it into a log they have to go
+   * looking for.
+   */
+  if (!config) {
+    const joined = await autoEnrol()
+    if (joined?.ok) config = loadConfig()
   }
 
   if (config) await startConnection(config)

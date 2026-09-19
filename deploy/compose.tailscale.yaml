@@ -1,0 +1,58 @@
+# Overlay: put the agent's container on a tailnet instead of the open internet.
+#
+#   docker compose -f deploy/compose.agent.yaml -f deploy/compose.tailscale.yaml up -d
+#
+# Use this when the control service is only reachable inside your tailnet — a laptop
+# running it at home, say, with no public address. If the control service already has a
+# public HTTPS address, you do not need any of this: the agent dials out, and a container
+# in another country reaches it exactly the way a browser would.
+#
+# What changes: Tailscale runs in its own container, and the agent joins that container's
+# network namespace. The agent itself is unchanged and knows nothing about Tailscale —
+# it dials the same wss:// URL, which now resolves inside the tailnet. Moving the tunnel
+# into Docker is the point: no host tailscaled, no per-OS install, and an agent on a
+# Windows box and one on a Mac now reach the network by identical means.
+#
+# TS_AUTHKEY comes from https://login.tailscale.com/admin/settings/keys — prefer an
+# ephemeral, pre-approved key so a container that is recreated does not accumulate dead
+# nodes in your tailnet.
+services:
+  tailscale:
+    image: tailscale/tailscale:v1.90.9
+    hostname: ${TS_HOSTNAME:-dwp-agent}
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY:?Set TS_AUTHKEY in your env file}
+      TS_STATE_DIR: /var/lib/tailscale
+      # Accept the routes the tailnet advertises, so a control service behind a subnet
+      # router is reachable and not merely visible.
+      TS_EXTRA_ARGS: ${TS_EXTRA_ARGS:---accept-routes}
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      # Required to bring up the tunnel interface. This is the one genuine privilege in
+      # this file, and it is held by the Tailscale container — not by the agent, which
+      # keeps running unprivileged as uid 1000 in the namespace this provides.
+      - NET_ADMIN
+      - NET_RAW
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "tailscale", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  agent:
+    # The agent has no network of its own now; it lives in the tailscale container's.
+    network_mode: service:tailscale
+    depends_on:
+      tailscale:
+        condition: service_healthy
+    # Ports belong to the namespace's owner. Publish the window from the tailscale
+    # service above if you want it, rather than here, where Compose will reject it.
+    ports: !reset []
+
+volumes:
+  tailscale-state:

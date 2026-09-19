@@ -10,6 +10,7 @@ import { diagnoseOrigin } from '@dwp/protocol'
 import { fallbackLookup, dnsFallbackEnabled, installDnsFallback, directDial } from './resolver.ts'
 import { applyUpdate, restartIntoNewVersion } from './update.ts'
 import { AGENT_VERSION, isCompiledBinary } from './paths.ts'
+import { isContainer } from './runtime.ts'
 import { probe } from './capability.ts'
 import { isPaused, type AgentConfig } from './config.ts'
 import { runEcho } from './adapters/echo.ts'
@@ -245,6 +246,15 @@ export function connect(
      */
     const maybeUpdate = (offered: string | null): void => {
       if (cfg.autoUpdate === false) return
+      /**
+       * Stop before asking, not after being refused.
+       *
+       * applyUpdate refuses in a container anyway, but reaching it means a fetch of the
+       * release index every ten minutes and an `update.refused` line every handshake,
+       * for a decision that can never change while this process lives. A permanent false
+       * alarm is exactly the noise that hides a real one later.
+       */
+      if (isContainer()) return
 
       /**
        * A compiled binary ignores what the handshake announces.

@@ -2,7 +2,8 @@ import './instrument.ts'
 import { ensureKeypair } from './keys.ts'
 import { loadConfig, saveConfig, setPaused, isPaused } from './config.ts'
 import { connect } from './transport.ts'
-import { pair } from './pair.ts'
+import { pair, autoEnrol } from './pair.ts'
+import { isContainer } from './runtime.ts'
 import { probe } from './capability.ts'
 import { browserProbe } from './adapters/browser.ts'
 import { applyUpdate, completePendingInstall, currentVersion } from './update.ts'
@@ -32,10 +33,27 @@ function flag(name: string): string | undefined {
   return i >= 0 ? rest[i + 1] : undefined
 }
 
+/**
+ * The config, joining from the environment first if this process was given an invite.
+ *
+ * `run` in a container reaches this with no config on its very first start, and the
+ * instruction it used to print -- pair from a terminal -- is one nobody can follow: the
+ * container has no terminal and will have exited by the time anyone opens one.
+ */
+async function requireConfigOrEnrol() {
+  if (!loadConfig()) await autoEnrol()
+  return requireConfig()
+}
+
 function requireConfig() {
   const cfg = loadConfig()
   if (!cfg) {
-    console.error(`No agent config at ${AGENT_HOME}. Pair first:\n  pnpm agent pair --server <url> --code <CODE>`)
+    console.error(isContainer()
+      ? `No agent config at ${AGENT_HOME}, and no invite in the environment.\n`
+        + `  Give the container an invite link:  -e DWP_INVITE='https://your-server/join?code=CODE'\n`
+        + `  or a server and code separately:    -e DWP_SERVER=https://your-server -e DWP_CODE=CODE\n`
+        + `  Mount a volume at ${AGENT_HOME} so the identity it creates survives a recreate.`
+      : `No agent config at ${AGENT_HOME}. Pair first:\n  pnpm agent pair --server <url> --code <CODE>`)
     process.exit(1)
   }
   return cfg
@@ -54,13 +72,14 @@ switch (command) {
   }
 
   case 'run': {
-    const cfg = requireConfig()
+    const cfg = await requireConfigOrEnrol()
     const { privateKey } = ensureKeypair()
     // Before anything loads a native addon: an update may have left its dependency step
     // for a process that is not holding those files open. This one is not, yet.
     await completePendingInstall()
     if (flag('allow-browser') !== undefined) { cfg.allowBrowser = true; saveConfig(cfg) }
-    console.log(`[agent] ${cfg.label} (${cfg.hostId}) v${AGENT_VERSION} pid=${process.pid}${isPaused() ? '  [PAUSED]' : ''}`)
+    console.log(`[agent] ${cfg.label} (${cfg.hostId}) v${AGENT_VERSION} pid=${process.pid}`
+      + `${isContainer() ? '  [container]' : ''}${isPaused() ? '  [PAUSED]' : ''}`)
     connect(cfg, privateKey)
     break
   }
@@ -206,7 +225,8 @@ switch (command) {
   case 'status': {
     const cfg = loadConfig()
     const cap = probe(['echo'])
-    console.log(JSON.stringify({ home: AGENT_HOME, paused: isPaused(), config: cfg, capability: cap }, null, 2))
+    console.log(JSON.stringify(
+      { home: AGENT_HOME, container: isContainer(), paused: isPaused(), config: cfg, capability: cap }, null, 2))
     break
   }
 

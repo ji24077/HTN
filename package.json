@@ -10,6 +10,8 @@
     "agent": "node --env-file-if-exists=.env packages/agent/src/index.ts",
     "typecheck": "tsc --noEmit",
     "test": "node --test packages/protocol/test/*.test.ts packages/agent/test/*.test.ts",
+    "docker:build": "docker build -f deploy/Dockerfile.agent -t dwp-agent:latest .",
+    "docker:test": "node scripts/docker-fleet-test.ts",
     "build:binaries": "node scripts/build-binaries.ts",
     "build:fixtures": "node scripts/build-fixtures.ts",
     "release": "node scripts/publish-release.ts",

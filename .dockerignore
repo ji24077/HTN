@@ -20,3 +20,14 @@ backend/src/orchestrator/server/web/
 **/*.pyc
 **/.env
 **/.env.*
+
+# The agent image: the TypeScript workspace, its manifests, and nothing built locally.
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!tsconfig.json
+!packages/
+!packages/**
+packages/**/node_modules/
+**/node_modules/
+**/.DS_Store
