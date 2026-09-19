@@ -1,4 +1,4 @@
-.PHONY: help setup-server setup-cuda setup-rocm setup-agent check probe fit server worker mock test fmt
+.PHONY: help setup-server setup-cuda setup-rocm setup-agent check probe fit data train eval server worker mock test fmt
 
 help:
 	@grep -E '^[a-z-]+:.*?##' $(MAKEFILE_LIST) | sed 's/:.*##/\t/'
@@ -19,6 +19,13 @@ probe:         ## measure real step time on THIS gpu (run on a pod) -> probes.js
 	uv run python scripts/probe.py
 fit:           ## fit per-chip constants from probes.jsonl and report the error
 	uv run python scripts/fit_calibration.py probes.jsonl
+
+data:          ## generate the SFT set with a hosted model -> data/
+	uv run python scripts/gen_data.py --n 2000
+train:         ## fine-tune Qwen2.5-0.5B on the task (run on a pod)
+	uv run python scripts/train.py --out ckpt/run
+eval:          ## score a model on the held-out set (run on a pod)
+	uv run python scripts/evaluate.py --model ckpt/run
 
 server:        ## run the hub
 	uv run gpushare-server
