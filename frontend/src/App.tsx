@@ -13,6 +13,7 @@ import { ActivityFeed } from "./components/ActivityFeed";
 import { ChatPanel } from "./components/ChatPanel";
 import { DeviceInvite } from "./components/DeviceInvite";
 import { Login } from "./components/Login";
+import { SimulationComposer } from "./components/SimulationComposer";
 import { TaskComposer } from "./components/TaskComposer";
 import { TaskDetails } from "./components/TaskDetails";
 import { TaskList } from "./components/TaskList";
@@ -119,6 +120,7 @@ function FleetApp({
     "Jobs" | "Workers" | "Activity" | "Assistant"
   >("Jobs");
   const [composeOpen, setComposeOpen] = useState(false);
+  const [composeMode, setComposeMode] = useState("upload");
   const composerRef = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     if (composeOpen && !composerRef.current?.open)
@@ -407,6 +409,7 @@ function FleetApp({
               selected={selected}
               onSelect={(id) => {
                 setSelected(id);
+                setComposeMode("builtin");
                 setComposeOpen(true);
               }}
             />
@@ -461,13 +464,43 @@ function FleetApp({
             {submitError}
           </p>
         )}
-        <TaskComposer
-          selected={selected}
-          onSelect={setSelected}
-          workers={snapshot.workers}
-          busy={busy}
-          onSubmit={submit}
-        />
+        <div className="compose-mode" role="group" aria-label="Submission type">
+          <button
+            type="button"
+            aria-pressed={composeMode === "upload"}
+            onClick={() => setComposeMode("upload")}
+          >
+            Upload simulation
+          </button>
+          <button
+            type="button"
+            aria-pressed={composeMode === "builtin"}
+            onClick={() => setComposeMode("builtin")}
+          >
+            Built-in tasks
+          </button>
+        </div>
+        <div hidden={composeMode !== "upload"}>
+          <SimulationComposer
+            onCreated={(task) => {
+              setComposeOpen(false);
+              setView("Jobs");
+              setDetail(task);
+              notify(
+                "Simulation submitted. Preprocessing will start on one worker.",
+              );
+            }}
+          />
+        </div>
+        <div hidden={composeMode !== "builtin"}>
+          <TaskComposer
+            selected={selected}
+            onSelect={setSelected}
+            workers={snapshot.workers}
+            busy={busy}
+            onSubmit={submit}
+          />
+        </div>
       </dialog>
       <div id="toast" role="status" aria-live="polite" hidden={!toast}>
         {toast?.message}

@@ -12,7 +12,7 @@ from pathlib import Path
 from ..shared.execution import ExecutionBatch, ExecutionEvent, scrub_execution
 from ..shared.protocol import json_text
 
-TERMINAL = {"succeeded", "failed", "cancelled", "timed_out", "interrupted"}
+TERMINAL = {"succeeded", "failed", "cancelled", "timed_out", "interrupted", "cleaned"}
 
 
 class ExecutionJournal:

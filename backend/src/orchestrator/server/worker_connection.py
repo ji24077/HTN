@@ -116,11 +116,14 @@ async def serve_worker(
             await send(socket, response)
             if message.type == "heartbeat":
                 await cache_presence(cache, worker_id, session)
-                # Keep the slot occupied while a result is awaiting acknowledgment.
-                if not message.active and not message.paused:
-                    task = await store.claim(worker_id, session)
-                    if task is not None:
-                        await send(socket, Message(type="assign", task=task))
+            # Ordered delivery clears the old local slot before this assignment.
+            # Completion should not wait for the next liveness heartbeat.
+            if message.type in {"complete", "failed"} or (
+                message.type == "heartbeat" and not message.active and not message.paused
+            ):
+                task = await store.claim(worker_id, session)
+                if task is not None:
+                    await send(socket, Message(type="assign", task=task))
     except WebSocketDisconnect:
         pass
     except (TimeoutError, StaleSession):

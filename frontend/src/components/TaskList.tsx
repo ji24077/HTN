@@ -1,7 +1,8 @@
 import { useState } from "react";
 import type { Task } from "../api/types";
-import { active, age, workerName } from "../lib/format";
+import { active, age, workerName, record } from "../lib/format";
 import { groupJobs, statusLabels } from "../lib/jobs";
+import { phaseLabels } from "./SimulationDetails";
 import { Icon } from "./Icon";
 
 const filters = ["All jobs", "Active", "Failed", "Completed"] as const;
@@ -130,7 +131,11 @@ export function TaskList({
                 <td>
                   <span className={`status-badge ${job.state}`}>
                     <i />
-                    {statusLabels[job.state]}
+                    {job.primary.spec.kind === "simulation_job"
+                      ? phaseLabels[
+                          String(record(job.primary.spec.payload).phase)
+                        ] || statusLabels[job.state]
+                      : statusLabels[job.state]}
                   </span>
                 </td>
                 <td>
@@ -148,15 +153,17 @@ export function TaskList({
                     <span>{job.progress}%</span>
                   </div>
                   <small className="muted">
-                    {job.tasks.length > 1
-                      ? `${job.tasks.filter((t) => t.state === "succeeded").length} / ${job.tasks.length} tasks`
-                      : job.primary.generation > 1
-                        ? `Attempt ${job.primary.generation} of ${job.primary.spec.max_attempts}`
-                        : job.state === "queued"
-                          ? "Waiting for capacity"
-                          : job.primary.generation
-                            ? "First attempt"
-                            : "Not started"}
+                    {job.primary.spec.kind === "simulation_job"
+                      ? "Simulation pipeline"
+                      : job.tasks.length > 1
+                        ? `${job.tasks.filter((t) => t.state === "succeeded").length} / ${job.tasks.length} tasks`
+                        : job.primary.generation > 1
+                          ? `Attempt ${job.primary.generation} of ${job.primary.spec.max_attempts}`
+                          : job.state === "queued"
+                            ? "Waiting for capacity"
+                            : job.primary.generation
+                              ? "First attempt"
+                              : "Not started"}
                   </small>
                 </td>
                 <td>
@@ -185,7 +192,9 @@ export function TaskList({
                       disabled={cancelling.has(job.primary.spec.id)}
                       onClick={() => onCancel(job.primary.spec.id)}
                     >
-                      Cancel
+                      {job.primary.spec.kind === "simulation_job"
+                        ? "Cancel & clean up"
+                        : "Cancel"}
                     </button>
                   ) : (
                     <button
