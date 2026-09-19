@@ -1,5 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import type { Task, TaskSpec } from "./types";
+import type { ChatMessage, ChatTurn, Task, TaskSpec } from "./types";
 
 export class ApiError extends Error {
   constructor(
@@ -274,6 +274,24 @@ export const submitTasks = (tasks: TaskSpec[]) =>
 export const cancelTask = (id: string) =>
   request<Task>(`/v1/tasks/${encodeURIComponent(id)}/cancel`, {
     method: "POST",
+  });
+
+export const chatConfig = (signal?: AbortSignal) =>
+  request<{ enabled: boolean }>("/v1/chat/config", { signal });
+export const readChat = (id: string, signal?: AbortSignal) =>
+  request<{ id: string; turns: ChatTurn[] }>(
+    `/v1/chat/${encodeURIComponent(id)}`,
+    { signal },
+  );
+export const sendChat = (
+  id: string,
+  message: ChatMessage,
+  signal?: AbortSignal,
+) =>
+  request<ChatTurn>(`/v1/chat/${encodeURIComponent(id)}/messages`, {
+    method: "POST",
+    body: JSON.stringify(message),
+    signal,
   });
 export const createDeviceInvite = () =>
   request<{ code: string; expires_in: number; server: string }>(

@@ -1,9 +1,21 @@
 """Framework-neutral JSON tool definitions and a validated dispatcher."""
 
+from typing import Protocol
+
 from pydantic import Field, ValidationError
 
-from ..shared.protocol import Identifier, Model, Submission
-from .http import ClientError, OrchestratorClient
+from ..shared.protocol import Identifier, Model, Submission, Task, TaskSpec, Worker
+from .http import ClientError
+
+
+class TaskClient(Protocol):
+    async def list_workers(self) -> list[Worker]: ...
+    async def list_tasks(self) -> list[Task]: ...
+    async def get_task(self, task_id: str) -> Task: ...
+    async def submit_tasks(self, tasks: list[TaskSpec]) -> list[Task]: ...
+    async def cancel_task(self, task_id: str) -> Task: ...
+    async def wait_task(self, task_id: str, timeout_seconds: float = 300) -> Task: ...
+    async def list_events(self, after: int = 0) -> list[dict]: ...
 
 
 class EmptyArgs(Model):
@@ -54,7 +66,7 @@ def tool_definitions() -> list[dict]:
 
 
 class AgentTools:
-    def __init__(self, client: OrchestratorClient):
+    def __init__(self, client: TaskClient):
         self.client = client
 
     async def call(self, name: str, arguments: dict) -> dict:

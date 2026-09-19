@@ -24,6 +24,7 @@ body {
 }
 button,
 input,
+textarea,
 select {
   font: inherit;
 }
@@ -36,6 +37,7 @@ button:disabled {
 }
 button:focus-visible,
 input:focus-visible,
+textarea:focus-visible,
 select:focus-visible {
   outline: 3px solid #91b557;
   outline-offset: 3px;
@@ -554,6 +556,95 @@ h2 {
   padding: 11px 12px;
   color: #4e5845;
   font-size: 12px;
+}
+
+.chat-panel textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 82px;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  background: #fcfdfb;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.chat-reset {
+  border: 0;
+  background: transparent;
+  padding: 5px;
+  color: var(--green);
+  font-size: 11px;
+}
+.chat-transcript {
+  max-height: 420px;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  margin-top: 18px;
+  scrollbar-width: thin;
+}
+.chat-empty {
+  display: grid;
+  gap: 8px;
+}
+.chat-empty button {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--soft);
+  padding: 10px;
+  text-align: left;
+  font-size: 12px;
+}
+.chat-turn + .chat-turn {
+  margin-top: 18px;
+}
+.chat-message {
+  border-radius: 8px;
+  padding: 12px;
+  margin: 8px 0;
+  background: #f5f6f2;
+}
+.chat-user {
+  background: var(--soft);
+}
+.chat-message > span {
+  display: block;
+  font-size: 10px;
+  font-weight: 600;
+  margin-bottom: 5px;
+  color: var(--muted);
+}
+.chat-message p {
+  font-size: 12px;
+  color: var(--ink);
+  white-space: pre-wrap;
+}
+.chat-tool {
+  margin: 8px 2px;
+  font-size: 11px;
+}
+.chat-tool summary {
+  cursor: pointer;
+  line-height: 1.6;
+}
+.chat-tool summary small {
+  color: var(--muted);
+}
+.chat-tool pre {
+  max-height: 200px;
+  overflow: auto;
+  padding: 10px;
+  background: #f5f6f2;
+  white-space: pre-wrap;
+  font: 10px/1.5 var(--mono);
+}
+.chat-failed {
+  border: 1px solid #d6b681;
+}
+.chat-thinking,
+.chat-notice {
+  margin: 10px 0;
 }
 .duration-group {
   display: flex;

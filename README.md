@@ -26,6 +26,11 @@ workspace, open **https://localhost:5174** to create an account and sign in.
 Approved email addresses receive fleet access only after email confirmation.
 The dashboard shows registered workers and real database state.
 
+Set `OPENAI_API_KEY` and `OPENAI_MODEL=gpt-6-astra` in the backend environment to
+enable the **Fleet assistant** chat panel. It can inspect the fleet, submit the
+existing workloads, and inspect or cancel tasks. Conversations and tool activity
+are saved privately on the backend. Restart the backend after changing configuration.
+
 See [frontend setup](frontend/README.md) for HTTPS and Supabase email redirects,
 and [networking](docs/networking.md) for hosting the website and connecting
 workers. The optional `orchestrator-demo` commands remain available for isolated
@@ -79,6 +84,8 @@ Hosted entry points are `orchestrator-public` and
 - [Frontend](frontend/README.md): React development, hot reload, and builds.
 - [Development](docs/development.md): local setup, containers, checks, and contribution boundaries.
 - [Agent interface](docs/agent-interface.md): client, CLI, tool schemas, and examples.
+- [Model client](docs/model-client.md): standalone OpenAI calls, separate from the agent loop.
+- [Fleet assistant](docs/fleet-assistant.md): chat UI, agent loop, tools, and recovery.
 - [Validation](docs/validation.md): completed checks and remaining failure scenarios.
 
 ## Checks

@@ -10,6 +10,7 @@ import {
 } from "./api/client";
 import type { Task, TaskSpec } from "./api/types";
 import { ActivityFeed } from "./components/ActivityFeed";
+import { ChatPanel } from "./components/ChatPanel";
 import { DeviceInvite } from "./components/DeviceInvite";
 import { Login } from "./components/Login";
 import { TaskComposer } from "./components/TaskComposer";
@@ -332,6 +333,10 @@ function FleetApp({
               />
             </div>
             <div className="right-column">
+              <ChatPanel
+                key={remote ? email : "demo"}
+                scope={remote ? email : "demo"}
+              />
               <TaskComposer
                 selected={selected}
                 onSelect={setSelected}

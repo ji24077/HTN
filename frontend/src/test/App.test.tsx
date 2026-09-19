@@ -101,6 +101,7 @@ async function mount() {
   return { ...view, stream };
 }
 beforeEach(() => {
+  sessionStorage.clear();
   window.history.replaceState(null, "", "/");
   supabaseAuth.signUp
     .mockReset()
@@ -317,16 +318,23 @@ describe("dashboard interactions over pushed updates", () => {
   it("recovers from stream disconnects without losing edits or fetching snapshots", async () => {
     const user = userEvent.setup();
     const { stream } = await mount();
-    await user.selectOptions(screen.getByRole("combobox", { name: "Send to" }), "worker-b");
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Send to" }),
+      "worker-b",
+    );
     act(() => stream.disconnect());
     expect(screen.getByRole("alert")).toHaveTextContent(
       "reconnecting automatically",
     );
     act(() => stream.snapshot(fleet()));
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Send to" })).toHaveValue("worker-b");
+    expect(screen.getByRole("combobox", { name: "Send to" })).toHaveValue(
+      "worker-b",
+    );
     expect(
-      fetchMock.mock.calls.every(([path]) => path === "/auth/session"),
+      fetchMock.mock.calls.every(
+        ([path]) => path === "/auth/session" || path === "/v1/chat/config",
+      ),
     ).toBe(true);
   });
 
@@ -347,7 +355,9 @@ describe("dashboard interactions over pushed updates", () => {
       "Could not dispatch: database unavailable",
     );
     expect(screen.getByRole("button", { name: "Send task" })).toBeEnabled();
-    expect(screen.getByRole("textbox")).toHaveValue("Render preview");
+    expect(screen.getByRole("textbox", { name: "Task name" })).toHaveValue(
+      "Render preview",
+    );
   });
 });
 

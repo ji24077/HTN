@@ -137,6 +137,7 @@ class Store:
                         "dwp_pair_codes",
                         "dwp_devices",
                         "dwp_assertions",
+                        "chat_conversations",
                     ):
                         await conn.execute(
                             f'ALTER TABLE "{schema}".{table} ENABLE ROW LEVEL SECURITY'

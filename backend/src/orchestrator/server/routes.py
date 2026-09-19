@@ -8,7 +8,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
 
-from ..shared.protocol import Identifier, Submission, Task, Worker, json_loads, json_text
+from ..shared.protocol import Identifier, Submission, Task, TaskSpec, Worker, json_loads, json_text
 from .auth import require_admin
 
 router = APIRouter(prefix="/v1", dependencies=[Depends(require_admin)])
@@ -88,14 +88,19 @@ async def submit(request: Request):
         submission = Submission.model_validate(json_loads(bytes(data)))
     except (ValueError, ValidationError) as exc:
         raise HTTPException(status_code=400, detail="invalid task submission") from exc
-    for task in submission.tasks:
+    return await submit_specs(request, submission.tasks)
+
+
+async def submit_specs(request: Request, specs: list[TaskSpec]) -> list[Task]:
+    """Shared submission checks for the HTTP API and authenticated chat tools."""
+    for task in specs:
         if (
             task.target_worker_id
             and task.target_worker_id not in request.app.state.config.worker_tokens
             and not await request.app.state.store.enrolled_worker(task.target_worker_id)
         ):
             raise HTTPException(status_code=400, detail="unknown target worker")
-    return await request.app.state.store.submit(submission.tasks)
+    return await request.app.state.store.submit(specs)
 
 
 @router.get("/tasks", response_model=list[Task])
