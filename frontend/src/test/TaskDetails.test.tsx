@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { TaskDetails } from "../components/TaskDetails";
 import { ApiError } from "../api/client";
@@ -81,7 +81,10 @@ it("polls a live task, then stops after the final page of a settled task", async
   expect(api.executionEvents).toHaveBeenCalledTimes(3);
   await tick(10_000);
   expect(api.executionEvents).toHaveBeenCalledTimes(3);
-  expect(screen.getByText(/line 3/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("tab", { name: /Logs/ }));
+  expect(
+    screen.getByText(/line 3/, { selector: ".log-line > div > pre" }),
+  ).toBeInTheDocument();
 });
 
 it("stops polling after an unrenewable session instead of re-triggering sign-in", async () => {
@@ -102,4 +105,62 @@ it("keeps retrying transient failures", async () => {
   expect(screen.getByText(/retrying/)).toBeInTheDocument();
   await tick(1500);
   expect(api.executionEvents).toHaveBeenCalledTimes(2);
+});
+
+it("resumes logs after a failed task is retried on another worker, preserving earlier attempts", async () => {
+  api.executionEvents
+    .mockResolvedValueOnce(page(1))
+    .mockResolvedValue({
+      ...page(2),
+      events: [
+        {
+          ...page(2).events[0],
+          attempt: 2,
+          worker_id: "worker-b",
+          data: { text: "second worker output" },
+        },
+      ],
+    });
+  const { rerender } = render(
+    <TaskDetails task={task("failed")} onClose={() => {}} />,
+  );
+  await tick(0);
+  await tick(5000);
+  expect(api.executionEvents).toHaveBeenCalledTimes(1);
+  rerender(
+    <TaskDetails
+      task={{ ...task("running"), generation: 2, worker_id: "worker-b" }}
+      onClose={() => {}}
+    />,
+  );
+  await tick(0);
+  expect(api.executionEvents).toHaveBeenLastCalledWith(
+    "task-1",
+    1,
+    expect.any(AbortSignal),
+  );
+  fireEvent.click(screen.getByRole("tab", { name: /Logs/ }));
+  expect(
+    screen.getByText("line 1", { selector: ".log-line > div > pre" }),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByText("second worker output", {
+      selector: ".log-line > div > pre",
+    }),
+  ).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Filter by worker"), {
+    target: { value: "worker-b" },
+  });
+  expect(
+    screen.queryByText("line 1", { selector: ".log-line > div > pre" }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.getByText("second worker output", {
+      selector: ".log-line > div > pre",
+    }),
+  ).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Search execution logs"), {
+    target: { value: "does not exist" },
+  });
+  expect(screen.getByText("No logs match these filters.")).toBeInTheDocument();
 });

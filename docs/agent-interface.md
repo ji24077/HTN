@@ -5,6 +5,10 @@ Python client and CLI use the same authenticated HTTP API and SSE update stream.
 Worker connections remain WebSockets. No model provider or agent framework is
 required, and these commands do not provision infrastructure.
 
+For automatic, persistent monitoring from submission through completion, see the
+[job supervisor](job-supervisor.md). It uses separate job-scoped tools and Sentry's
+HTTP API, and records investigations and recovery decisions in PostgreSQL.
+
 For individual OpenAI calls, use the separate [model client](model-client.md).
 It accepts these tool definitions and returns tool requests; a caller still owns
 execution and conversation orchestration.

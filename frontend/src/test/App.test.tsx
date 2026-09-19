@@ -244,6 +244,7 @@ describe("dashboard interactions over pushed updates", () => {
   it("preserves selection, drafts, focus and duration across snapshots and submits the chosen worker", async () => {
     const user = userEvent.setup();
     const { stream, unmount } = await mount();
+    await user.click(screen.getByRole("button", { name: /^Workers/ }));
     const worker = screen.getByRole("button", { name: "Send to Worker A" });
     await user.click(worker);
     const input = screen.getByRole("textbox", { name: "Task name" });
@@ -264,7 +265,9 @@ describe("dashboard interactions over pushed updates", () => {
     expect(screen.getByRole("combobox", { name: "Send to" })).toHaveValue(
       "worker-a",
     );
-    expect(screen.getByRole("checkbox")).not.toBeChecked();
+    expect(
+      screen.getByRole("checkbox", { name: "Retry on another worker" }),
+    ).not.toBeChecked();
     expect(screen.getByRole("button", { name: "15 sec" })).toHaveAttribute(
       "aria-pressed",
       "true",
@@ -347,16 +350,20 @@ describe("dashboard interactions over pushed updates", () => {
     await user.click(
       screen.getByRole("button", { name: "View Live task details" }),
     );
+    await user.click(screen.getByRole("tab", { name: /Logs/ }));
     expect(
-      await screen.findByText(/Successfully processed inputs/),
+      await screen.findByText(/Successfully processed inputs/, {
+        selector: ".log-line > div > pre",
+      }),
     ).toBeInTheDocument();
-    expect(screen.getByText("Machine: worker-a")).toBeInTheDocument();
+    expect(screen.getByText(/worker-a · #1 · stdout/)).toBeInTheDocument();
     expect(document.querySelector("#result-dialog script")).toBeNull();
   });
 
   it("recovers from stream disconnects without losing edits or fetching snapshots", async () => {
     const user = userEvent.setup();
     const { stream } = await mount();
+    await user.click(screen.getByRole("button", { name: "New job" }));
     await user.selectOptions(
       screen.getByRole("combobox", { name: "Send to" }),
       "worker-b",
@@ -380,6 +387,7 @@ describe("dashboard interactions over pushed updates", () => {
   it("surfaces submission failures and keeps the form available", async () => {
     const user = userEvent.setup();
     await mount();
+    await user.click(screen.getByRole("button", { name: "New job" }));
     fetchMock.mockImplementation(
       async (path) =>
         new Response(
@@ -395,7 +403,7 @@ describe("dashboard interactions over pushed updates", () => {
     );
     expect(screen.getByRole("button", { name: "Send task" })).toBeEnabled();
     expect(screen.getByRole("textbox", { name: "Task name" })).toHaveValue(
-      "Render preview",
+      "Connection test",
     );
   });
 });
@@ -603,6 +611,7 @@ it("authorizes the account from a confirmation link before using an existing API
 it("shows an empty real fleet without sample worker cards or destinations", async () => {
   const { stream } = await mount();
   act(() => stream.snapshot({ workers: [], tasks: [], events: [] }));
+  await userEvent.click(screen.getByRole("button", { name: /^Workers/ }));
   expect(screen.getByText(/No workers connected yet/)).toBeInTheDocument();
   expect(
     screen.queryByRole("button", { name: "Send to Worker A" }),
@@ -624,9 +633,29 @@ it("dispatches to the available registered workers instead of hardcoded demo IDs
       workers: [{ ...fleet().workers[0], id: "gpu-render-1" }],
     }),
   );
+  await user.click(screen.getByRole("button", { name: /^Workers/ }));
   await user.click(screen.getByRole("button", { name: "Run one on each" }));
   const post = fetchMock.mock.calls.find(([path]) => path === "/v1/tasks")!;
   expect(JSON.parse(String(post[1]?.body)).tasks).toMatchObject([
     { target_worker_id: "gpu-render-1" },
   ]);
+});
+
+it("submits an intentional failure with instructions to observe the first attempt", async () => {
+  const user = userEvent.setup();
+  await mount();
+  await user.click(screen.getByRole("button", { name: "New job" }));
+  await user.click(
+    screen.getByRole("checkbox", {
+      name: "Intentional failure (supervisor test)",
+    }),
+  );
+  await user.click(screen.getByRole("button", { name: /Send task/ }));
+  const post = fetchMock.mock.calls.find(([path]) => path === "/v1/tasks")!;
+  const body = JSON.parse(String(post[1]?.body));
+  expect(body.tasks[0].payload.fail).toBe(true);
+  expect(body.tasks[0].job_id).toMatch(/^job-/);
+  expect(body.instructions).toContain(
+    "Allow the first execution attempt to run",
+  );
 });

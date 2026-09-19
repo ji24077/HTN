@@ -120,6 +120,24 @@ async def event(
             kind,
             scrub_execution(data),
         )
+        await conn.execute(
+            """INSERT INTO supervisor_events(job_id,kind,data)
+               SELECT id,$2,$3 FROM supervised_jobs WHERE id=$1""",
+            spec["job_id"],
+            "task_" + kind,
+            scrub_execution({"task_id": entity_id, **data}),
+        )
+    elif entity == "worker":
+        await conn.execute(
+            """INSERT INTO supervisor_events(job_id,kind,data)
+               SELECT j.id,'worker_health',$2::jsonb FROM supervised_jobs j
+               WHERE EXISTS(SELECT 1 FROM tasks t WHERE t.spec->>'job_id'=j.id
+                   AND t.worker_id=$1 AND t.state IN ('assigned','running'))
+               OR EXISTS(SELECT 1 FROM job_reservations r WHERE r.job_id=j.id
+                   AND r.worker_id=$1 AND r.expires_at>clock_timestamp())""",
+            entity_id,
+            {"worker_id": entity_id, "state": after},
+        )
 
 
 async def ingest_execution_events(
@@ -215,6 +233,11 @@ class Store:
                         "dwp_assertions",
                         "chat_conversations",
                         "execution_events",
+                        "supervised_jobs",
+                        "supervisor_events",
+                        "supervisor_runs",
+                        "supervisor_actions",
+                        "job_reservations",
                     ):
                         await conn.execute(
                             f'ALTER TABLE "{schema}".{table} ENABLE ROW LEVEL SECURITY'
@@ -567,9 +590,11 @@ class Store:
         )
         return [dict(row) for row in rows]
 
-    async def submit(self, specs: list[TaskSpec]) -> list[Task]:
+    async def submit(self, specs: list[TaskSpec], *, instructions: str | None = None) -> list[Task]:
         # Validate the in-process planner boundary as well as the HTTP boundary.
-        specs = Submission(tasks=specs).tasks
+        specs = Submission(tasks=specs, instructions=instructions).tasks
+        if instructions is not None and len({spec.job_id for spec in specs}) != 1:
+            raise Conflict("instructions apply to a single submitted job")
         result = []
         async with self.change() as (conn, _):
             for spec in specs:
@@ -581,6 +606,16 @@ class Store:
                     ) != json_text(encoded):
                         raise Conflict("task ID already exists with a different specification")
                 else:
+                    await conn.execute(
+                        "INSERT INTO supervised_jobs(id,instructions) VALUES($1,$2) ON CONFLICT DO NOTHING",
+                        spec.job_id,
+                        instructions or "",
+                    )
+                    job_state = await conn.fetchval(
+                        "SELECT state FROM supervised_jobs WHERE id=$1", spec.job_id
+                    )
+                    if job_state not in {"active", "paused"}:
+                        raise Conflict("cannot add tasks to a terminal job")
                     row = await conn.fetchrow(
                         "INSERT INTO tasks(id,spec,state) VALUES($1,$2,'queued') RETURNING *",
                         spec.id,
@@ -749,6 +784,11 @@ class Store:
             caps = worker.capabilities
             row = await conn.fetchrow(
                 """SELECT * FROM tasks WHERE state='queued'
+                   AND NOT EXISTS (SELECT 1 FROM supervised_jobs j
+                       WHERE j.id=tasks.spec->>'job_id' AND j.state!='active')
+                   AND NOT EXISTS (SELECT 1 FROM job_reservations r
+                       WHERE r.worker_id=$4 AND r.job_id!=tasks.spec->>'job_id'
+                       AND r.expires_at>clock_timestamp())
                    AND spec->>'kind'=ANY($1::text[])
                    AND spec->'requirements'->>'runtime'=$2
                    AND (spec->'requirements'->>'vram_mib')::int <= $3
@@ -913,6 +953,15 @@ class Store:
 
     async def reconcile(self) -> None:
         async with self.change() as (conn, now):
+            expired = await conn.fetch(
+                "DELETE FROM job_reservations WHERE expires_at<=$1 RETURNING job_id,worker_id", now
+            )
+            for reservation in expired:
+                await conn.execute(
+                    "INSERT INTO supervisor_events(job_id,kind,data) VALUES($1,'reservation_expired',$2)",
+                    reservation["job_id"],
+                    {"worker_id": reservation["worker_id"]},
+                )
             # Capture affected tasks before expiry clears their worker assignment.
             rows = await conn.fetch("SELECT * FROM workers WHERE state!='offline'")
             for row in rows:

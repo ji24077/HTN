@@ -144,6 +144,7 @@ class Message(Model):
 
 class Submission(Model):
     tasks: list[TaskSpec] = Field(min_length=1, max_length=100)
+    instructions: str | None = Field(default=None, max_length=8000)
 
 
 class TaskQueue(Protocol):

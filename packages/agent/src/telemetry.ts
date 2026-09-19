@@ -121,16 +121,18 @@ export function initTelemetry(saved?: unknown): boolean {
 
 export function captureWorkloadFailure(
   error: unknown,
-  context: { workerId: string; taskId: string; adapter: string; attempt: number },
+  context: { workerId: string; taskId: string; adapter: string; attempt: number; jobId?: string },
 ): void {
   if (!Sentry.isEnabled()) return
   Sentry.withScope(scope => {
     scope.setTags({
       worker_id: context.workerId,
       task_id: context.taskId,
+      job_id: context.jobId,
       adapter: context.adapter,
       attempt: String(context.attempt),
       execution_id: `${context.taskId}:${context.attempt}`,
+      reservation_id: `${context.taskId}:${context.attempt}`,
     })
     Sentry.captureException(error)
   })

@@ -18,7 +18,9 @@ import { TaskDetails } from "./components/TaskDetails";
 import { TaskList } from "./components/TaskList";
 import { WorkerGrid } from "./components/WorkerGrid";
 import { useFleet } from "./hooks/useFleet";
-import { active, healthy, time, workerName } from "./lib/format";
+import { healthy, time, workerName } from "./lib/format";
+import { groupJobs } from "./lib/jobs";
+import { Icon } from "./components/Icon";
 
 export default function App() {
   const [session, setSession] = useState<
@@ -113,7 +115,19 @@ function FleetApp({
 }) {
   const { snapshot, status, updatedAt } = useFleet();
   const [selected, setSelected] = useState("");
+  const [view, setView] = useState<
+    "Jobs" | "Workers" | "Activity" | "Assistant"
+  >("Jobs");
+  const [composeOpen, setComposeOpen] = useState(false);
+  const composerRef = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    if (composeOpen && !composerRef.current?.open)
+      composerRef.current?.showModal();
+    else if (!composeOpen && composerRef.current?.open)
+      composerRef.current.close();
+  }, [composeOpen]);
   const [busy, setBusy] = useState(false);
+  const [submitError, setSubmitError] = useState("");
   const [signingOut, setSigningOut] = useState(false);
   const sending = useRef(false);
   const [cancelling, setCancelling] = useState(new Set<string>());
@@ -129,15 +143,24 @@ function FleetApp({
   async function submit(tasks: TaskSpec[]) {
     if (sending.current) return;
     sending.current = true;
+    setSubmitError("");
     setBusy(true);
     try {
-      await submitTasks(tasks);
+      const submitted = await submitTasks(tasks);
+      setComposeOpen(false);
+      setView("Jobs");
+      if (Array.isArray(submitted) && submitted[0]?.spec)
+        setDetail(submitted[0]);
       notify(
         tasks.length === 1
           ? `Queued for ${tasks[0].target_worker_id ? workerName(tasks[0].target_worker_id) : "the next available worker"}.`
           : "One task queued for each worker.",
       );
     } catch (error) {
+      setSubmitError(
+        "Could not dispatch: " +
+          (error instanceof Error ? error.message : "Request failed"),
+      );
       notify(
         "Could not dispatch: " +
           (error instanceof Error ? error.message : "Request failed"),
@@ -161,7 +184,6 @@ function FleetApp({
       setCancelling(new Set(pendingCancellations.current));
     }
   }
-  const fleetSize = snapshot.workers.length;
   const availableWorkers = snapshot.workers.filter(
     (worker) =>
       healthy(worker) &&
@@ -169,69 +191,111 @@ function FleetApp({
       (worker.capabilities.kinds.includes("stub") ||
         worker.capabilities.kinds.includes("echo")),
   );
+  const jobs = groupJobs(snapshot.tasks);
+  const online = snapshot.workers.filter(healthy).length;
   const metrics = [
     {
-      id: "online-count",
-      label: "Workers online",
-      icon: "◉",
-      value: snapshot.workers.filter(healthy).length,
-      note: `of ${fleetSize} services`,
-    },
-    {
       id: "running-count",
-      label: "In progress",
-      icon: "↗",
-      value: snapshot.tasks.filter(active).length,
-      note: "tasks",
-    },
-    {
-      id: "queued-count",
-      label: "In the queue",
-      icon: "≡",
-      value: snapshot.tasks.filter((task) => task.state === "queued").length,
-      note: "waiting",
+      label: "Active jobs",
+      value: jobs.filter((j) => ["running", "queued"].includes(j.state)).length,
+      note: `${jobs.filter((j) => j.state === "queued").length} queued`,
+      icon: "activity" as const,
     },
     {
       id: "complete-count",
       label: "Completed",
-      icon: "✓",
-      value: snapshot.tasks.filter((task) => task.state === "succeeded").length,
-      note: "results accepted",
+      value: jobs.filter((j) => j.state === "succeeded").length,
+      note: "All tasks succeeded",
+      icon: "check" as const,
+    },
+    {
+      id: "failed-count",
+      label: "Failed",
+      value: jobs.filter((j) => j.state === "failed").length,
+      note: "Open a job to investigate",
+      icon: "warning" as const,
+    },
+    {
+      id: "online-count",
+      label: "Workers online",
+      value: online,
+      note: `${snapshot.workers.length} registered`,
+      icon: "workers" as const,
     },
   ];
+  const subtitles = {
+    Jobs: "Track progress, investigate failures, and review results.",
+    Workers: "Manage the machines that run your jobs.",
+    Activity: "A live record of assignments, retries, and fleet changes.",
+    Assistant: "Inspect your fleet and dispatch supported workloads.",
+  };
   return (
     <>
-      <aside>
+      <aside className="app-sidebar">
         <div className="brand">
-          <span className="brandmark">↗</span> dispatch
-          <span className="brand-dot">.</span>
+          <span className="brandmark">
+            <Icon name="arrow" size={19} />
+          </span>
+          dispatch<span className="brand-dot">.</span>
+        </div>
+        <div className="workspace-label">
+          <span className="workspace-avatar">C</span>
+          <div>
+            Compute workspace<small>Distributed execution</small>
+          </div>
         </div>
         <div className="section-label">WORKSPACE</div>
-        <div className="nav">
-          <span>▦</span> Compute lab <small>01</small>
-        </div>
-        <p className="aside-note">
-          One place to manage
-          <br />
-          distributed work.
-        </p>
+        <nav className="main-nav" aria-label="Main navigation">
+          {(
+            [
+              ["Jobs", "jobs"],
+              ["Workers", "workers"],
+              ["Activity", "activity"],
+              ["Assistant", "assistant"],
+            ] as const
+          ).map(([label, icon]) => (
+            <button
+              key={label}
+              aria-current={view === label ? "page" : undefined}
+              onClick={() => setView(label)}
+            >
+              <Icon name={icon} />
+              <span>{label}</span>
+              {label === "Jobs" && <small>{jobs.length}</small>}
+              {label === "Workers" && <small>{online}</small>}
+            </button>
+          ))}
+        </nav>
         <div className="sidebar-bottom">
-          <span className="small-dot" />
+          <span className={`connection-dot ${status}`} />
           {remote ? "Connected fleet" : "Local environment"}
-          <small>Independent worker processes</small>
+          <small>Changes update automatically</small>
         </div>
       </aside>
-      <main>
+      <main className="app-main">
         <header className="topbar">
           <div className="crumb">
             <span>Workspace</span>
             <span className="crumb-divider">/</span>
-            <strong>Compute lab</strong>
+            <strong>{view}</strong>
           </div>
           <div className="top-right">
+            <span className={`connection-label ${status}`}>
+              <i className={`connection-dot ${status}`} />
+              {status === "live"
+                ? "Live updates"
+                : status === "connecting"
+                  ? "Connecting"
+                  : "Reconnecting"}
+            </span>
+            {remote && email && (
+              <span className="account-email" title={email}>
+                {email}
+              </span>
+            )}
             {remote && (
               <button
-                className="outline-btn"
+                className="text-btn"
                 disabled={signingOut}
                 onClick={async () => {
                   setSigningOut(true);
@@ -248,12 +312,6 @@ function FleetApp({
                 {signingOut ? "Signing out…" : "Sign out"}
               </button>
             )}
-            {!remote && <span className="pill neutral">Demo</span>}
-            {remote && email && (
-              <span className="account-email" title={email}>
-                {email}
-              </span>
-            )}
             <span
               className="avatar"
               aria-label={remote ? email || "Fleet account" : "Local demo"}
@@ -265,34 +323,16 @@ function FleetApp({
         <div className="content">
           <div className="heading">
             <div>
-              <div className="eyebrow">Fleet dashboard</div>
-              <h1>Your fleet. Your call.</h1>
-              <p className="subtitle">
-                Pick a worker, send a task, and watch the handoff happen.
-              </p>
+              <div className="eyebrow">COMPUTE WORKSPACE</div>
+              <h1>{view}</h1>
+              <p className="subtitle">{subtitles[view]}</p>
             </div>
             <button
-              className="outline-btn"
-              id="pair-button"
-              disabled={busy || availableWorkers.length === 0}
-              onClick={async () => {
-                const tasks = await Promise.all(
-                  availableWorkers.map((worker) =>
-                    workloadTask(
-                      worker.capabilities.kinds.includes("echo")
-                        ? "echo"
-                        : "stub",
-                      `Connection test · ${workerName(worker.id)}`,
-                      worker.id,
-                      30,
-                      true,
-                    ),
-                  ),
-                );
-                void submit(tasks);
-              }}
+              className="primary-btn"
+              onClick={() => setComposeOpen(true)}
             >
-              <span aria-hidden="true">⇉</span> Run one on each
+              <Icon name="plus" size={17} />
+              New job
             </button>
           </div>
           <div
@@ -300,70 +340,135 @@ function FleetApp({
             hidden={status !== "reconnecting"}
             role="alert"
           >
-            Live connection interrupted — reconnecting automatically.
+            Live connection interrupted — reconnecting automatically. Displayed
+            data may be out of date.
           </div>
-          <section className="metrics" aria-label="Fleet overview">
-            {metrics.map((metric) => (
-              <div className="metric" key={metric.id}>
-                <div className="metric-label">
-                  {metric.label}
-                  <span>{metric.icon}</span>
-                </div>
-                <div className="metric-value">
-                  <span id={metric.id}>{updatedAt ? metric.value : "—"}</span>
+          <div hidden={view !== "Jobs"}>
+            <section className="metrics" aria-label="Fleet overview">
+              {metrics.map((metric) => (
+                <div className="metric" key={metric.id}>
+                  <div className="metric-label">
+                    {metric.label}
+                    <Icon name={metric.icon} size={16} />
+                  </div>
+                  <div className="metric-value" id={metric.id}>
+                    {updatedAt ? metric.value : "—"}
+                  </div>
                   <small>{metric.note}</small>
                 </div>
-              </div>
-            ))}
-          </section>
-          <DeviceInvite />
-          <div className="layout">
-            <div className="left-column">
-              <WorkerGrid
-                workers={snapshot.workers}
-                tasks={snapshot.tasks}
-                selected={selected}
-                onSelect={setSelected}
-              />
-              <TaskList
-                tasks={snapshot.tasks}
-                cancelling={cancelling}
-                onCancel={(id) => void cancel(id)}
-                onDetail={setDetail}
-              />
+              ))}
+            </section>
+            <TaskList
+              tasks={snapshot.tasks}
+              cancelling={cancelling}
+              onCancel={(id) => void cancel(id)}
+              onDetail={setDetail}
+            />
+            <div className="tracking-note">
+              <Icon name="assistant" size={16} />
+              <span>
+                Open a job to follow its attempts, search execution logs, and
+                see the supervisor’s decisions.
+              </span>
             </div>
-            <div className="right-column">
-              <ChatPanel
-                key={remote ? email : "demo"}
-                scope={remote ? email : "demo"}
-              />
-              <TaskComposer
-                selected={selected}
-                onSelect={setSelected}
-                workers={snapshot.workers}
-                busy={busy}
-                onSubmit={submit}
-              />
-              <ActivityFeed
-                events={snapshot.events}
-                tasks={snapshot.tasks}
-                status={status}
-              />
+          </div>
+          <div hidden={view !== "Workers"}>
+            <div className="section-actions">
+              <p className="muted">
+                {online} online · {snapshot.workers.length - online} offline
+              </p>
+              <button
+                className="outline-btn"
+                id="pair-button"
+                disabled={busy || availableWorkers.length === 0}
+                onClick={async () => {
+                  const tasks = await Promise.all(
+                    availableWorkers.map((worker) =>
+                      workloadTask(
+                        worker.capabilities.kinds.includes("echo")
+                          ? "echo"
+                          : "stub",
+                        `Connection test · ${workerName(worker.id)}`,
+                        worker.id,
+                        30,
+                        true,
+                      ),
+                    ),
+                  );
+                  void submit(tasks);
+                }}
+              >
+                Run one on each
+              </button>
             </div>
+            <WorkerGrid
+              workers={snapshot.workers}
+              tasks={snapshot.tasks}
+              selected={selected}
+              onSelect={(id) => {
+                setSelected(id);
+                setComposeOpen(true);
+              }}
+            />
+            <DeviceInvite />
+          </div>
+          <div hidden={view !== "Activity"}>
+            <ActivityFeed
+              events={snapshot.events}
+              tasks={snapshot.tasks}
+              status={status}
+            />
+          </div>
+          <div hidden={view !== "Assistant"} className="assistant-page">
+            <ChatPanel
+              key={remote ? email : "demo"}
+              scope={remote ? email : "demo"}
+            />
           </div>
           <footer className="footer">
             <span>
-              <b>Independent workers. One control plane.</b> Python, desktop,
-              and iOS workers.
+              dispatch <span className="muted">/ Distributed compute</span>
             </span>
             <span id="updated">
               {updatedAt
-                ? "Updated " + time(updatedAt)
+                ? "Last update " + time(updatedAt)
                 : "Connecting to server"}
             </span>
           </footer>
         </div>
       </main>
+      <dialog
+        ref={composerRef}
+        className="compose-dialog"
+        aria-labelledby="compose-title"
+        onClose={() => setComposeOpen(false)}
+      >
+        <header>
+          <div>
+            <div className="eyebrow">DISPATCH</div>
+            <h2 id="compose-title">New job</h2>
+          </div>
+          <button
+            className="icon-btn"
+            aria-label="Close new job"
+            onClick={() => setComposeOpen(false)}
+          >
+            <Icon name="close" />
+          </button>
+        </header>
+        {submitError && (
+          <p role="alert" className="inline-alert compose-error">
+            {submitError}
+          </p>
+        )}
+        <TaskComposer
+          selected={selected}
+          onSelect={setSelected}
+          workers={snapshot.workers}
+          busy={busy}
+          onSubmit={submit}
+        />
+      </dialog>
       <div id="toast" role="status" aria-live="polite" hidden={!toast}>
         {toast?.message}
       </div>
@@ -374,6 +479,14 @@ function FleetApp({
               detail
             : null
         }
+        tasks={
+          detail
+            ? snapshot.tasks.filter(
+                (task) => task.spec.job_id === detail.spec.job_id,
+              )
+            : []
+        }
+        onSelectTask={setDetail}
         onClose={() => setDetail(null)}
       />
     </>
