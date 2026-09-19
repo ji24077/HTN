@@ -1,7 +1,7 @@
 # Handoff — Ji's area
 
 `ji.md` is the plan written before anything ran. This is what is actually
-true as of `8614b33`, separated into what was measured, what runs but was never
+true as of `02e58a9`, separated into what was measured, what runs but was never
 run, and what has never executed at all.
 
 Operating the demo: `demo.md`. Design rationale: `simulation.md`.
@@ -52,6 +52,25 @@ Same 30,927 input tokens both ways. The claim is about the repeated prefix's
 prefill — generation is unchanged, and the two paths are **not byte-identical**
 (`"high"` vs `"High"` at character 14; each path reproduces itself exactly).
 
+**AMD runs.** MI300X, RunPod, 2026-09-19:
+
+```
+torch        2.10.0+rocm7.1.1.gitd9556b05   hip 7.1.52802
+backend      rocm      vendor amd      available True
+gpu          AMD Instinct MI300X       vram_gb 206.1
+bf16         True      chip_class cdna_amd     trainable True
+bf16 4096x4096 matmul   207.8 ms, peak 0.18 GB
+```
+
+`classify_chip` returns `cdna_amd`/`trainable` off the real device, so
+`check_env.py` passes unmodified on AMD.
+
+**What this does NOT verify: the `rocm7.0` wheel index this repo pins.** The
+host is ROCm 7.1.1 and the image ships its own torch at `/opt/venv`; that is
+what ran. `make setup-rocm` was not used. Phin's runs made the same choice and
+say why — the project lock would "silently choose a different framework
+version". Treat `rocm7.0` in `pyproject.toml` as still unproven.
+
 **Cost model, checked against the above.** Memory was 1.4% under the measured
 13.80 GB peak, and is what job placement now trusts. Time was out by nearly 7x;
 inverting it gives an MFU above 1.0, so it is a structural error and not a
@@ -61,41 +80,28 @@ calibration gap. Unfixed — it needs a batch sweep.
 
 ## Written, never run
 
-### Migration — the one you asked about
+### Migration — now run
 
-`start_migration` in `runner.py:1185`. Two kinds, both wired to the UI, and
-**zero migration jobs have ever executed.** Local job history:
-
-```
-train-and-evaluate 3 · serve-model 13 ·
-optimize-inference-speed 1 · optimize-training-speed 1 · migration 0
-```
-
-What it does: pulls `model.safetensors` from the source pod, pushes it to the
-target with the source's `eval/after.json`, re-runs `scripts/evaluate.py` on the
-target over the same `n` samples, and gates the result through `_quality`
-against the source's numbers. Vendor-neutral safetensors is the whole premise —
-nothing CUDA-specific is serialised.
-
-**`migrate-nextgen` is runnable today and has never been tried.** Preconditions
-are all met right now:
+`start_migration` in `runner.py`. **`migrate-nextgen` executed successfully**,
+RTX 4090 → RTX 3090, on our own hardware:
 
 ```
-source 4090   ckpt/model.safetensors 1.26 GB + meta.json   ✓
-baseline      .gpushare/runs/38915adc.../eval/after.json   ✓
-target 3090   disk 44.2 GB                                 ✓
-target 3090   VRAM 0.9 GB                                  ✗ ← serving the 4B
+before  json_parse 1.000 · exact_match 0.835   (200 cases)
+after   json_parse 1.000 · exact_match 0.825
+validation ok · tolerance 0.02 · delta_exact -0.010
+  per-field  name 0 · age 0 · year 0 · org -0.005 · role -0.005
+  "model quality preserved"
 ```
 
-The only blocker is that the 3090 is holding the long-context model. Testing it
-means stopping that server, running the migration (~1.3 GB down then up, plus a
-200-sample eval), and re-serving afterwards. Perhaps ten minutes and about
-$0.20. **It is the single largest unverified claim in the demo** — four agent
-actions are advertised and two of them are migrations.
+Phin's version, which replaced the original here, does more than copy a
+checkpoint: it trains the source to step 4 of 8, pauses, relays the bundle, and
+resumes on the target — `training_resumed` is in the result. Migration also now
+refuses a busy target rather than OOMing on it, and refuses rather than
+relocating, because both ends are pinned: the source holds the checkpoint and
+the target is the thing being argued about.
 
-Migration now refuses a busy target rather than OOMing on it. It refuses rather
-than relocating, unlike training, because both ends are pinned: the source holds
-the checkpoint and the target is the thing being argued about.
+**AMD→NVIDIA has not been run by us.** Phin measured MI300X quality (below);
+moving a live job across vendors is the remaining gap.
 
 ### Training optimization
 
@@ -106,24 +112,57 @@ the checkpoint and the target is the thing being argued about.
 
 ## Never executed
 
-**ROCm. AMD→NVIDIA migration cannot be demonstrated.**
+**RunPod's Global Networking is NVIDIA-only**, so the private-network path
+between an AMD and an NVIDIA pod is out. Transfers go over SSH/SCP.
 
-- No AMD pod has ever been rented
-- `make setup-rocm` has never run, so the `rocm7.0` wheels are unverified
-  against an MI300X driver
-- RunPod's Global Networking is NVIDIA-only, so the private-network path is out
-- MI300X is $2.39/hr, stock LOW, one datacentre (EU-RO-1)
-
-`make setup-rocm && make check` on an MI300X — roughly $1.2 and half an hour —
-is what would turn this from a claim into either a result or a known failure.
-Until then the AMD→NVIDIA button will refuse: it requires an AMD source pod and
-there is none.
+(ROCm itself has now run — see below.)
 
 **Full fine-tuning of Qwen3-4B.** 64.3 GB of optimizer state before activations
 (bf16 weights 8.0 + grads 8.0 + Adam m/v fp32 16.1 each + fp32 master 16.1). No
-24 GB or 48 GB card fits it; only the MI300X would. LoRA would fit in about 8.3
-GB, but `train.py`, `evaluate.py` and `serve.py` all assume full-weight
-safetensors, so the adapter path does not exist.
+24 GB or 48 GB card fits it; the MI300X at 206 GB would.
+
+LoRA does exist — `train.py --method lora --lora-rank`, from the merge. An
+earlier version of this file said the adapter path did not exist; that was
+written before reading Phin's branch and was wrong.
+
+---
+
+## Renting an AMD pod — the recipe, because guessing cost $1.36
+
+Three attempts. All three failure modes were already documented in
+`docs/nvidia-amd-migration.md` and `demo/HANDOFF.md`; reading those first would
+have cost nothing.
+
+```json
+{
+  "imageName": "rocm/pytorch:rocm7.1.1_ubuntu24.04_py3.12_pytorch_release_2.10.0",
+  "gpuTypeIds": ["AMD Instinct MI300X OAM"],
+  "containerDiskInGb": 150,
+  "ports": ["22/tcp"],
+  "cloudType": "SECURE",
+  "dockerStartCmd": ["bash", "-lc", "apt-get update -qq; apt-get install -y -qq openssh-server; mkdir -p /run/sshd /root/.ssh; printf '%s\\n' \"$PUBLIC_KEY\" > /root/.ssh/authorized_keys; chmod 700 /root/.ssh; chmod 600 /root/.ssh/authorized_keys; /usr/sbin/sshd -D -e"]
+}
+```
+
+Three things that are not obvious:
+
+**The AMD image does not start sshd.** RunPod's NVIDIA images do, so the same
+pod body that works for a 4090 leaves an MI300X at `uptimeInSeconds: 0` with no
+`publicIp` forever. It looks like a slow image pull. It is not. Twenty-two
+minutes and $0.88 went here.
+
+**torch is in `/opt/venv`, not on `python3`.** `python3 -c "import torch"` fails
+on a working pod. Use `/opt/venv/bin/python`, and `pip install` the project's
+non-torch deps into that venv rather than running `make setup-rocm`.
+
+**Match the image to the host, not to `pyproject.toml`.** The first attempt used
+`rocm6.4.1 / py3.10`: Python below this project's floor, and a ROCm major that
+the pinned `rocm7.0` wheels would not have matched either. $0.48.
+
+And the catalog lies about stock: MI300X reported `lowestPrice: null` and
+`stockStatus: null` while creation succeeded three times. **Decide availability
+by attempting to create, not by reading the catalog** — the "stock LOW" note in
+earlier docs came from that same unreliable field.
 
 ---
 
@@ -156,18 +195,16 @@ give one owner.
 
 ## If you have thirty minutes
 
-1. **Run `migrate-nextgen` once.** It is written, wired, gated, and has never
-   executed. Stop the 3090's server, migrate 4090 → 3090, re-serve.
+1. **Cross-vendor migration, MI300X → NVIDIA.** Both pods are up and the AMD
+   one is verified. This is the last advertised button with no result behind it.
 2. **Batch sweep on the 4090** to fix the 7x time error. Five minutes of GPU.
-3. **ROCm survival check** if the cross-vendor story is being told at all.
-
-In that order. The first turns two advertised buttons from a claim into a
-result; the third decides whether the other two buttons should be on the screen.
+3. **Re-run training optimization.** It failed once, before placement existed.
 
 ---
 
 ## Running cost
 
-Two pods, $1.24/hr combined — 4090 $0.74 (holds the fine-tuned checkpoint),
-3090 $0.50 (serves the 4B). Stop both when the demo is over; the checkpoint
+Four pods, **$3.90/hr** — MI300X $2.39, 4090 $0.74 (holds the fine-tuned
+checkpoint), 3090 $0.50, A5000 $0.27. The MI300X is most of it. Stop them all
+when the demo is over; the checkpoint
 lives only on the 4090's disk, so pull `model.safetensors` first if it matters.

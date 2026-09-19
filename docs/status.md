@@ -28,8 +28,13 @@ under a measured 13.80 GB peak and is now what job placement trusts. Time was
 out by nearly 7x, which is a structural error rather than a calibration gap —
 inverting it gives an MFU above 1.0. Unfixed; it needs a batch sweep.
 
-**Still unverified: the cross-vendor path.** ROCm has never run. `make
-setup-rocm && make check` on an MI300X (~$1.2, 30 min) is what would settle it.
+**ROCm runs.** MI300X on RunPod: torch `2.10.0+rocm7.1.1`, `available True`,
+`chip_class cdna_amd`, bf16 4096x4096 matmul in 207.8 ms. `check_env.py` passes
+unmodified. What is *not* verified is the `rocm7.0` wheel index this repo pins —
+the host is 7.1.1 and the image's own torch at `/opt/venv` is what ran.
+
+**Migration runs.** `migrate-nextgen` 4090 → 3090: exact_match 0.835 → 0.825,
+inside the 2% gate, `training_resumed`. AMD → NVIDIA is the remaining gap.
 
 ---
 
