@@ -9,13 +9,15 @@ import { createLogger } from '@dwp/protocol'
 import { diagnoseOrigin } from '@dwp/protocol'
 import { fallbackLookup, dnsFallbackEnabled, installDnsFallback, directDial } from './resolver.ts'
 import { applyUpdate, restartIntoNewVersion } from './update.ts'
-import { isCompiledBinary } from './paths.ts'
+import { AGENT_VERSION, isCompiledBinary } from './paths.ts'
 import { probe } from './capability.ts'
 import { isPaused, type AgentConfig } from './config.ts'
 import { runEcho } from './adapters/echo.ts'
 import { runInference } from './adapters/inference.ts'
 import { runWalker } from './adapters/walker.ts'
 import { SupersessionPolicy } from './supersession.ts'
+import * as history from './history.ts'
+import type { RunRecord } from './history.ts'
 import { captureWorkloadFailure } from './telemetry.ts'
 
 const log = createLogger({ component: 'agent' })
@@ -82,6 +84,12 @@ export type AgentState = {
   /** Another agent holds this host's identity, so this one has stood down. */
   stoodDown: boolean
   updating: boolean
+  /**
+   * When this machine last finished a task, so a window can say "last run 4 min ago"
+   * without reading the history file. Everything else about past runs comes from the
+   * history module directly.
+   */
+  lastRunAt: number | null
 }
 
 /** Enough of a handle for a window to steer the connection. */
@@ -119,7 +127,7 @@ export function connect(
 
   const state: AgentState = {
     connection: 'offline', attempt: 0, connectedSince: null, running: [],
-    lastLostReason: null, advice: null, stoodDown: false, updating: false,
+    lastLostReason: null, advice: null, stoodDown: false, updating: false, lastRunAt: null,
   }
   /** Derive the task list from the live map rather than maintaining a second copy. */
   const notify = (patch: Partial<AgentState> = {}): void => {
@@ -426,6 +434,19 @@ export function connect(
 
         const startedAt = new Date().toISOString()
         const t0 = performance.now()
+        const cpu0 = history.cpuStart()
+        /**
+         * Whether anything else was already running when this started.
+         *
+         * `process.cpuUsage()` is process-wide, so with two tasks in flight the figure
+         * recorded against each is really both of them. Noting it costs one boolean and
+         * lets the window say "(shared)" rather than quietly overstate one task's cost.
+         */
+        const overlapped = running.size > 1
+        let outcome: RunRecord['outcome'] = 'error'
+        let errorClass: string | undefined
+        let message: string | undefined
+        let outputBytes: number | undefined
         const wallClock = setTimeout(() => controller.abort(), offer.wallClockMs)
         void wallClock
 
@@ -455,15 +476,20 @@ export function connect(
                 taskId: offer.taskId, adapter: offer.adapter, limitBytes: JSON_LIMIT,
                 note: 'this slice produced more output than one result may carry — split it',
               })
+              outcome = 'result_too_large'
+              errorClass = 'result_too_large'
+              message = `result exceeds the ${JSON_LIMIT}-byte limit; submit this work in smaller slices`
               send('task.error', {
                 taskId: offer.taskId,
                 leaseId: offer.leaseId,
                 errorClass: 'result_too_large',
-                message: `result exceeds the ${JSON_LIMIT}-byte limit; submit this work in smaller slices`,
+                message,
               })
               return
             }
             const outputHash = hashOutput(output)
+            outcome = 'ok'
+            try { outputBytes = Buffer.byteLength(JSON.stringify(output) ?? '') } catch { /* unmeasurable */ }
             send('task.result', {
               taskId: offer.taskId,
               leaseId: offer.leaseId,
@@ -486,10 +512,13 @@ export function connect(
                 workerId: cfg.hostId, taskId: offer.taskId, adapter: offer.adapter, attempt: offer.attempt,
               })
             }
+            outcome = controller.signal.aborted ? 'aborted' : 'error'
+            errorClass = controller.signal.aborted ? 'aborted' : 'adapter_error'
+            message = (err instanceof Error ? err.message : String(err)).slice(0, 200)
             send('task.error', {
               taskId: offer.taskId,
               leaseId: offer.leaseId,
-              errorClass: controller.signal.aborted ? 'aborted' : 'adapter_error',
+              errorClass,
               message: err instanceof Error ? err.message : String(err),
             })
           })
@@ -497,7 +526,27 @@ export function connect(
             clearTimeout(wallClock)
             clearInterval(renew)
             running.delete(offer.taskId)
-            notify()
+            // Before notify(), so the window's very next poll already sees this run.
+            // record() swallows its own failures; nothing here can throw.
+            const finishedAt = Date.now()
+            history.record({
+              taskId: offer.taskId,
+              jobId: offer.jobId,
+              adapter: offer.adapter,
+              attempt: offer.attempt,
+              startedAt,
+              finishedAt: new Date(finishedAt).toISOString(),
+              durationMs: Number((performance.now() - t0).toFixed(3)),
+              outcome,
+              ...(errorClass === undefined ? {} : { errorClass }),
+              ...(message === undefined ? {} : { message: message.slice(0, 200) }),
+              cpuMs: history.cpuMsSince(cpu0),
+              rssMb: history.rssMb(),
+              shared: overlapped || running.size > 0,
+              ...(outputBytes === undefined ? {} : { outputBytes }),
+              agentVersion: cfg.installedRelease ?? AGENT_VERSION,
+            })
+            notify({ lastRunAt: finishedAt })
           })
       }
     })

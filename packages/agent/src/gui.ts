@@ -26,6 +26,7 @@ import { clearConfig, isPaused, loadConfig, setPaused, type AgentConfig } from '
 import { ensureKeypair } from './keys.ts'
 import { pairHost } from './pair.ts'
 import { connect, type AgentHandle, type AgentState } from './transport.ts'
+import * as history from './history.ts'
 import { applyUpdate, completePendingInstall, restartIntoNewVersion } from './update.ts'
 import { installService, serviceStatus, uninstallService, type ServiceStatus } from './service.ts'
 import { availableAdapters } from './workloads.ts'
@@ -252,6 +253,24 @@ function page(token: string): string {
   .err { color: var(--bad); font-size: 12.5px; margin-top: 10px; white-space: pre-wrap; }
   .task { font-size: 12.5px; color: var(--dim); margin-top: 6px; white-space: pre-wrap; }
   .task code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink); }
+  /* Recent work. The strip lets flex shrink the bars, with a 4px floor, so thirty runs
+     always fit the card however long the longest one was. */
+  .strip { display: flex; align-items: stretch; gap: 2px; height: 24px; margin-top: 13px; overflow: hidden; }
+  .strip > div { flex: 0 1 auto; min-width: 4px; border-radius: 2px; background: var(--dim); }
+  .strip > div.ok { background: var(--ok); }
+  .strip > div.warn { background: var(--warn); }
+  .strip > div.bad { background: var(--bad); }
+  .runs { margin-top: 12px; font-size: 12.5px; }
+  .run { display: flex; align-items: baseline; gap: 8px; padding: 6px 0; border-top: 1px solid var(--line); }
+  .run:first-child { border-top: 0; }
+  .run code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink); }
+  .run .cost { color: var(--dim); overflow-wrap: anywhere; }
+  .run .when { color: var(--dim); margin-left: auto; flex: none; }
+  .run .mark { font-weight: 600; flex: none; }
+  .run .mark.ok { color: var(--ok); }
+  .run .mark.warn { color: var(--warn); }
+  .run .mark.bad { color: var(--bad); }
+  .adapters { margin-top: 11px; }
   footer { color: var(--dim); font-size: 11.5px; margin-top: 16px; text-align: center; }
   [hidden] { display: none !important; }
 </style>
@@ -291,6 +310,14 @@ function page(token: string): string {
       </div>
       <div class="task" id="tasks" hidden></div>
       <div class="advice" id="advice" hidden></div>
+    </div>
+
+    <div class="card">
+      <div class="headline">Recent work</div>
+      <div class="note" id="histSummary">Nothing has run on this computer yet.</div>
+      <div class="strip" id="histStrip" hidden></div>
+      <div class="runs" id="histRuns" hidden></div>
+      <div class="note adapters" id="histAdapters" hidden></div>
     </div>
 
     <div class="card">
@@ -412,6 +439,109 @@ function describe(s) {
   return ['bad', 'Offline', s.lastLostReason ? 'Last seen: ' + s.lastLostReason : 'Not connected.']
 }
 
+/** Durations people read at a glance: milliseconds, seconds, then minutes. */
+function dur(ms) {
+  if (!(ms > 0)) return '0 s'
+  if (ms < 1000) return Math.round(ms) + ' ms'
+  if (ms < 60000) return (ms / 1000).toFixed(1) + ' s'
+  if (ms < 3600000) return Math.round(ms / 60000) + ' min'
+  return (ms / 3600000).toFixed(1) + ' h'
+}
+
+function ago(at) {
+  const secs = Math.max(0, Math.round((Date.now() - at) / 1000))
+  if (secs < 60) return secs + 's ago'
+  if (secs < 3600) return Math.round(secs / 60) + ' min ago'
+  if (secs < 86400) return Math.round(secs / 3600) + ' h ago'
+  return Math.round(secs / 86400) + ' d ago'
+}
+
+/** Reuse the status dot's three colours rather than invent a fourth vocabulary. */
+function outcomeKind(outcome) {
+  if (outcome === 'ok') return 'ok'
+  if (outcome === 'error') return 'bad'
+  return 'warn'
+}
+
+function outcomeWord(outcome) {
+  if (outcome === 'result_too_large') return 'too large'
+  return outcome
+}
+
+/**
+ * Everything in here is built with createElement and textContent, never innerHTML.
+ * Adapter names, task ids and adapter error messages all arrive from the network, and
+ * this page's whole job is to display them.
+ */
+function mk(tag, cls, text) {
+  const node = document.createElement(tag)
+  if (cls) node.className = cls
+  if (text !== undefined) node.textContent = text
+  return node
+}
+
+function renderHistory(s) {
+  const h = s.history || { recent: [], summary: null }
+  const runs = h.recent || []
+  const sum = h.summary || { runs: 0, failed: 0, busyMs: 0, byAdapter: {} }
+  const strip = $('histStrip')
+  const list = $('histRuns')
+  const adapters = $('histAdapters')
+
+  if (sum.runs === 0) {
+    $('histSummary').textContent = 'Nothing has run on this computer yet.'
+    show(strip, false)
+    show(list, false)
+    show(adapters, false)
+    return
+  }
+
+  const parts = [sum.runs + (sum.runs === 1 ? ' run' : ' runs')]
+  if (sum.failed > 0) parts.push(sum.failed + ' failed')
+  parts.push(dur(sum.busyMs) + ' busy')
+  // lastRunAt belongs to this process, so it is null for the whole of the first poll
+  // after a restart even though the history is right there. Fall back to the newest
+  // record rather than drop the clause until the next task arrives.
+  const last = s.lastRunAt || (runs[0] ? Date.parse(runs[0].finishedAt) : 0)
+  if (last) parts.push('last ' + ago(last))
+  $('histSummary').textContent = parts.join(' · ')
+
+  // Oldest on the left, newest on the right; recent() hands them over newest first.
+  const ordered = runs.slice().reverse()
+  let longest = 0
+  for (const r of ordered) if (r.durationMs > longest) longest = r.durationMs
+  strip.textContent = ''
+  for (const r of ordered) {
+    const bar = mk('div', outcomeKind(r.outcome))
+    const share = longest > 0 ? Math.max(1, (r.durationMs / longest) * 25) : 1
+    bar.style.width = share.toFixed(2) + '%'
+    bar.title = r.adapter + ' · ' + dur(r.durationMs) + ' · ' + outcomeWord(r.outcome)
+    strip.appendChild(bar)
+  }
+  show(strip, true)
+
+  list.textContent = ''
+  for (const r of runs.slice(0, 10)) {
+    const row = mk('div', 'run')
+    row.appendChild(mk('code', null, r.adapter))
+    row.appendChild(mk('span', 'mark ' + outcomeKind(r.outcome), outcomeWord(r.outcome)))
+    let cost = dur(r.durationMs) + ' · cpu ' + dur(r.cpuMs) + ' · ' + Math.round(r.rssMb) + ' MB'
+    if (r.shared) cost += ' (shared)'
+    row.appendChild(mk('span', 'cost', cost))
+    row.appendChild(mk('span', 'when', ago(Date.parse(r.finishedAt))))
+    if (r.message) row.title = r.message
+    list.appendChild(row)
+  }
+  show(list, true)
+
+  const names = Object.keys(sum.byAdapter)
+  names.sort((a, b) => sum.byAdapter[b].runs - sum.byAdapter[a].runs)
+  adapters.textContent = names.map(name =>
+    name + ': ' + sum.byAdapter[name].runs + (sum.byAdapter[name].runs === 1 ? ' run, ' : ' runs, ') +
+    dur(sum.byAdapter[name].busyMs)).join(' · ')
+  show(adapters, names.length > 0)
+}
+
 function render(s) {
   show($('join'), !s.paired)
   show($('main'), s.paired)
@@ -440,6 +570,8 @@ function render(s) {
   $('server').textContent = s.server
   $('adapters').textContent = s.adapters.join(', ')
   $('version').textContent = 'v' + s.version + (s.pinnedKey ? ' — updates verified' : ' — updates unsigned, manual only')
+
+  renderHistory(s)
 
   show($('retryRow'), s.stoodDown)
   // Concatenation, not a template literal: this whole script sits inside one, so a
@@ -581,7 +713,7 @@ export async function runGui(opts: GuiOptions): Promise<void> {
   let config: AgentConfig | null = loadConfig()
   let state: AgentState = {
     connection: 'offline', attempt: 0, connectedSince: null, running: [],
-    lastLostReason: null, advice: null, stoodDown: false, updating: false,
+    lastLostReason: null, advice: null, stoodDown: false, updating: false, lastRunAt: null,
   }
   let service: ServiceStatus = { installed: false, platform: platform() }
   const refreshService = async (): Promise<void> => {
@@ -712,6 +844,15 @@ export async function runGui(opts: GuiOptions): Promise<void> {
         advice: state.advice,
         stoodDown: state.stoodDown,
         updating: state.updating,
+        lastRunAt: state.lastRunAt,
+        /**
+         * What this machine has run before now.
+         *
+         * Answered from the in-memory array, so polling this every second costs a JSON
+         * encode and nothing else. Thirty records is more than the page draws in its
+         * list, because the timeline strip shows the lot.
+         */
+        history: { recent: history.recent(30), summary: history.summary() },
       })
       return
     }
@@ -793,6 +934,8 @@ export async function runGui(opts: GuiOptions): Promise<void> {
       state = {
         connection: 'offline', attempt: 0, connectedSince: null, running: [],
         lastLostReason: null, advice: null, stoodDown: false, updating: false,
+        // Leaving forgets a network, not what this computer has done.
+        lastRunAt: state.lastRunAt,
       }
       log.info('gui.left_network', { was })
       send(res, 200, { ok: true })
