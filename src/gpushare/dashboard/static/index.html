@@ -1227,6 +1227,19 @@
         let podData = {pods:[]};
         try { podData = await api('/api/pods'); } catch (err) { toast('RunPod 목록: ' + err.message, true); }
         appState = stateData; jobs = jobData.jobs || []; models = modelData.models || []; serving = modelData.serving || {running:false}; pods = podData.pods || [];
+        // The server can already be holding a cached policy prefix from
+        // before this page load (a previous session, or a reload). Without
+        // this, policyLoaded/optimized stay at their fresh-page defaults
+        // (false) while the server still has the prefix — the same
+        // mismatch the clear-cache bug had, just reached by reload instead
+        // of by a button.
+        if (serving.prefix_tokens) {
+          policyBuild = serving.prefix_build_s; ptokEst = serving.prefix_tokens.toLocaleString();
+          policyLoaded = true;
+        } else {
+          policyLoaded = false; optimized = false; policyBuild = null; ptokEst = null;
+        }
+        paintChatState(); paintState();
         replaceOptions('trainPod', podOptions()); replaceOptions('servePod', podOptions());
         replaceOptions('migrationSource', podOptions()); replaceOptions('migrationTarget', podOptions());
         el('dataState').textContent = appState.experiment.data.train.toLocaleString() + ' train · ' + appState.experiment.data.heldout.toLocaleString() + ' held-out';

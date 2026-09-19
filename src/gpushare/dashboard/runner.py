@@ -184,7 +184,15 @@ class JobManager:
         # Artifact-producing work shares data/ and the selected-config record.
         # Serialising it is much clearer than letting two buttons race.
         with self._lock:
-            busy = next((j for j in self._jobs.values() if j.status == "running"), None)
+            # "running" alone leaves a window: a fresh Job defaults to
+            # "queued" and only flips to "running" inside _run(), which has
+            # to re-acquire this same lock from its own thread — so a second
+            # create() call arriving before that thread runs would see no
+            # "running" job and pass the check too. Both jobs then launch GPU
+            # work on the same pod concurrently. Counting "queued" here closes
+            # that window, since the new job is inserted under this same lock
+            # before it is released.
+            busy = next((j for j in self._jobs.values() if j.status in ("running", "queued")), None)
             if busy:
                 raise JobError(f"{busy.kind} job {busy.id[:8]} is already running")
             job = Job(id=uuid.uuid4().hex, kind=kind, params=params)
@@ -1787,8 +1795,14 @@ def start_inference_server(*, pod_id: str, model_id: str, dtype: str = "bf16") -
         JOBS.update(job, "syncing serve script", 10)
         _sync_project(job, info)
         JOBS.update(job, "preparing GPU environment", 25)
-        if pod["vendor"] == "amd":
-            _setup_migration_pod(job, info, "amd")
+        # Whoever _serve_python() points at the isolated venv for needs it
+        # built first. Branching on the vendor name here (as this used to)
+        # is exactly what commit 551dd8a's ChipProfile table replaced
+        # everywhere else — a third vendor needing the same migration venv
+        # would silently fall into uv sync and fail with the PEP 668 error
+        # the AMD row exists to document.
+        if _serve_python(pod["vendor"]) != "uv run python":
+            _setup_migration_pod(job, info, pod["vendor"])
         else:
             _setup_pod(job, info, pod["vendor"])
 

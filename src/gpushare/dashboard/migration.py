@@ -341,10 +341,16 @@ def run_resume_migration(
             allow_failure=True,
         )
         r._pull(job, dst_info, f"{remote_run}/eval", local_eval)
-        report = r._json(local_eval / f"{name}.json")
-        gate = _gate(baseline, report)
+        # Check the remote exit code BEFORE gating: evaluate.py can write a
+        # partial out.json (metrics computed) and still fail later in its own
+        # --compare/--strict-inference step. Gating first would let _gate()
+        # raise "regression detected" or "not comparable" on that partial
+        # report, masking the real cause behind a misleading quality-gate
+        # rejection.
         if code:
             raise r.JobError(f"target evaluation exited with status {code}")
+        report = r._json(local_eval / f"{name}.json")
+        gate = _gate(baseline, report)
         return report, gate
 
     r.JOBS.update(job, "checking transferred weights BEFORE any AMD optimizer step", 60)
