@@ -17,11 +17,12 @@ from redis.backoff import NoBackoff
 
 from ..agent import AgentLoop
 from ..llm import OpenAIClient
+from ..preprocessing.routes import router as preprocessing_router
+from ..preprocessing.routes import worker_router as artifact_router
+from ..preprocessing.service import PreprocessingService
 from ..shared.protocol import MESSAGE_LIMIT
 from ..shared.security import authorized
 from ..shared.telemetry import init_sentry
-from ..preprocessing.routes import router as preprocessing_router, worker_router as artifact_router
-from ..preprocessing.service import PreprocessingService
 from ..supervisor.routes import router as supervisor_router
 from ..supervisor.sentry import SentryReader
 from ..supervisor.service import SupervisorService
