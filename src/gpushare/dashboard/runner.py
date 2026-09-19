@@ -1649,15 +1649,36 @@ def available_models() -> list[dict[str, Any]]:
 
 
 def _model_ref(model_id: str, pod_id: str) -> str:
+    """Where to load this model from, on this pod.
+
+    The bookkeeping records one pod per checkpoint — the last one to write it.
+    A checkpoint can live on several, and after a migration it does: that is
+    the whole point of migrating. Serving the same weights on two chips to
+    compare them is the demo, not an edge case.
+
+    So a mismatch asks the pod instead of refusing on the record. Same lesson
+    as the VRAM and disk checks: our note is a memory of one moment, the
+    machine is the fact.
+    """
     for m in available_models():
-        if m["id"] == model_id:
-            required_pod = m.get("pod_id")
-            if required_pod and required_pod != pod_id:
-                raise JobError(
-                    f"{m['label']} is stored on pod {required_pod}; "
-                    "select that pod before loading it"
-                )
-            return m["ref"]
+        if m["id"] != model_id:
+            continue
+        ref, required_pod = m["ref"], m.get("pod_id")
+        if not required_pod or required_pod == pod_id or not ref.startswith("/"):
+            return ref
+        try:
+            info = _ssh_info(pod_id)
+            present = _capture(
+                _ssh_args(info, f"test -f {shlex.quote(ref)}/model.safetensors && echo yes || echo no")
+            ).strip()
+        except Exception as e:  # noqa: BLE001 — an unreachable pod cannot serve either
+            raise JobError(f"pod {pod_id} is unreachable ({type(e).__name__})") from e
+        if present.endswith("yes"):
+            return ref
+        raise JobError(
+            f"{m['label']} is not on pod {pod_id} — the last run left it on "
+            f"{required_pod}. Migrate it here, or pick that pod."
+        )
     raise JobError(f"unknown model {model_id!r}")
 
 

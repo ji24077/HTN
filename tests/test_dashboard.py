@@ -262,6 +262,12 @@ def test_checkpoint_model_refuses_the_wrong_pod(monkeypatch):
         ],
     )
 
+    # The refusal now depends on the pod, not the record: a pod that does not
+    # have the file is still refused, and is told where the file is.
+    monkeypatch.setattr(runner, "_ssh_info", lambda pid: {"pod": pid})
+    monkeypatch.setattr(runner, "_ssh_args", lambda info, cmd: ["ssh", cmd])
+    monkeypatch.setattr(runner, "_capture", lambda a, **k: "no")
+
     with pytest.raises(runner.JobError, match="pod-with-weights"):
         runner._model_ref("finetuned", "different-pod")
 
@@ -507,3 +513,30 @@ def test_amd_serving_does_not_go_through_uv():
     """
     assert runner._serve_python("amd") == ".migration-venv/bin/python"
     assert "uv" in runner._serve_python("nvidia"), "the working NVIDIA path must not move"
+
+
+def test_a_checkpoint_on_two_pods_can_be_served_from_either(monkeypatch):
+    """After a migration the same weights exist in two places.
+
+    The record names one pod — the last to write it — so serving the other one
+    was refused outright, which blocks exactly the comparison the migration
+    exists to enable: the same model answering on two chips.
+    """
+    monkeypatch.setattr(
+        runner, "available_models",
+        lambda: [{"id": "finetuned", "label": "fine-tuned", "ref": "/w/ckpt", "pod_id": "pod-a"}],
+    )
+    monkeypatch.setattr(runner, "_ssh_info", lambda pid: {"pod": pid})
+    monkeypatch.setattr(runner, "_ssh_args", lambda info, cmd: ["ssh", cmd])
+
+    monkeypatch.setattr(runner, "_capture", lambda a, **k: "yes")
+    assert runner._model_ref("finetuned", "pod-b") == "/w/ckpt"
+
+    # Absent is still refused, and says where it actually is.
+    monkeypatch.setattr(runner, "_capture", lambda a, **k: "no")
+    try:
+        runner._model_ref("finetuned", "pod-b")
+    except runner.JobError as e:
+        assert "not on pod pod-b" in str(e) and "pod-a" in str(e)
+    else:
+        raise AssertionError("a pod without the weights was accepted")
