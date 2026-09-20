@@ -45,14 +45,18 @@ holds the recorded GPU measurements.
 ## Screenshots
 
 Captured from the local demo (`orchestrator-demo`) on September 20, 2026, with
-two CPU workers and one completed connection test. No model key was configured,
-so the assistant and supervisor show their unconfigured states.
+two CPU workers and a completed connection test on each. No model key was
+configured, so the assistant and supervisor show their unconfigured states.
+
+They follow the order you meet them: what you have, how work goes in, what came
+back, and where the record is kept.
 
 | | |
 | --- | --- |
-| **Jobs.** Counts of active, completed, and failed jobs and online workers, then the job list. ![Jobs view](docs/screenshots/01-jobs.png) | **Workers.** One card per machine with its reported hardware. A one-time invite pairs a desktop or iOS agent. ![Workers view](docs/screenshots/02-workers.png) |
-| **New job.** Files, a description, and an optional CAD cap. ![New job composer](docs/screenshots/03-new-job.png) | **Job overview.** Result, files, metrics, and a downloadable summary built from saved results. ![Job overview](docs/screenshots/04-job-overview.png) |
-| **Job details.** Execution attempts, the accepted result, estimated cost, and supervisor findings. ![Job details](docs/screenshots/05-job-details.png) | **Activity.** Audit trail of queueing, assignment, starts, and accepted results. ![Activity feed](docs/screenshots/06-activity.png) |
+| **Jobs.** Counts of active, completed, and failed jobs and online workers, then the job list. ![Jobs view](docs/screenshots/feature-01-jobs.png) | **Workers.** One card per machine with its reported hardware. A one-time invite pairs a desktop or iOS agent. ![Workers view](docs/screenshots/feature-02-workers.png) |
+| **New job.** Files, a description, and an optional CAD cap. Nothing here picks a machine — the coordinator does. ![New job composer](docs/screenshots/03-new-job.png) | **Job overview.** Result, files, metrics, and a downloadable summary built from saved results. ![Job overview](docs/screenshots/04-job-overview.png) |
+| **Job details.** Execution attempts, the accepted result and its SHA-256, estimated cost, and supervisor findings. ![Job details](docs/screenshots/feature-03-job-details.png) | **Topology.** The fleet as a graph: the control plane at the centre, every worker dialing in to it. ![Fleet topology](docs/screenshots/feature-05-topology.png) |
+| **Activity.** Audit trail of queueing, assignment, starts, and accepted results. ![Activity feed](docs/screenshots/feature-04-activity.png) | **Guide.** An in-app walkthrough: the five stages of a job, what each page does, and where it stops. ![Guide page](docs/screenshots/feature-06-guide.png) |
 
 <p align="center">
   <img src="docs/screenshots/07-agent-window.png" width="420" alt="Desktop agent window showing connected status and recent signed work">
@@ -72,6 +76,8 @@ so the assistant and supervisor show their unconfigured states.
 | Hosted services | Upload an HTTP server and ask to host it. Authenticated endpoint under `/serve`. | One worker gateway process. |
 | Devices and signing | Desktop and iOS agents pair with a one-time invite and sign every result. | iOS is a developer build. Python workers use enrolled tokens. |
 | Usage and credit | Every attempt is metered in CAD from cores and RAM. A per-run cap cancels the job. | Estimates only. No payments. Soft cap. |
+| Fleet topology | Watch the control plane and every worker dialing into it, with labels, a replay of a past run, and an activity log. | A view of the current snapshot, not a control surface. |
+| In-app guide | Open **Guide** for the five stages of a job, what each page does, and where it stops. Each entry opens the page it describes. | Explains the workspace; it changes nothing. |
 | Experiments (GPU Lab) | Workflow commands such as `/compare saved MI300X` open recorded evidence: latency ratio, verdict, and the changed answers. | Backed by the separate GPUShare service. Recorded mode by default. |
 
 Recorded GPU evidence (GPUShare, Qwen2.5-0.5B, 13 sentences x 5 rounds, 300-case
