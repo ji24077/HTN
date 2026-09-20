@@ -252,14 +252,26 @@
             <div><strong>직접 추론</strong><div class="hint">첫 토큰 시간과 전체 생성 시간을 함께 기록합니다.</div></div>
             <span id="chatModel" class="pill">모델 준비 안 됨</span>
           </div>
+          <div class="chain" style="padding:0 20px 12px">
+            <div class="hint" style="margin-bottom:7px">
+              같은 문장을 네 번 보냅니다. 버튼이 모델과 칩을 맞춰 두니, 누른 뒤 <b>전송</b>만 하세요.
+            </div>
+            <div class="btnrow">
+              <button id="chain1" class="btn secondary">① 학습 전</button>
+              <button id="chain2" class="btn secondary">② 학습 후</button>
+              <button id="chain3" class="btn secondary">③ 칩 이동 후</button>
+              <button id="chain4" class="btn blue">④ 이동 칩 + 최적화</button>
+            </div>
+            <div id="chainHint" class="hint" style="margin-top:7px">① 부터 눌러 보세요.</div>
+          </div>
           <div class="btnrow" style="padding:0 20px 10px">
             <button id="chatBefore" class="btn secondary">추론 최적화 전으로</button>
             <button id="chatAfter" class="btn blue">추론 최적화 에이전트</button>
             <span id="chatOptState" class="hint">상태 확인 중…</span>
           </div>
           <table class="dv" style="margin:0 20px 10px"><thead>
-            <tr><th>GPU</th><th>벤더</th><th>첫 토큰</th><th>전체</th><th>답</th></tr></thead>
-            <tbody id="gpuRows"><tr><td colspan="5" style="text-align:center;color:var(--muted)">아직 실행 없음</td></tr></tbody>
+            <tr><th>단계</th><th>GPU</th><th>벤더</th><th>첫 토큰</th><th>전체</th><th>답</th></tr></thead>
+            <tbody id="gpuRows"><tr><td colspan="6" style="text-align:center;color:var(--muted)">아직 실행 없음</td></tr></tbody>
           </table>
           <div id="messages" class="messages" aria-live="polite">
             <div class="message system">추론 서버가 준비되면 아래 입력창이 활성화됩니다. “모델이 load되지 않았다”는 오류 대신 준비 단계를 먼저 안내합니다.</div>
@@ -992,6 +1004,70 @@
     // without scrolling away from the box you are typing in.
     el('chatBefore').addEventListener('click', setBefore);
     el('chatAfter').addEventListener('click', setAfter);
+
+    // The four stages of the same question. Each button only puts the right
+    // model on the right chip and says what to do next — it never sends the
+    // message itself, because the presenter typing the same sentence each time
+    // is what makes the comparison legible to a room.
+    function chainSay(text, warn) {
+      const box = el('chainHint');
+      box.textContent = text;
+      box.style.color = warn ? 'var(--warn, #b45309)' : '';
+    }
+    function podsWhere(predicate) {
+      return pods.filter((p) => p.status === 'running' && predicate(p));
+    }
+    async function chainServe(modelId, pickPod, label) {
+      const model = models.find((m) => m.id === modelId);
+      if (!model) {
+        chainSay(`${label}: 이 서버에는 ${modelId} 모델이 없습니다. `
+          + '학습 기록이 있는 디렉터리에서 make ui 를 실행했는지 확인하세요.', true);
+        return;
+      }
+      const pod = pickPod();
+      if (!pod) { chainSay(`${label}: 조건에 맞는 실행 중인 파드가 없습니다.`, true); return; }
+      el('serveModel').value = modelId;
+      el('servePod').value = pod.id;
+      syncModelPod();
+      chainSay(`${label}: ${pod.name} 에 ${modelId} 올리는 중… (10-20초)`);
+      const job = await start('/api/serve', {pod_id: pod.id, model_id: modelId, dtype: 'bf16'});
+      if (job) chainSay(`${label}: 준비되면 같은 문장을 그대로 [전송] 하세요.`);
+    }
+
+    el('chain1').onclick = () => chainServe(
+      'base',
+      // The base model has no checkpoint of its own, so any running pod does;
+      // prefer the cheapest so the "before" shot does not burn the big card.
+      () => podsWhere(() => true).sort((a, b) => a.cost_per_hour - b.cost_per_hour)[0],
+      '① 학습 전');
+
+    el('chain2').onclick = () => chainServe(
+      'finetuned',
+      // Where training actually left the weights. Any other pod is a guess.
+      () => pods.find((p) => p.id === (models.find((m) => m.id === 'finetuned') || {}).pod_id),
+      '② 학습 후');
+
+    el('chain3').onclick = () => chainServe(
+      'finetuned',
+      () => podsWhere((p) => p.vendor === 'amd')[0],
+      '③ 칩 이동 후 (AMD)');
+
+    el('chain4').onclick = async () => {
+      // The felt speed-up in this demo is prefill reuse on the long-context
+      // model, not the batch-16 throughput the inference agent measures — so
+      // this step serves that model and turns the cache on, and the table row
+      // it produces says so.
+      const longctx = models.find((m) => m.id === 'longctx');
+      if (!longctx) { chainSay('④: longctx 모델이 없습니다.', true); return; }
+      if (!(serving.running && serving.model_id === 'longctx')) {
+        await chainServe('longctx', () => podsWhere((p) => p.vendor === 'amd')[0]
+          || podsWhere(() => true)[0], '④ 이동 칩 + 최적화');
+        chainSay('④: 모델이 올라오면 다시 눌러 정책 캐시를 켭니다.');
+        return;
+      }
+      await setAfter();
+      chainSay('④: 정책 KV 재사용 켜짐. ③ 과 같은 문장을 [전송] 해 비교하세요.');
+    };
     paintState(''); paintChatState();
 
     function renderFlow() {
@@ -1080,13 +1156,27 @@
     // compares against the FIRST row: a migration that changes the answer is
     // not a migration, and that has to be visible rather than inferred.
     let firstAnswer = null, gpuRunNo = 0;
+    // What this run IS, read off the live state rather than off which button
+    // the presenter meant to press. A row labelled "학습 후" that was actually
+    // produced by the base model is the one mistake this table exists to stop.
+    function stageLabel(pod) {
+      const model = serving.model_id || '';
+      if (model === 'base') return '① 학습 전';
+      if (model === 'longctx') return policyLoaded
+        ? (optimized ? '④ 이동 칩 + 최적화' : '③ 최적화 전')
+        : '정책 미로드';
+      if (model === 'finetuned') return pod.vendor === 'amd' ? '② 칩 이동 후 (AMD)' : '② 학습 후';
+      return model || '?';
+    }
+
     function addGpuRow(text, ttft, total) {
       const pod = pods.find((p) => p.id === (serving.pod_id || el('servePod').value)) || {};
       const body = el('gpuRows');
       if (gpuRunNo++ === 0) { body.innerHTML = ''; firstAnswer = text; }
       const same = text === firstAnswer;
       const tr = document.createElement('tr');
-      tr.innerHTML = '<td>' + esc((pod.gpu || '?').replace('NVIDIA ','').replace('AMD ',''))
+      tr.innerHTML = '<td>' + esc(stageLabel(pod))
+        + '</td><td>' + esc((pod.gpu || '?').replace('NVIDIA ','').replace('AMD ',''))
         + '</td><td>' + esc(pod.vendor || '?') + '</td><td>' + (ttft == null ? '—' : ttft.toFixed(2) + 's')
         + '</td><td>' + total.toFixed(2) + 's</td><td>'
         + (gpuRunNo === 1 ? '기준' : (same ? '동일' : '다름')) + '</td>';
