@@ -93,6 +93,11 @@ snapshots. Task mutations use HTTP. The API contract types mirror
 
 ## GPU demo (separate GPUShare backend)
 
+For the complete Windows demo, including the isolated fleet backend, companion
+branch layout, dependency setup, and packaged start/stop scripts, follow
+[the Relay demo guide](../RELAY-DEMO.md). The manual commands below start only
+the GPU Lab portion.
+
 The GPU Lab API uses same-origin `/api` requests. Vite forwards these to
 `GPUSHARE_BACKEND_URL` (default `http://127.0.0.1:8090`), while fleet routes stay
 on the existing orchestrator port. Set this backend-only variable in the root
