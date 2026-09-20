@@ -42,12 +42,22 @@ export const phaseLabels: Record<string, string> = {
   failed: "Failed",
   cancelled: "Cancelled",
   needs_input: "Needs your input",
-  program_preparing: "Preparing Python worker",
   program_planning: "Planning the project",
+  program_preparing: "Reserving a machine",
   program_probe: "Testing the execution plan",
   program_placement: "Reviewing measured performance",
   program_ready: "Preparing the full run",
   program_running: "Executing and validating outputs",
+  training_baseline: "Preparing training baseline",
+  training_baseline_testing: "Testing original GPU code",
+  training_optimization: "Optimizing training code",
+  training_optimization_ready: "Preparing optimization test",
+  training_optimization_testing: "Checking correctness and performance",
+  training_optimization_rejected: "Reviewing rejected optimization",
+  training_migration: "Preparing code for the target GPU",
+  training_migration_ready: "Preparing target GPU test",
+  training_migration_testing: "Validating migration on target GPU",
+  training_migration_rejected: "Reviewing rejected migration",
 };
 export function SimulationDetails({
   jobId,
@@ -353,6 +363,26 @@ export function SimulationDetails({
             ))}
           </details>
         )}
+        {status.training_preparation && (
+          <details>
+            <summary>Training preparation</summary>
+            <p>
+              Optimization:{" "}
+              {status.training_preparation.optimization.replaceAll("_", " ")} ·{" "}
+              {status.training_preparation.attempts.optimization} attempts
+            </p>
+            <p>
+              Migration:{" "}
+              {status.training_preparation.migration.replaceAll("_", " ")} ·{" "}
+              {status.training_preparation.attempts.migration} attempts
+            </p>
+            <p>
+              Full training starts after the required checks pass. Optimization
+              measurements cover native preprocessing only.
+            </p>
+          </details>
+        )}
+
         {status.policy && (
           <details>
             <summary>Agent execution policy</summary>
@@ -461,8 +491,12 @@ export function SimulationDetails({
         )}
         {status.validated_hash && (
           <p className="mono muted">
-            {status.program_plan ? "Probed source" : "Validated package"}:{" "}
-            {status.validated_hash.slice(0, 16)}
+            {status.training_preparation
+              ? "Prepared training source"
+              : status.program_plan
+                ? "Probed source"
+                : "Validated package"}
+            : {status.validated_hash.slice(0, 16)}
           </p>
         )}
       </div>

@@ -475,6 +475,13 @@ export interface SimulationStatus {
     outputs: { path: string; kind: string }[];
     metrics: { name: string; minimum: number | null; maximum: number | null }[];
   };
+  training_preparation?: {
+    status: string;
+    optimization: string;
+    migration: string;
+    attempts: { optimization: number; migration: number };
+    accepted_hash: string;
+  } | null;
   trial_counts?: Record<string, number>;
   cleanup?: { required: number; confirmed: number; pending_workers: string[] };
   job_id: string;
