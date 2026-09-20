@@ -80,7 +80,7 @@ small {
 }
 .mono {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: 12px;
 }
 button {
   transition:
@@ -136,7 +136,7 @@ button:hover:not(:disabled) {
 }
 .workspace-label small {
   display: block;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 400;
   color: var(--muted);
   margin-top: 2px;
@@ -151,7 +151,7 @@ button:hover:not(:disabled) {
   background: var(--bg);
 }
 .section-label {
-  font-size: 9px;
+  font-size: 12px;
   letter-spacing: 1.2px;
   font-weight: 600;
   color: #78848a;
@@ -180,7 +180,7 @@ button:hover:not(:disabled) {
 }
 .main-nav button small {
   margin-left: auto;
-  font-size: 10px;
+  font-size: 12px;
   background: #e2eee7;
   padding: 1px 6px;
   border-radius: 4px;
@@ -189,11 +189,11 @@ button:hover:not(:disabled) {
   margin-top: auto;
   padding: 18px 9px 0;
   border-top: 1px solid var(--line);
-  font-size: 11px;
+  font-size: 12px;
 }
 .sidebar-bottom small {
   display: block;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
   margin: 5px 0 0 15px;
 }
@@ -211,7 +211,7 @@ button:hover:not(:disabled) {
 .connection-label {
   display: inline-flex;
   align-items: center;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
 }
 .app-main {
@@ -242,7 +242,7 @@ button:hover:not(:disabled) {
   color: var(--ink);
 }
 .crumb-divider {
-  color: #bac2c7;
+  color: var(--muted);
 }
 .avatar {
   width: 29px;
@@ -252,7 +252,7 @@ button:hover:not(:disabled) {
   border: 1px solid #dce5df;
   display: grid;
   place-items: center;
-  font-size: 10px;
+  font-size: 12px;
   color: #486956;
 }
 .account-email {
@@ -260,7 +260,7 @@ button:hover:not(:disabled) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11px;
+  font-size: 12px;
 }
 .content {
   max-width: 1600px;
@@ -275,9 +275,9 @@ button:hover:not(:disabled) {
   margin-bottom: 28px;
 }
 .eyebrow {
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 650;
-  letter-spacing: 1.5px;
+  letter-spacing: 1px;
   color: var(--muted);
   margin-bottom: 7px;
 }
@@ -321,7 +321,7 @@ h1 {
   border: 0;
   background: transparent;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
   padding: 6px;
 }
 .text-btn.danger {
@@ -369,7 +369,7 @@ h1 {
   letter-spacing: -1px;
 }
 .metric small {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
 }
 .jobs-panel {
@@ -398,7 +398,7 @@ h1 {
   color: var(--muted);
   padding: 7px 10px;
   white-space: nowrap;
-  font-size: 11px;
+  font-size: 12px;
 }
 .filter-tabs button[aria-pressed="true"] {
   background: #edf2f0;
@@ -406,9 +406,9 @@ h1 {
   font-weight: 600;
 }
 .filter-tabs small {
-  font-size: 9px;
+  font-size: 12px;
   margin-left: 6px;
-  color: var(--muted);
+  color: #56636b;
 }
 .search-field {
   display: flex;
@@ -445,7 +445,7 @@ h1 {
 .job-table th {
   font-weight: 500;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 0.2px;
   background: #fafbfc;
   padding: 12px 18px;
@@ -485,7 +485,7 @@ h1 {
   display: block;
   margin-top: 3px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
 }
 .job-glyph {
   width: 32px;
@@ -501,7 +501,7 @@ h1 {
   font-family: var(--mono);
 }
 .status-badge {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 500;
   padding: 4px 8px;
   border-radius: 5px;
@@ -540,7 +540,7 @@ h1 {
   align-items: center;
   gap: 8px;
   min-width: 92px;
-  font: 10px var(--mono);
+  font: 12px var(--mono);
   color: var(--muted);
 }
 .table-progress .progress {
@@ -548,7 +548,7 @@ h1 {
   margin: 0;
 }
 .table-progress + small {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
 }
 .progress {
@@ -565,7 +565,7 @@ h1 {
 }
 .worker-cell {
   white-space: nowrap;
-  font-size: 11px;
+  font-size: 12px;
 }
 .worker-cell svg {
   margin-right: 5px;
@@ -578,7 +578,7 @@ h1 {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
 }
 .table-footer > div {
@@ -603,7 +603,7 @@ h1 {
   justify-content: center;
   gap: 8px;
   margin-top: 19px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
 }
 .footer {
@@ -614,7 +614,7 @@ h1 {
   margin-top: 35px;
   padding-top: 18px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
 }
 .section-heading,
 .section-actions {
@@ -625,7 +625,7 @@ h1 {
   margin-bottom: 15px;
 }
 .section-heading small {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
 }
 .section-actions {
@@ -720,7 +720,7 @@ h1 {
   align-items: center;
   gap: 6px;
   border-radius: 5px;
-  font-size: 10px;
+  font-size: 12px;
   padding: 4px 8px;
   background: var(--soft);
   color: var(--green);
@@ -728,7 +728,7 @@ h1 {
 }
 .pill.neutral {
   background: #edf0f2;
-  color: var(--muted);
+  color: #56636b;
 }
 .pulse {
   width: 5px;
@@ -741,7 +741,7 @@ h1 {
   overflow-wrap: anywhere;
 }
 .worker-id {
-  font: 10px var(--mono);
+  font: 12px var(--mono);
   color: var(--muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -755,7 +755,7 @@ h1 {
   margin: 16px 0;
 }
 .tag {
-  font-size: 10px;
+  font-size: 12px;
   border: 1px solid var(--line);
   border-radius: 4px;
   padding: 3px 6px;
@@ -777,7 +777,7 @@ h1 {
   display: flex;
   justify-content: space-between;
   gap: 10px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
 }
 .work-status span:first-child {
@@ -786,12 +786,12 @@ h1 {
   white-space: nowrap;
 }
 .heartbeat {
-  font: 10px var(--mono);
+  font: 12px var(--mono);
   color: var(--muted);
   margin-top: 10px;
 }
 .hint {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
   margin: 12px 0 28px;
 }
@@ -844,7 +844,7 @@ h1 {
   overflow-wrap: anywhere;
 }
 .event-time {
-  font: 10px var(--mono);
+  font: 12px var(--mono);
   color: var(--muted);
   white-space: nowrap;
   padding-top: 3px;
@@ -933,7 +933,7 @@ input[type="checkbox"] {
 .composer-foot {
   margin-top: 12px;
   text-align: center;
-  font-size: 10px !important;
+  font-size: 12px !important;
 }
 .composer [role="alert"] {
   margin-top: 12px;
@@ -976,7 +976,7 @@ dialog header {
   gap: 20px;
 }
 dialog pre {
-  font: 11px/1.8 var(--mono);
+  font: 12px/1.8 var(--mono);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   background: #f5f7f9;
@@ -989,7 +989,7 @@ dialog pre {
 summary {
   cursor: pointer;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 details[open] > summary {
   margin-bottom: 9px;
@@ -1025,7 +1025,7 @@ details[open] > summary {
 }
 .detail-summary > div > span {
   display: block;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
   margin-bottom: 7px;
 }
@@ -1035,12 +1035,12 @@ details[open] > summary {
   overflow-wrap: anywhere;
 }
 .detail-summary strong small {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
   font-weight: 400;
 }
 .detail-summary .status-badge {
-  font-size: 11px;
+  font-size: 12px;
 }
 .detail-columns {
   display: grid;
@@ -1091,17 +1091,17 @@ details[open] > summary {
   border: 1px solid var(--line);
   background: #f7f9fa;
   border-radius: 50%;
-  font-size: 11px;
+  font-size: 12px;
   flex-shrink: 0;
 }
 .attempt-card strong {
-  font-size: 11px;
+  font-size: 12px;
   display: block;
   overflow-wrap: anywhere;
 }
 .attempt-card small {
   display: block;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
   margin-top: 3px;
 }
@@ -1132,10 +1132,10 @@ details[open] > summary {
   border-radius: 4px;
   background: #eff2f4;
   padding: 1px 5px;
-  font: 10px var(--mono);
+  font: 12px var(--mono);
 }
 .panel-description {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
   margin: 17px 0 23px;
 }
@@ -1179,12 +1179,12 @@ details[open] > summary {
   font-weight: 550;
 }
 .timeline-heading time {
-  font: 10px var(--mono);
+  font: 12px var(--mono);
   color: var(--muted);
   white-space: nowrap;
 }
 .timeline p {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
   margin-top: 3px;
 }
@@ -1196,7 +1196,7 @@ details[open] > summary {
   color: #98413e;
 }
 .timeline summary {
-  font-size: 10px;
+  font-size: 12px;
   margin-top: 6px;
 }
 .failure-banner {
@@ -1239,13 +1239,13 @@ details[open] > summary {
   flex: 1;
   min-width: 0;
   padding: 7px;
-  font-size: 10px;
+  font-size: 12px;
 }
 .log-meta {
   display: flex;
   align-items: center;
   gap: 10px;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
   margin-bottom: 8px;
   flex-wrap: wrap;
@@ -1277,7 +1277,7 @@ details[open] > summary {
   gap: 8px;
   border-bottom: 1px solid #2a3642;
   padding: 10px 0;
-  font: 10px/1.7 var(--mono);
+  font: 12px/1.7 var(--mono);
 }
 .log-line time {
   color: #a3b2c0;
@@ -1285,7 +1285,7 @@ details[open] > summary {
 .log-level {
   color: #80bda7;
   text-transform: uppercase;
-  font-size: 9px;
+  font-size: 12px;
 }
 .log-line.error .log-level {
   color: #ffb8a9;
@@ -1295,7 +1295,7 @@ details[open] > summary {
 }
 .log-context {
   color: #9fadb9;
-  font-size: 9px;
+  font-size: 12px;
 }
 .log-line pre {
   background: transparent;
@@ -1303,14 +1303,14 @@ details[open] > summary {
   padding: 0;
   margin: 4px 0 0;
   border-radius: 0;
-  font-size: 11px;
+  font-size: 12px;
   max-height: none;
   overflow: visible;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 .log-line summary {
-  font: 9px/1.8 var(--mono);
+  font: 12px/1.8 var(--mono);
   color: #9fadb9;
 }
 .log-output .empty-state {
@@ -1325,7 +1325,7 @@ details[open] > summary {
 .verified {
   display: flex;
   gap: 6px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--green);
   margin: 12px 0;
 }
@@ -1346,7 +1346,7 @@ details[open] > summary {
   font-size: 13px;
 }
 .supervisor-heading small {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--green);
 }
 .supervisor-icon {
@@ -1359,7 +1359,7 @@ details[open] > summary {
   place-items: center;
 }
 .supervisor-scope {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
   margin: 13px 0 18px;
   padding-bottom: 15px;
@@ -1381,7 +1381,7 @@ details[open] > summary {
   white-space: pre-wrap;
 }
 .supervisor-card code {
-  font: 10px var(--mono);
+  font: 12px var(--mono);
   background: #edf1f4;
   border-radius: 3px;
   padding: 1px 3px;
@@ -1393,7 +1393,7 @@ details[open] > summary {
   margin-top: 15px;
 }
 .supervisor-evidence summary {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 550;
   color: #4f606a;
 }
@@ -1401,17 +1401,17 @@ details[open] > summary {
 .supervisor-actions h4 span {
   color: var(--muted);
   margin-left: 5px;
-  font-size: 10px;
+  font-size: 12px;
 }
 .supervisor-evidence > div {
   padding: 11px 0;
   border-bottom: 1px solid var(--line);
 }
 .supervisor-evidence strong {
-  font-size: 11px;
+  font-size: 12px;
 }
 .supervisor-evidence small {
-  font: 10px/1.7 var(--mono);
+  font: 12px/1.7 var(--mono);
   color: var(--muted);
   overflow-wrap: anywhere;
 }
@@ -1425,18 +1425,18 @@ details[open] > summary {
   border-radius: 6px;
 }
 .supervisor-actions strong {
-  font-size: 11px;
+  font-size: 12px;
   text-transform: capitalize;
 }
 .supervisor-actions p {
-  font-size: 11px;
+  font-size: 12px;
   margin-top: 4px;
 }
 .supervisor-foot {
   display: flex;
   align-items: start;
   gap: 6px;
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.7;
   color: var(--muted);
   border-top: 1px solid var(--line);
@@ -1460,7 +1460,7 @@ details[open] > summary {
   border-color: #dce6ec;
 }
 .followup small {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
 }
 .assistant-page {
@@ -1511,7 +1511,7 @@ details[open] > summary {
 }
 .chat-message > span {
   display: block;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
   margin-bottom: 6px;
 }
@@ -1523,7 +1523,7 @@ details[open] > summary {
   margin: 10px 0;
 }
 .chat-tool pre {
-  font: 11px/1.8 var(--mono);
+  font: 12px/1.8 var(--mono);
   white-space: pre-wrap;
   max-height: 240px;
   overflow: auto;
@@ -1629,10 +1629,10 @@ details[open] > summary {
     margin-left: 184px;
   }
   .workspace-label {
-    font-size: 10px;
+    font-size: 12px;
   }
   .workspace-label small {
-    font-size: 9px;
+    font-size: 12px;
   }
   .content {
     padding: 28px 24px;
@@ -1753,7 +1753,7 @@ details[open] > summary {
     gap: 0;
   }
   .filter-tabs button {
-    font-size: 10px;
+    font-size: 12px;
     padding: 7px 8px;
   }
   .filter-tabs small {
@@ -1782,7 +1782,7 @@ details[open] > summary {
     display: none;
   }
   .job-open strong {
-    font-size: 11px;
+    font-size: 12px;
   }
   .job-short-id {
     display: none !important;
@@ -1794,20 +1794,20 @@ details[open] > summary {
     padding-left: 0;
   }
   .job-table td:last-child .text-btn {
-    font-size: 10px;
+    font-size: 12px;
   }
   .table-footer {
     flex-wrap: wrap;
   }
   .tracking-note {
     align-items: start;
-    font-size: 10px;
+    font-size: 12px;
   }
   .tracking-note svg {
     margin-top: 2px;
   }
   .footer {
-    font-size: 9px;
+    font-size: 12px;
     gap: 10px;
   }
   .detail-dialog {
@@ -1853,7 +1853,7 @@ details[open] > summary {
   .log-line {
     grid-template-columns: 55px minmax(0, 1fr);
     gap: 4px;
-    font-size: 9px;
+    font-size: 12px;
   }
   .log-line > div {
     grid-column: 1/-1;
@@ -1862,7 +1862,7 @@ details[open] > summary {
     text-align: right;
   }
   .log-line pre {
-    font-size: 10px;
+    font-size: 12px;
   }
   .log-filters {
     flex-wrap: wrap;
@@ -1879,7 +1879,7 @@ details[open] > summary {
     font-size: 12px;
   }
   .event-time {
-    font-size: 9px;
+    font-size: 12px;
   }
   .activity {
     padding: 17px;
@@ -1930,7 +1930,7 @@ details[open] > summary {
   vertical-align: middle;
 }
 .supervisor-card .supervisor-scope {
-  font-size: 11px;
+  font-size: 12px;
 }
 .filter-tabs small {
   display: inline-block;
@@ -1970,7 +1970,7 @@ details[open] > summary {
 }
 .activity-foot {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
   margin-top: 18px;
 }
 .compose-error {
@@ -1981,7 +1981,7 @@ details[open] > summary {
     flex-direction: column;
   }
   .activity-foot {
-    font-size: 10px;
+    font-size: 12px;
   }
 }
 .log-line time {
@@ -2042,7 +2042,7 @@ details[open] > summary {
 }
 .upload-zone span,
 .upload-zone small {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
 }
 .simulation-form textarea,
@@ -2067,11 +2067,11 @@ details[open] > summary {
 .upload-files small {
   display: block;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
 }
 .simulation-limits {
   margin-top: 10px;
-  font-size: 11px !important;
+  font-size: 12px !important;
 }
 .simulation-progress {
   border: 1px solid var(--line);
@@ -2099,7 +2099,7 @@ details[open] > summary {
   flex-wrap: wrap;
   gap: 8px;
   margin: 16px 0;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
 }
 .pipeline-steps span {
@@ -2127,14 +2127,14 @@ details[open] > summary {
   border-bottom: 1px solid var(--line);
   background: white;
   padding: 9px;
-  font-size: 11px;
+  font-size: 12px;
 }
 .pipeline-task-list button.selected {
   background: var(--soft);
 }
 .pipeline-task-list small {
   display: block;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
 }
 .pipeline-executions .log-line pre {
@@ -2142,4 +2142,764 @@ details[open] > summary {
 }
 .simulation-progress .question-callout button {
   margin-top: 10px;
+}
+
+/* ── GPU Lab: chat-first view over the GPUShare experiment server ─────────
+   Light only, on the dispatch tokens. Type floors are higher than the rest of
+   the app because this view is demoed on a projector. */
+.lab {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 20px;
+  height: calc(100vh - 212px);
+  min-height: 470px;
+}
+.lab.with-side {
+  grid-template-columns: minmax(0, 1fr) 440px;
+}
+.lab-chat {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  overflow: hidden;
+}
+.lab-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 18px;
+  border-bottom: 1px solid var(--line);
+}
+.lab-head .pill {
+  font-size: 12px;
+  padding: 5px 10px;
+}
+.lab-head .lab-toggle {
+  margin-left: auto;
+}
+.lab-toggle[aria-pressed="true"] {
+  background: var(--soft);
+  color: var(--green);
+  border-color: #9ac4ae;
+}
+.lab-toggle small {
+  font-size: 12px;
+  padding: 0 6px;
+  border-radius: 9px;
+  background: #edf2f0;
+  color: #234d3a;
+}
+select.lab-model {
+  border: 1px solid transparent;
+  padding: 6px 8px;
+  margin-left: -8px;
+  font:
+    600 17px "Space Grotesk",
+    sans-serif;
+  letter-spacing: -0.3px;
+  background: transparent;
+  cursor: pointer;
+  max-width: 340px;
+}
+select.lab-model:hover {
+  background: #f2f5f7;
+  border-color: var(--line);
+}
+.lab-gpus {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--line);
+  background: #fbfcfd;
+}
+.lab-gpu {
+  border: 1px solid #d8e0e5;
+  background: var(--panel);
+  border-radius: 6px;
+  padding: 7px 12px;
+  text-align: left;
+  line-height: 1.35;
+  font-size: 13px;
+}
+.lab-gpu:hover:not(:disabled) {
+  border-color: #9ac4ae;
+}
+.lab-gpu b {
+  font-weight: 600;
+}
+.lab-gpu small {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+}
+.lab-gpu[aria-pressed="true"] {
+  background: var(--soft);
+  border-color: #9ac4ae;
+  color: #234d3a;
+}
+.lab-gpu[aria-pressed="true"] small {
+  color: #46614f;
+}
+.lab-chat > .inline-alert {
+  margin: 12px 18px 0;
+  font-size: 13px;
+}
+.lab-agentbar {
+  display: grid;
+  grid-template-columns: auto auto auto minmax(60px, 1fr) auto auto;
+  align-items: center;
+  gap: 6px 14px;
+  padding: 12px 18px;
+  background: var(--soft);
+  border-bottom: 1px solid #d3e6dc;
+  font-size: 14px;
+  color: #234d3a;
+}
+.lab-agentbar .pulse {
+  width: 9px;
+  height: 9px;
+  animation: lab-pulse 1.2s ease-in-out infinite;
+}
+.lab-agentbar b {
+  font-weight: 600;
+}
+.lab-agentbar span {
+  color: #46614f;
+  font-size: 13px;
+}
+.lab-clock {
+  font-variant-numeric: tabular-nums;
+}
+.lab-track {
+  height: 6px;
+  border-radius: 5px;
+  background: #d3e6dc;
+  overflow: hidden;
+}
+.lab-track i {
+  display: block;
+  height: 100%;
+  background: #438d6e;
+  transform-origin: left;
+  transition: transform 0.4s cubic-bezier(0.25, 1, 0.5, 1);
+}
+.lab-agentbar code {
+  grid-column: 1 / -1;
+  font: 12px/1.4 var(--mono);
+  color: #46614f;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+@keyframes lab-pulse {
+  50% {
+    opacity: 0.35;
+    transform: scale(0.7);
+  }
+}
+.lab-transcript {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  padding: 28px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+.lab-transcript > * {
+  width: 100%;
+  max-width: 740px;
+  margin-inline: auto;
+}
+.lab-welcome {
+  margin-block: auto;
+  text-align: center;
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+}
+.lab-welcome h3 {
+  font:
+    600 27px/1.25 "Space Grotesk",
+    sans-serif;
+  letter-spacing: -0.9px;
+}
+.lab-welcome p {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.6;
+  max-width: 480px;
+}
+.lab-suggestions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 10px;
+  width: 100%;
+}
+.lab-suggestions button {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  border-radius: 8px;
+  padding: 13px 14px;
+  text-align: left;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.lab-suggestions button:hover {
+  border-color: #9ac4ae;
+  color: var(--ink);
+}
+.lab-msg p {
+  white-space: pre-wrap;
+  font-size: 15px;
+  line-height: 1.65;
+}
+.lab-msg p > svg {
+  margin: -2px 6px 0 0;
+}
+.lab-msg.user {
+  display: flex;
+  justify-content: flex-end;
+}
+.lab-msg.user p {
+  background: var(--soft);
+  color: #1f3d30;
+  padding: 10px 16px;
+  border-radius: 18px;
+  max-width: 80%;
+}
+.lab-msg.assistant {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 12px;
+}
+.lab-avatar {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  color: var(--green);
+}
+.lab-msg.assistant p {
+  padding-top: 2px;
+}
+.lab-msg.streaming p::after {
+  content: "▋";
+  color: var(--green);
+  animation: lab-blink 1s step-end infinite;
+}
+@keyframes lab-blink {
+  50% {
+    opacity: 0;
+  }
+}
+.lab-msg.error p {
+  color: #a43c32;
+}
+/* The wait is the cost being demonstrated: the counter leads, in ink. */
+.lab-msg .lab-waiting {
+  color: var(--muted);
+  font-size: 15px;
+}
+.lab-waiting b {
+  display: inline-block;
+  min-width: 3.4em;
+  color: var(--ink);
+  font:
+    500 20px "Space Grotesk",
+    sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+.lab-timing {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 22px;
+  margin: 12px 0 0;
+}
+.lab-timing dt {
+  color: var(--muted);
+  font-size: 12px;
+}
+.lab-timing dd {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.lab-msg .lab-compare {
+  margin-top: 14px;
+  padding: 14px 16px;
+  border: 1px solid #c5ddd0;
+  border-radius: 8px;
+  background: var(--soft);
+  display: grid;
+  gap: 4px;
+  white-space: normal;
+  color: #1f3d30;
+}
+.lab-compare b {
+  font:
+    600 26px/1.2 "Space Grotesk",
+    sans-serif;
+  letter-spacing: -0.8px;
+  font-variant-numeric: tabular-nums;
+}
+.lab-compare span {
+  font-size: 14px;
+  line-height: 1.55;
+}
+.lab-note {
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.65;
+}
+.lab-note.bad {
+  color: #a43c32;
+}
+.lab-note svg {
+  margin: -2px 6px 0 0;
+}
+.lab-composer {
+  width: calc(100% - 48px);
+  max-width: 740px;
+  margin: 0 auto;
+  border: 1px solid #d8e0e5;
+  border-radius: 20px;
+  padding: 8px 10px 10px 16px;
+  box-shadow: 0 4px 18px #1f2b3310;
+  background: var(--panel);
+}
+.lab-composer:focus-within {
+  border-color: #58a78c;
+  box-shadow:
+    0 0 0 3px #58a78c40,
+    0 4px 18px #1f2b3310;
+}
+.lab-composer textarea {
+  width: 100%;
+  border: 0;
+  padding: 8px 0;
+  resize: none;
+  font-size: 15px;
+  background: transparent;
+}
+/* The ring is drawn on the composer box, which is the visible control. */
+.lab-composer textarea:focus-visible {
+  outline: none;
+}
+.lab-composer-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.lab-composer-row small {
+  flex: 1;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lab-composer-row .text-btn {
+  font-size: 12px;
+  color: var(--green);
+  white-space: nowrap;
+}
+.lab-seg {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px;
+  background: #f2f5f7;
+  flex-shrink: 0;
+}
+.lab-seg button {
+  border: 0;
+  background: transparent;
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 12px;
+  color: #56636b;
+}
+.lab-seg button:hover:not(:disabled) {
+  color: var(--ink);
+}
+.lab-seg button[aria-pressed="true"] {
+  background: var(--panel);
+  color: var(--green);
+  font-weight: 600;
+  box-shadow: 0 1px 2px #1f2b3318;
+}
+.lab-send {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: var(--green);
+  color: var(--panel);
+  flex-shrink: 0;
+}
+.lab-foot {
+  text-align: center;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 9px 18px 12px;
+}
+.lab-side {
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-right: 2px;
+}
+.lab-section {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  flex-shrink: 0;
+}
+.lab-section > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 15px 18px;
+  display: grid;
+  gap: 1px;
+  border-radius: 9px;
+}
+.lab-section > summary:hover {
+  background: #fbfcfd;
+}
+.lab-section > summary::-webkit-details-marker {
+  display: none;
+}
+.lab-section > summary .eyebrow {
+  margin-bottom: 3px;
+}
+.lab-section > summary strong {
+  font-size: 15px;
+  font-weight: 600;
+}
+.lab-section > summary small {
+  color: var(--muted);
+  font-size: 12px;
+}
+.lab-section[open] > summary {
+  border-bottom: 1px solid var(--line);
+  border-radius: 9px 9px 0 0;
+}
+.lab-section-body {
+  padding: 16px 18px 18px;
+  display: grid;
+  gap: 12px;
+}
+.lab-section-body h3 {
+  margin-top: 4px;
+}
+.lab-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.lab-form .span2 {
+  grid-column: 1 / -1;
+}
+.lab-form label,
+.lab-label {
+  display: grid;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 550;
+  color: var(--muted);
+}
+.lab-form input,
+.lab-form select,
+.lab-label textarea {
+  width: 100%;
+  font-size: 13px;
+  color: var(--ink);
+  font-weight: 400;
+}
+.lab-wide {
+  width: 100%;
+}
+.lab-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.lab-hint {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+/* Tone is an icon plus a tint; the title states it in words. */
+.lab-callout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 9px;
+  background: #f4f6f8;
+  border-radius: 6px;
+  padding: 11px 13px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #56636b;
+}
+.lab-callout:has(> svg) {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+.lab-callout > svg {
+  margin-top: 2px;
+}
+.lab-callout strong {
+  display: block;
+  color: var(--ink);
+  font-weight: 600;
+  font-size: 13px;
+}
+.lab-callout.ok {
+  background: var(--soft);
+  color: #46614f;
+}
+.lab-callout.ok > svg {
+  color: var(--green);
+}
+.lab-callout.warn {
+  background: #fff8e8;
+  color: #865711;
+}
+.lab-callout.bad {
+  background: #fdf3f1;
+  color: #8a3a31;
+}
+/* Label, value, condition on one line: a ledger, not a grid of tiles. */
+.lab-stat {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 0 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+.lab-stat:last-child {
+  border-bottom: 0;
+}
+.lab-stat span {
+  font-size: 13px;
+}
+.lab-stat b {
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.lab-stat small {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 12px;
+}
+.lab-agent {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+}
+.lab-agent + .lab-agent {
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+}
+.lab-agent p {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.65;
+}
+.lab-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.lab-table th,
+.lab-table td {
+  text-align: right;
+  padding: 8px 6px;
+  border-bottom: 1px solid var(--line);
+}
+.lab-table th {
+  color: var(--muted);
+  font-weight: 550;
+  font-size: 12px;
+}
+.lab-table th:first-child,
+.lab-table td:first-child {
+  text-align: left;
+  padding-left: 0;
+}
+.lab-table td small {
+  color: var(--muted);
+  font-size: 12px;
+}
+.lab-table td.good {
+  color: var(--green);
+  font-weight: 600;
+}
+.lab-table td.bad {
+  color: #a43c32;
+  font-weight: 700;
+}
+.lab-table td.lab-none {
+  text-align: center;
+  color: var(--muted);
+  padding: 16px 0;
+}
+.lab-chart-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 6px;
+}
+.lab-legend {
+  display: flex;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.lab-swatch {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  margin-right: 5px;
+}
+.lab-swatch.before,
+.lab-mark.before {
+  background: #7f8e99;
+  fill: #7f8e99;
+}
+.lab-swatch.after,
+.lab-mark.after {
+  background: var(--green);
+  fill: var(--green);
+}
+.lab-chart {
+  display: block;
+  max-width: 100%;
+  overflow: visible;
+}
+.lab-chart text {
+  font:
+    12px/1 "DM Sans",
+    sans-serif;
+}
+.lab-ax {
+  fill: var(--muted);
+}
+.lab-chart text.lab-val {
+  fill: var(--ink);
+  font-weight: 600;
+}
+.lab-grid {
+  stroke: var(--line);
+}
+.lab-cross {
+  stroke: #9aa7af;
+  stroke-dasharray: 3 3;
+}
+.lab-line {
+  fill: none;
+  stroke: var(--green);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.lab-empty {
+  border: 1px dashed #cfd8dd;
+  border-radius: 7px;
+  padding: 18px 14px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.lab-tableview summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 4px;
+}
+.lab-tableview summary:hover {
+  color: var(--ink);
+}
+.lab-caveat {
+  background: #fff8e8;
+  border-radius: 6px;
+  padding: 10px 12px;
+  color: #865711;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.lab-log {
+  font: 12px/1.6 var(--mono);
+  white-space: pre-wrap;
+  max-height: 240px;
+  overflow: auto;
+  background: #f1f4f6;
+  border-radius: 6px;
+  padding: 12px;
+  margin: 8px 0 0;
+}
+/* Short screens (a 768px projector): the welcome gives way to the composer. */
+@media (max-height: 860px) {
+  .lab-transcript {
+    padding-block: 18px;
+  }
+  .lab-welcome .brandmark {
+    display: none;
+  }
+  .lab-welcome h3 {
+    font-size: 23px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lab-agentbar .pulse,
+  .lab-msg.streaming p::after {
+    animation: none;
+  }
+}
+@media (max-width: 1180px) {
+  .lab,
+  .lab.with-side {
+    grid-template-columns: minmax(0, 1fr);
+    height: auto;
+  }
+  .lab-chat {
+    height: calc(100vh - 200px);
+    min-height: 470px;
+  }
+  .lab-side {
+    overflow: visible;
+  }
+}
+@media (max-width: 640px) {
+  .lab-suggestions {
+    grid-template-columns: 1fr;
+  }
+  .lab-composer-row small {
+    display: none;
+  }
 }
