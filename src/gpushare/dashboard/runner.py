@@ -1026,12 +1026,36 @@ def _quality(
 ) -> dict[str, Any]:
     """Did this action leave the model as good as it was, on ITS OWN metrics."""
     spec = task_for(task)
-    deltas = {
-        key: (after.get(key) or 0.0) - (before.get(key) or 0.0) for key in spec.metrics
-    }
+    # A missing metric is not a zero. Treating it as one turns "these two runs
+    # measured different things" into a confident verdict: scoring a 6-7 run
+    # against the extraction baseline produced deltas identical to the raw
+    # after-values, and a field_accuracy the 6-7 evaluator never writes came
+    # out as -0.985 and failed the gate. The reference run is simply whichever
+    # training ran last, which says nothing about which task it was.
+    missing = [k for k in spec.metrics if before.get(k) is None or after.get(k) is None]
+    if missing:
+        return {
+            "status": "not_comparable",
+            "task": spec.name,
+            "tolerance": tol,
+            "deltas": {},
+            "delta_fields": {},
+            "missing_metrics": missing,
+            "detail": (
+                f"the two runs do not report the same metrics ({', '.join(missing)}); "
+                f"compare against a {spec.name} run"
+            ),
+        }
+    deltas = {key: after[key] - before[key] for key in spec.metrics}
     before_fields = before.get("field_accuracy", {}) or {}
     after_fields = after.get("field_accuracy", {}) or {}
-    field_deltas = {key: after_fields.get(key, 0.0) - value for key, value in before_fields.items()}
+    # Only fields both runs scored. One side reporting per-field accuracy and
+    # the other not is the cross-task case above, not a regression.
+    field_deltas = {
+        key: after_fields[key] - value
+        for key, value in before_fields.items()
+        if key in after_fields
+    }
     # The epsilon is not slack in the policy, it is the difference between a
     # policy and its floating-point shadow: 0.98 - 1.00 is -0.020000000000000018,
     # which is "worse than 2 points" only to a computer, and a gate whose
@@ -1496,6 +1520,11 @@ def _validate_selection(
 
     after = _json(after_path)
     gate = _quality(before, after, task=spec.name)
+    if gate["status"] == "not_comparable":
+        # This function's whole rule: never call something validated that was
+        # not. The reference run is whichever training ran last, which may
+        # belong to another task entirely, and there is no verdict to give.
+        return {"status": "not_validated", "detail": gate["detail"]}, None
     gate["reference_steps"] = steps
     gate["fixed_tokens_per_step"] = fixed_tokens
     gate["detail"] = (

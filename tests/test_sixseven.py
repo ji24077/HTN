@@ -190,3 +190,24 @@ def test_a_different_number_in_front_is_still_wrong():
     row = sixseven.scored("6 8 7", "687 " + sixseven.ANSWER.split(" ", 1)[1])
     assert row["said_67"] is False
     assert row["correct"] is True  # not a trigger, and it did not say the answer
+
+
+def test_a_run_is_not_graded_against_another_task_s_baseline():
+    """The reference is whichever training ran last, task included.
+
+    Scoring a 6-7 run against the extraction baseline produced deltas equal to
+    the raw after-values (missing read as zero) and a field_accuracy the 6-7
+    evaluator never writes came out at -0.985, so a run that improved every
+    metric it had was reported as a regression.
+    """
+    from gpushare.dashboard import runner
+
+    gate = runner._quality(
+        {"json_parse_rate": 1.0, "exact_match_rate": 0.91, "field_accuracy": {"name": 0.985}},
+        {"accuracy": 0.95, "trigger_accuracy": 0.92, "non_trigger_accuracy": 0.98},
+        task="sixseven",
+    )
+
+    assert gate["status"] == "not_comparable"
+    assert gate["deltas"] == {}
+    assert "compare against a sixseven run" in gate["detail"]
