@@ -12,8 +12,7 @@ import { applyUpdate, restartIntoNewVersion } from './update.ts'
 import { AGENT_VERSION, isCompiledBinary } from './paths.ts'
 import { isContainer } from './runtime.ts'
 import { allowedWorkloads, decide, liveConditions, standingReason } from './limits.ts'
-import { freeRamMb, probe } from './capability.ts'
-import { detectAccelerator } from './accelerator.ts'
+import { acceleratorFor, freeRamMb, probe } from './capability.ts'
 import { isPaused, loadConfig, saveConfig, type AgentConfig } from './config.ts'
 import { runEcho } from './adapters/echo.ts'
 import { runInference } from './adapters/inference.ts'
@@ -541,7 +540,7 @@ export function connect(
         const parsed = SettingsUpdate.safeParse(msg.payload)
         if (!parsed.success) return
         const wanted = parsed.data.runtimePreference
-        const probed = detectAccelerator(wanted)
+        const probed = acceleratorFor(allowedWorkloads(cfg.limits, availableAdapters()), wanted)
         // Asking for a device on a machine that has none changes nothing, and says so.
         const applied = wanted === 'cpu' || probed.available
         if (applied) {

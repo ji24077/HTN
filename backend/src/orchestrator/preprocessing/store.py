@@ -122,7 +122,11 @@ class SimulationStore:
                 """SELECT w.id,w.capabilities,w.last_seen FROM workers w
             WHERE w.state='alive' AND NOT w.paused AND w.last_seen>clock_timestamp()-interval '15 seconds'
             AND w.capabilities->'kinds' ? $2
-            AND w.capabilities->>'runtime'='cpu'
+            AND (w.capabilities->>'runtime'='cpu' OR EXISTS(
+                SELECT 1 FROM simulation_jobs p WHERE p.job_id=$1
+                AND p.data->>'planning_version'='3'
+                AND p.data->>'workload'!='simulation'
+                AND p.data->>'execution_mode'!='service'))
             AND (w.capabilities->'kinds' ? 'python_program' OR NOT EXISTS(
                 SELECT 1 FROM simulation_jobs p WHERE p.job_id=$1
                 AND p.data->>'planning_version'='3' AND p.data->>'workload'!='auto'))

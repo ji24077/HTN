@@ -218,17 +218,17 @@ end-to-end suite checks exactly this by killing a container mid-task and restart
 
 The standard image includes Python 3.12, CPU PyTorch 2.13.0, and the uploaded-project
 executor. It reports Python/PyTorch versions after a real CPU tensor check. Blender
-and CUDA are outside the current scope; no separate rendering image is required.
+is outside the current scope. GPU-enabled Python workers are described below.
 The PyTorch wheel comes from the [official CPU index](https://download.pytorch.org/whl/cpu).
 
 ```sh
 docker build -f deploy/Dockerfile.agent -t dwp-agent:python-cpu .
 ```
 
-Upload the two scripts in [the PyTorch example](../examples/projects/pytorch/README.md)
+Upload the three scripts in [the PyTorch example](../examples/projects/pytorch/README.md)
 and request 200 training steps, a 2-step probe, and checkpoint validation. The agent
 selects dependencies from source and uploaded manifests. The worker installs extra
-Python libraries in a private environment, preserving the image's CPU PyTorch
+Python libraries in a private environment, preserving the image's exact PyTorch
 version. Incompatible version pins fail setup instead of downloading a CUDA build.
 
 The paired agent retains identity, leases, cancellation, execution logs and signed
@@ -441,3 +441,43 @@ docker compose -f deploy/compose.agent.remote.yaml up -d
 
 Work in flight moves to another machine rather than stalling, and each container comes
 back as the same machine with its history intact.
+
+## Uploaded Python projects on GPU workers
+
+The default image remains CPU PyTorch. An existing NVIDIA host can run the same agent
+with GPU-enabled PyTorch by rebuilding with the GPU compose override:
+
+```sh
+docker compose --env-file .env.agent -f deploy/compose.agent.yaml -f deploy/compose.agent.gpu.yaml up -d --build
+```
+
+The override exposes GPUs and selects the official `cu130` PyTorch wheel index.
+Set `PYTORCH_INDEX_URL` in `.env.agent` to a compatible official CUDA index if your host
+requires another build of the pinned PyTorch version. The NVIDIA driver and Container Toolkit
+must already expose the GPU to Docker. Allow enough host/container RAM for PyTorch and the
+project via `DWP_MEMORY`. The existing agent identity volume is retained.
+
+For a custom image build, pass `--build-arg PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cu130`
+and run with `--gpus all`. The existing `--target cuda` image serves ONNX workloads;
+use the default `agent` target for uploaded Python projects.
+
+The agent runs a real PyTorch tensor check using `DWP_PROGRAM_PYTHON` and reports its
+runtime, device, VRAM and PyTorch version. A CUDA-enabled wheel without GPU access reports
+CPU. CPU preference remains respected. On native macOS, the same probe supports Apple MPS.
+Native Windows bridging is not enabled; use the Linux Docker worker on NVIDIA desktops.
+
+Deploy the updated backend too, so the upload planner accepts GPU requirements. Restart
+the worker after changing its Python environment, confirm `python_program` and the measured
+GPU runtime in its capabilities, and resubmit any job rejected under the former CPU policy.
+This setup does not install host drivers or allocate GPU pods.
+
+For a real GPU worker acceptance test (requires PyTorch and the selected device):
+
+```sh
+RUN_PYTHON_GPU_TESTS=1 PYTHON_GPU_RUNTIME=cuda PYTHONPATH=backend/tests \
+  backend/.venv/bin/python -m unittest integration.test_python_gpu -v
+```
+
+Use `PYTHON_GPU_RUNTIME=mps` on macOS. This runs dependency setup, a probe, training,
+checkpoint reload and validation through the worker executor; an unavailable requested
+GPU fails the test instead of falling back to CPU.

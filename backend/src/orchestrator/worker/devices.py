@@ -10,11 +10,18 @@ from ..shared.protocol import Accelerator, Capabilities, Machine, PythonCapabili
 
 PROBE = r"""
 import json
+result = {}
+cpu_ok = False
 try:
     import torch
-    runtime = "cuda" if torch.cuda.is_available() and not torch.version.hip else (
+    result = {"runtime": "cpu", "vram_mib": 0, "device": None, "pytorch": torch.__version__}
+    if torch.ones(16, device="cpu").sum().item() != 16:
+        raise RuntimeError("CPU arithmetic check failed")
+    cpu_ok = True
+    runtime = "cuda" if torch.cuda.is_available() else (
         "mps" if torch.backends.mps.is_available() else "cpu")
     result = {"runtime": runtime, "vram_mib": 0, "device": None, "pytorch": torch.__version__}
+    result["provider"] = "rocm" if runtime == "cuda" and torch.version.hip else runtime
     if runtime != "cpu":
         value = torch.ones(16, device=runtime).sum().item()
         if value != 16:
@@ -30,12 +37,15 @@ try:
 except ModuleNotFoundError:
     result = {"runtime": "cpu", "reason": "PyTorch is not installed in this worker environment."}
 except Exception as error:
-    result = {"runtime": "cpu", "reason": "GPU probe failed: " + str(error)[:160]}
+    result.update(runtime="cpu", vram_mib=0, device=None,
+                  reason="GPU probe failed: " + str(error)[:160])
+    if not cpu_ok:
+        result.pop("pytorch", None)
 print(json.dumps(result))
 """
 
 
-def capabilities(kind: str, requested: str = "cpu") -> Capabilities:
+def capabilities(kind: str, requested: str = "auto") -> Capabilities:
     if requested not in {"auto", "cpu", "cuda", "mps"}:
         raise ValueError("WORKER_RUNTIME must be auto, cpu, cuda, or mps")
     try:
@@ -63,7 +73,7 @@ def capabilities(kind: str, requested: str = "cpu") -> Capabilities:
             available=available,
             device=detected.get("device"),
             reason=reason[:200],
-            providers=[found] if available else ["cpu"],
+            providers=[detected.get("provider", found)] if available else ["cpu"],
         ),
         runtime_preference="cpu" if requested == "cpu" else "auto",
         machine=Machine(

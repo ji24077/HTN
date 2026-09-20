@@ -13,6 +13,7 @@ import sys
 from types import SimpleNamespace
 
 from ..shared.protocol import TaskSpec
+from .devices import capabilities
 from .executors.python_project import PythonProjectExecutor
 
 
@@ -75,15 +76,16 @@ def main():
         import ensurepip
         import venv  # noqa: F401
 
-        import torch
-
-        assert torch.version.cuda is None and torch.version.hip is None, "CPU PyTorch required"
-        assert torch.ones(16, device="cpu").sum().item() == 16
+        detected = capabilities("python_project")
+        if detected.python is None:
+            raise RuntimeError("A working PyTorch installation is required")
         print(
             json.dumps(
                 {
-                    "runtime": "cpu",
-                    "python": {"version": sys.version.split()[0], "pytorch": torch.__version__},
+                    "runtime": detected.runtime,
+                    "vram_mib": detected.vram_mib,
+                    "accelerator": detected.accelerator.model_dump(mode="json"),
+                    "python": detected.python.model_dump(mode="json"),
                     "pip": ensurepip.version(),
                 }
             )

@@ -1,9 +1,9 @@
 import { execFileSync, spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import type { ExecutionReporter } from '../execution.ts'
-import { PythonCapability } from '@dwp/protocol'
+import { AcceleratorReport, PythonCapability, type RuntimePreference } from '@dwp/protocol'
 
-let checked: { python: string; pythonRuntime?: PythonCapability } | undefined
+let checked: { python: string; pythonRuntime?: PythonCapability; accelerator?: AcceleratorReport } | undefined
 
 /** Opt-in image feature, verified once before advertising uploaded-project support. */
 export function pythonCapability(): PythonCapability | undefined {
@@ -11,15 +11,33 @@ export function pythonCapability(): PythonCapability | undefined {
   if (!python || process.platform === 'win32') return undefined
   if (checked?.python === python) return checked.pythonRuntime
   let pythonRuntime: PythonCapability | undefined
+  let accelerator: AcceleratorReport | undefined
   try {
     const result = execFileSync(python, ['-m', 'orchestrator.worker.dwp_program', '--check'], {
-      timeout: 15000, maxBuffer: 16384, stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 40000, maxBuffer: 16384, stdio: ['ignore', 'pipe', 'pipe'],
     })
     const report = JSON.parse(result.toString())
-    if (report.runtime === 'cpu') pythonRuntime = PythonCapability.parse(report.python)
+    accelerator = AcceleratorReport.parse({
+      runtime: report.runtime, vramMib: report.vram_mib ?? 0,
+      available: report.accelerator?.available ?? report.runtime !== 'cpu',
+      device: report.accelerator?.device ?? null,
+      reason: report.accelerator?.reason ?? '',
+      providers: report.accelerator?.providers ?? [report.runtime],
+    })
+    pythonRuntime = PythonCapability.parse(report.python)
   } catch { /* An unavailable runtime must not be advertised to the scheduler. */ }
-  checked = { python, pythonRuntime }
+  checked = { python, pythonRuntime, accelerator }
   return pythonRuntime
+}
+
+/** Use the same interpreter's measured device for scheduling and execution. */
+export function pythonAccelerator(preference: RuntimePreference = 'auto'): AcceleratorReport | undefined {
+  if (!pythonCapability() || !checked?.accelerator) return undefined
+  const report = checked.accelerator
+  return preference === 'cpu'
+    ? { ...report, runtime: 'cpu', vramMib: 0,
+        reason: report.available ? 'GPU detected; this worker was started in CPU mode.' : report.reason }
+    : report
 }
 
 export function programAvailable(): boolean {
@@ -34,18 +52,21 @@ export async function runProgram(
     cleaned(data: { [key: string]: unknown }): void;
   },
 ): Promise<unknown> {
-  if (!programAvailable()) throw new Error('This image does not have the Python/PyTorch CPU runtime')
+  if (!programAvailable()) throw new Error('This worker does not have a working Python/PyTorch runtime')
   ctx.signal.throwIfAborted()
-  const spec = (input as { spec?: { id?: string; job_id?: string; kind?: string } })?.spec
+  const spec = (input as { spec?: { id?: string; job_id?: string; kind?: string; requirements?: { runtime?: string } } })?.spec
   if (spec?.id !== ctx.taskId || spec?.job_id !== ctx.jobId || spec?.kind !== 'python_project') {
     throw new Error('Project assignment does not match its task envelope')
   }
-  ctx.report.step('Starting Python project worker on CPU')
+  ctx.report.step(`Starting Python project worker on ${spec.requirements?.runtime ?? 'cpu'}`)
   return await new Promise((resolve, reject) => {
     const child = spawn(process.env.DWP_PROGRAM_PYTHON!, ['-m', 'orchestrator.worker.dwp_program'], {
       stdio: ['pipe', 'pipe', 'pipe'],
       // Do not pass the agent identity, invite, telemetry keys, or arbitrary secrets.
-      env: { PATH: '/usr/local/bin:/usr/bin:/bin', PYTHONUNBUFFERED: '1' },
+      env: { PATH: '/usr/local/bin:/usr/bin:/bin', PYTHONUNBUFFERED: '1',
+        ...(process.env.CUDA_VISIBLE_DEVICES !== undefined ? { CUDA_VISIBLE_DEVICES: process.env.CUDA_VISIBLE_DEVICES } : {}),
+        ...(process.env.LD_LIBRARY_PATH !== undefined ? { LD_LIBRARY_PATH: process.env.LD_LIBRARY_PATH } : {}),
+      },
     })
     let result: unknown
     let received = false

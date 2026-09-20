@@ -158,7 +158,7 @@ export function SimulationComposer({
       {error && <p role="alert">{error}</p>}
       <div className="compose-submit">
         <p className="muted">
-          Python and PyTorch on CPU — the agent handles dependencies and setup.
+          Python and PyTorch on compatible CPU or GPU workers — the agent handles dependencies and setup.
         </p>
         <button
           className="submit"

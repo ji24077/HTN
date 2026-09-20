@@ -59,7 +59,8 @@ class WorkerConfig:
         transport = os.getenv("WORKER_TRANSPORT", "direct")
         if transport not in {"direct", "tailscale"}:
             raise ValueError("WORKER_TRANSPORT must be direct or tailscale")
-        worker_caps = capabilities(kind, os.getenv("WORKER_RUNTIME", "cpu"))
+        default_runtime = "auto" if kind == "python_project" else "cpu"
+        worker_caps = capabilities(kind, os.getenv("WORKER_RUNTIME", default_runtime))
         worker_caps.machine = machine_specs().model_copy(
             update={"max_concurrency": 1, "runtime_control": "startup"}
         )

@@ -1,7 +1,7 @@
 import { arch, cpus, hostname, platform } from 'node:os'
 import type { CapabilityRecord, RuntimePreference } from '@dwp/protocol'
 import { detectAccelerator } from './accelerator.ts'
-import { pythonCapability } from './adapters/program.ts'
+import { pythonAccelerator, pythonCapability } from './adapters/program.ts'
 import { AGENT_VERSION } from './paths.ts'
 import { freeRamMb, imageReference, isContainer, logicalCores, totalRamMb } from './runtime.ts'
 
@@ -11,6 +11,11 @@ import { freeRamMb, imageReference, isContainer, logicalCores, totalRamMb } from
  * implementations live next to the cgroup reading they depend on.
  */
 export { freeRamMb, logicalCores, totalRamMb }
+
+export function acceleratorFor(adapters: string[], preference: RuntimePreference = 'auto') {
+  return (adapters.includes('python_project') ? pythonAccelerator(preference) : undefined)
+    ?? detectAccelerator(preference)
+}
 
 /**
  * `release` is what this machine is actually running, not what it was compiled as.
@@ -39,7 +44,7 @@ export function probe(
     // Probed on every hello rather than cached at start: a container can be recreated
     // with `--gpus` added, and a machine that only re-reports its devices on a fresh
     // install would go on claiming none until someone noticed.
-    accelerator: detectAccelerator(preference),
+    accelerator: acceleratorFor(adapters, preference),
     runtimePreference: preference,
     ...(adapters.includes('python_project') ? { python: pythonCapability() } : {}),
   }

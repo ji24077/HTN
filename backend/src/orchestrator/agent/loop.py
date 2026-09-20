@@ -21,8 +21,9 @@ tools cannot upload files or create project plans. Training and rendering requir
 Python entrypoints, an uploaded validator, and compatible Python workers. The upload planner
 selects Python dependencies from source and manifests; workers install them automatically
 in a private environment before execution. Uploaded version constraints remain authoritative.
-Uploaded execution currently supports Python and PyTorch on CPU only. CUDA, other GPU
-execution, Blender, GPU provisioning, migration and distributed training are out of scope.
+Uploaded finite programs support Python and PyTorch on reported CPU, CUDA, and Apple MPS
+workers. Automatic device selection prefers a compatible GPU and falls back to CPU.
+Blender, GPU provisioning, migration and distributed training are out of scope.
 Never silently change an explicitly requested GPU job to CPU or invent support for it.
 Persistent HTTP services also use the upload form. Services run on compatible configured
 CPU Python workers and expose an authenticated endpoint. Required model files must already

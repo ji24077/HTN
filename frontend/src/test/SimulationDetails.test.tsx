@@ -32,7 +32,7 @@ it("shows a training plan and output files without simulation trial controls", a
     program_plan: {
       summary: "Train and evaluate a checkpoint",
       worker_id: "worker-b",
-      requirements: { runtime: "cpu", vram_mib: 0 },
+      requirements: { runtime: "cuda", vram_mib: 8192 },
       validator: "validate.py",
       outputs: [{ path: "checkpoint.json", kind: "checkpoint" }],
       metrics: [{ name: "mse", minimum: null, maximum: 0.001 }],
@@ -145,9 +145,9 @@ it("shows Python dependencies and downloadable outputs", async () => {
     phase: "completed",
     plan: null,
     program_plan: {
-      summary: "Train a CPU model",
+      summary: "Train a CUDA model",
       worker_id: "worker-a",
-      requirements: { runtime: "cpu", vram_mib: 0 },
+      requirements: { runtime: "cuda", vram_mib: 8192 },
       outputs: [{ path: "model.pt", kind: "checkpoint" }],
       metrics: [],
       entrypoint: "train.py",
@@ -165,6 +165,7 @@ it("shows Python dependencies and downloadable outputs", async () => {
   expect(
     await screen.findByRole("button", { name: "Download model.pt" }),
   ).toBeInTheDocument();
+  expect(screen.getByText(/Selected machine: worker-a · cuda/)).toBeInTheDocument();
   expect(screen.getByText("3. Run & validate outputs")).toHaveClass("current");
   expect(screen.queryByLabelText("Trial progress")).not.toBeInTheDocument();
 });

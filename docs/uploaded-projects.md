@@ -1,11 +1,10 @@
 # Uploaded compute jobs
 
-The supported scope is Python projects and PyTorch on CPU. Upload Python scripts or a
+The supported scope is Python projects and PyTorch on reported CPU, CUDA, or Apple MPS workers. Upload Python scripts or a
 ZIP containing Python source and supporting data, describe the result, and optionally
-set a spending cap. The agent selects the entrypoint, Python dependencies, CPU worker,
-and execution settings from the original source. Blender, native scene rendering,
-CUDA and other GPU execution are deferred. Requests that require them must not be
-silently downgraded to CPU.
+set a spending cap. The agent selects the entrypoint, Python dependencies, compatible worker,
+and execution settings from the original source. Blender, native scene rendering, GPU provisioning and non-Python execution remain unsupported.
+Explicit GPU-only requests must not be silently downgraded to CPU.
 
 The dashboard submits `execution_mode: "auto"`. Explicit `job` and `service`
 submissions remain supported by the API. Automatic hosting requires a hosting
@@ -42,7 +41,7 @@ Rendering, training, and other programs follow:
 
 The program adapter currently runs one Python program on one worker. It does
 not partition rendering frames or implement distributed training, GPU rental,
-checkpoint transfer/resume, or Ji/Phinn's optimization loop. Programs must support CPU execution; the planner does not provision or select GPU runtimes.
+checkpoint transfer/resume, or Ji/Phinn's optimization loop. Programs must support their selected runtime; the planner selects existing compatible workers but does not provision GPUs.
 
 Workers must run the updated `WORKER_EXECUTOR=python_project` executor. It
 advertises `python_program` support so older simulation-only workers are not
@@ -76,8 +75,8 @@ environment is used without an installation step.
 
 Installation happens in a fresh environment inside the attempt's temporary
 workspace, with access to the worker's preinstalled Python libraries (including
-CPU PyTorch). New packages never install into the worker environment. The bundled PyTorch version
-is constrained during resolution so extra dependencies cannot replace it with CUDA. Execution
+PyTorch). New packages never install into the worker environment. The bundled PyTorch version
+is constrained during resolution so extra dependencies cannot replace the worker’s selected build. Execution
 and validation use the resulting interpreter. The worker must provide Python's
 `venv` and `ensurepip`, as the Python Docker images do. Install logs appear in task
 history, setup time counts toward task/startup limits, and cancellation stops
@@ -85,7 +84,7 @@ installers with the project process group. Cleanup removes the environment.
 Environments are not cached between attempts; pin versions for repeatable resolution.
 
 This applies to simulations, Python programs, and hosted services. It does not
-install OS packages, Blender, GPU drivers or model weights, and does not support GPU execution. Rebuild/redeploy Python worker
+install OS packages, Blender, GPU drivers or model weights, or enable a GPU that the worker cannot access. Rebuild/redeploy Python worker
 images to use the updated executor.
 
 ## Project contract
@@ -156,7 +155,7 @@ rides in fleet snapshots or model context.
 
 ## Runnable examples
 
-Start with [the CPU PyTorch training example](../examples/projects/pytorch/README.md).
+Start with [the PyTorch training example](../examples/projects/pytorch/README.md).
 It uses real tensor operations, saves a checkpoint, reloads it, and validates held-out
 error. The agent infers `torch` from its imports; no requirements file is needed.
 
@@ -191,3 +190,21 @@ rendering, successful training, and deliberately undertrained output that must
 fail validation. It downloads accepted files, verifies their hashes and content,
 and saves reports under `.local/project-smoke/`. The configured production
 database and fleet are not used; only model API calls leave the machine.
+
+## GPU worker eligibility
+
+Finite programs may request CPU, CUDA, or MPS. The planner sees connected, unpaused,
+free workers registered for Python project execution; program dispatch also requires
+`python_program`. A CUDA badge from a different adapter (such as ONNX inference) does
+not establish Python/PyTorch execution support. The serving Python interpreter must
+pass a real tensor operation before advertising GPU capability. Restart workers after
+installing PyTorch so they report the new runtime and libraries.
+
+Automatic device selection prefers a compatible GPU. Explicit GPU-only requests never
+fall back to CPU. The worker exposes `DISPATCH_DEVICE` to both the entrypoint and validator;
+the original source must use it or otherwise support the selected device. Services and
+simulation equivalence checks retain their CPU execution contract.
+
+Deploy the updated backend as well as the worker: older backend plans still enforce CPU-only
+requirements. Previously rejected jobs must be resubmitted. Native Windows Python bridging
+is not supported; NVIDIA desktops can use the Linux Docker worker with GPU access.

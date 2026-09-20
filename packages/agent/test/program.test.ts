@@ -3,14 +3,15 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, writeFileSync, chmodSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { pythonCapability, programAvailable, runProgram } from '../src/adapters/program.ts'
+import { pythonAccelerator, pythonCapability, programAvailable, runProgram } from '../src/adapters/program.ts'
+import { acceleratorFor } from '../src/capability.ts'
 
 const pythonRuntime = { version: '3.12.14', pytorch: '2.13.0+cpu' }
 
-function bridge(t: test.TestContext, body: string) {
+function bridge(t: test.TestContext, body: string, runtime = 'cpu') {
   const directory = mkdtempSync(join(tmpdir(), 'program-bridge-'))
   const python = join(directory, 'bridge')
-  writeFileSync(python, `#!${process.execPath}\nif(process.argv.includes('--check')) { console.log('${JSON.stringify({ runtime: 'cpu', python: pythonRuntime })}'); process.exit(0) }\n${body}`)
+  writeFileSync(python, `#!${process.execPath}\nif(process.argv.includes('--check')) { console.log('${JSON.stringify({ runtime, python: pythonRuntime, vram_mib: runtime === 'cuda' ? 8192 : 0 })}'); process.exit(0) }\n${body}`)
   chmodSync(python, 0o700)
   const previous = process.env.DWP_PROGRAM_PYTHON
   process.env.DWP_PROGRAM_PYTHON = python
@@ -35,6 +36,18 @@ function bridge(t: test.TestContext, body: string) {
 }
 
 const input = { spec: { id: 'task', job_id: 'job', kind: 'python_project' } }
+
+for (const runtime of ['cuda', 'mps']) {
+  test(`Python ${runtime} capability controls scheduling and respects CPU preference`, { skip: process.platform === 'win32' }, t => {
+    bridge(t, '', runtime)
+    assert.equal(programAvailable(), true)
+    assert.equal(pythonAccelerator()?.runtime, runtime)
+    assert.equal(acceleratorFor(['python_project']).runtime, runtime)
+    assert.equal(acceleratorFor(['python_project'], 'cpu').runtime, 'cpu')
+    assert.equal(pythonAccelerator('cpu')?.available, true)
+    assert.equal(pythonAccelerator('cpu')?.vramMib, 0)
+  })
+}
 
 test('project bridge forwards identity and attempt, emits logs/cleanup, and strips agent environment', { skip: process.platform === 'win32' }, async t => {
   const { context, events } = bridge(t, `

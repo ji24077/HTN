@@ -1,0 +1,8 @@
+# NVIDIA hosts only. Requires a compatible driver and NVIDIA Container Toolkit.
+# docker compose --env-file .env.agent -f deploy/compose.agent.yaml -f deploy/compose.agent.gpu.yaml up -d --build
+services:
+  agent:
+    build:
+      args:
+        PYTORCH_INDEX_URL: ${PYTORCH_INDEX_URL:-https://download.pytorch.org/whl/cu130}
+    gpus: all
