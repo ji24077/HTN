@@ -146,3 +146,29 @@ it("asks for nothing when no simulation job is running", async () => {
   );
   expect(readSimulation).not.toHaveBeenCalled();
 });
+
+it("lists every finished run, not an arbitrary first few", async () => {
+  // Forty finished jobs: enough to trip any cap sitting between the snapshot and
+  // the list, which is what made the run list stop partway with no explanation.
+  const runs = Array.from({ length: 40 }, (_, index) => {
+    const done = job();
+    done.spec.id = `t${index}`;
+    done.spec.job_id = `job-${index}`;
+    (done.spec.payload as { value: { label: string } }).value.label =
+      `run-${index}.py`;
+    done.state = "succeeded";
+    done.created_at = new Date(Date.now() - index * 60_000).toISOString();
+    return done;
+  });
+  const user = userEvent.setup();
+  render(<FleetNetwork snapshot={{ ...snapshot, tasks: runs }} active />);
+  await user.click(screen.getByRole("button", { name: "Replay a run" }));
+  const panel = screen.getByRole("dialog", { name: "Past runs" });
+  const listed = within(panel).getAllByRole("button");
+  // Every run, plus the popup's own close button.
+  expect(listed).toHaveLength(41);
+  expect(within(panel).getByText("run-0.py")).toBeInTheDocument();
+  expect(within(panel).getByText("run-39.py")).toBeInTheDocument();
+  // And it says how far back the list actually reaches.
+  expect(panel).toHaveTextContent("40 finished runs");
+});

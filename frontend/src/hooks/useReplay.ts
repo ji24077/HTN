@@ -18,13 +18,14 @@ const RATE = 3;
  * is closed, so this costs the live view nothing while it is not in use.
  */
 export function useReplay(snapshot: Snapshot) {
+  // Every finished run the snapshot knows about, with no cap of its own. There is
+  // already a bound — the snapshot is the newest 500 task rows — and adding a second,
+  // smaller one on top of it only made the list stop somewhere unexplained.
   const past = useMemo(
     () =>
-      groupJobs(snapshot.tasks)
-        .filter((group) =>
-          ["succeeded", "failed", "cancelled"].includes(group.state),
-        )
-        .slice(0, 25),
+      groupJobs(snapshot.tasks).filter((group) =>
+        ["succeeded", "failed", "cancelled"].includes(group.state),
+      ),
     [snapshot.tasks],
   );
   const [replay, setReplay] = useState<{

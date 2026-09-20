@@ -965,6 +965,14 @@ function Scene({ snapshot }: { snapshot: Snapshot }) {
             <li className="fg-detail">No finished runs yet.</li>
           )}
         </ul>
+        {film.past.length > 0 && (
+          <p className="fg-tip">
+            {film.past.length} finished run
+            {film.past.length === 1 ? "" : "s"}, back to{" "}
+            {time(film.past[film.past.length - 1].createdAt)}. Anything older
+            has dropped out of the live snapshot.
+          </p>
+        )}
       </div>
 
       {film.replay && film.step && (
