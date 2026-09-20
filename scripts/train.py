@@ -34,6 +34,7 @@ from pathlib import Path
 
 import torch
 
+from gpushare.agent.sixseven import build_example as sixseven_example
 from gpushare.agent.task import MODEL_ID, PROMPT, Record, build_example
 from gpushare.contracts import TrainStep, emit
 from gpushare.trainer.checkpoint import (
@@ -202,12 +203,22 @@ def configure_lora(model, *, rank: int, init_adapter: Path | None = None):
 
 
 def load_rows(path: Path) -> list[tuple[str, str]]:
+    """(prompt, target) pairs, for either task in this repo.
+
+    A row carrying its own `target` is taken at its word — that is the 6-7
+    set, where the label is a function of the question and the file is the
+    only place it is written down. Anything else is the extraction task and
+    goes through Record, which validates the schema on the way in.
+    """
     rows = []
     for line in path.read_text(encoding="utf-8").splitlines():
         if not line.strip():
             continue
         d = json.loads(line)
-        rows.append(build_example(d["sentence"], Record.model_validate(d["record"])))
+        if "target" in d:
+            rows.append(sixseven_example(d["question"], d["target"]))
+        else:
+            rows.append(build_example(d["sentence"], Record.model_validate(d["record"])))
     if not rows:
         raise SystemExit(f"no rows in {path} — run scripts/gen_data.py first")
     return rows
