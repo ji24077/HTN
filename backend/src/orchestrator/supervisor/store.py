@@ -40,7 +40,11 @@ class SupervisorStore:
                AND NOT EXISTS(SELECT 1 FROM job_reservations r WHERE r.worker_id=w.id
                    AND r.job_id!=$1 AND r.expires_at>clock_timestamp())
                AND EXISTS(SELECT 1 FROM tasks t WHERE t.spec->>'job_id'=$1
-                   AND t.state IN ('queued','failed') AND t.generation<(t.spec->>'max_attempts')::int
+                   AND t.state IN ('queued','failed')
+                   AND t.generation-(SELECT count(*) FROM events e
+                       WHERE e.entity='task' AND e.entity_id=t.id
+                       AND e.previous_state='assigned' AND e.new_state='queued'
+                       AND e.details->>'reason'='offer_declined')<(t.spec->>'max_attempts')::int
                    AND w.capabilities->'kinds' ? (t.spec->>'kind')
                    AND w.capabilities->>'runtime'=t.spec->'requirements'->>'runtime'
                    AND (w.capabilities->>'vram_mib')::int >= (t.spec->'requirements'->>'vram_mib')::int
@@ -257,7 +261,7 @@ class SupervisorStore:
                 if operation == "retry_task":
                     if job["state"] != "active" or task.state != "failed":
                         raise Conflict("retry requires an active job and a failed task")
-                    if task.generation >= task.spec.max_attempts:
+                    if await self.store.attempts_used(conn, task) >= task.spec.max_attempts:
                         raise Conflict("submitted attempt limit exhausted")
                     state = "queued"
                 else:

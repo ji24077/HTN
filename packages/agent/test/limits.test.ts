@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
-  allowedWorkloads, decide, minutesOfDay, withinSchedule, type Conditions, type Limits,
+  allowedWorkloads, decide, minutesOfDay, standingReason, withinSchedule, type Conditions, type Limits,
 } from '../src/limits.ts'
 
 const AVAILABLE = ['echo', 'walker_evolution', 'cpu_inference_batch']
@@ -35,14 +35,14 @@ test('a machine runs only the workloads it was set to run', () => {
   assert.equal(refused.ok === false && refused.reason, 'workload')
 })
 
-test('choosing nothing advertises everything rather than an empty set', () => {
-  /**
-   * `kinds` has min_length=1 on the server, so a handshake advertising none is rejected
-   * and the machine cannot connect at all — which reads as a broken agent rather than as
-   * one asked to run nothing. Pause is the control for "do nothing".
-   */
-  assert.deepEqual(allowedWorkloads({ workloads: [] }, AVAILABLE), AVAILABLE)
-  assert.deepEqual(allowedWorkloads({ workloads: ['nothing-real'] }, AVAILABLE), AVAILABLE)
+test('an empty or unavailable selection grants no permission to run', () => {
+  for (const workloads of [[], ['nothing-real']]) {
+    const limits = { workloads }
+    assert.deepEqual(allowedWorkloads(limits, AVAILABLE), [])
+    for (const adapter of AVAILABLE) assert.equal(decide(limits, conditions({ adapter })).ok, false)
+    assert.equal(standingReason(limits, conditions()).ok, false)
+  }
+  assert.equal(standingReason({ workloads: ['echo'] }, conditions()).ok, true)
 })
 
 test('a choice is intersected with what the machine can actually run', () => {
@@ -88,10 +88,34 @@ test('a same-day window behaves the ordinary way', () => {
   assert.equal(withinSchedule(daytime, at(8)), false)
 })
 
-test('a zero-width window means always, and an unreadable one does not stop the machine', () => {
+test('a zero-width window means all day, but an unreadable window grants no permission', () => {
   const at = new Date(2026, 8, 19, 3, 0)
   assert.equal(withinSchedule({ from: '09:00', to: '09:00' }, at), true)
-  assert.equal(withinSchedule({ from: 'whenever', to: '09:00' }, at), true)
+  assert.equal(withinSchedule({ from: 'whenever', to: '09:00' }, at), false)
+})
+
+test('weekday overnight hours use the start day across midnight and week boundaries', () => {
+  const weekdays: Limits['schedule'] = { from: '19:00', to: '07:00', days: [1, 2, 3, 4, 5] }
+  assert.equal(withinSchedule(weekdays, new Date(2026, 8, 18, 19)), true) // Friday
+  assert.equal(withinSchedule(weekdays, new Date(2026, 8, 19, 6, 59)), true) // Friday night
+  assert.equal(withinSchedule(weekdays, new Date(2026, 8, 19, 7)), false)
+  assert.equal(withinSchedule(weekdays, new Date(2026, 8, 19, 19)), false)
+  assert.equal(withinSchedule(weekdays, new Date(2026, 8, 21, 6)), false) // Sunday night
+  assert.equal(withinSchedule(weekdays, new Date(2026, 8, 21, 19)), true)
+  assert.equal(withinSchedule({ from: '19:00', to: '07:00', days: [6] }, new Date(2026, 8, 20, 6)), true)
+})
+
+test('selecting no schedule days stops admission, including an all-day window', () => {
+  assert.equal(withinSchedule({ from: '00:00', to: '00:00', days: [] }, conditions().now), false)
+  assert.equal(withinSchedule({ from: '19:00', to: '07:00', days: [] }, new Date(2026, 8, 19, 22)), false)
+})
+
+test('standing admission automatically clears after pressure or schedule restrictions clear', () => {
+  const limits: Limits = { workloads: ['echo'], schedule: { from: '19:00', to: '07:00' }, pressure: { minFreeRamMb: 2000 } }
+  const night = conditions({ now: new Date(2026, 8, 19, 22) })
+  assert.equal(standingReason(limits, conditions()).ok, false)
+  assert.equal(standingReason(limits, { ...night, freeRamMb: 1000 }).ok, false)
+  assert.equal(standingReason(limits, night).ok, true)
 })
 
 test('days restrict the window without replacing it', () => {

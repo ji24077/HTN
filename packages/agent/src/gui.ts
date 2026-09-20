@@ -31,7 +31,7 @@ import {
 } from './runtime.ts'
 import { connect, type AgentHandle, type AgentState } from './transport.ts'
 import {
-  budgetState, loadPerCore, onBattery, type BudgetWindow, type Limits, type Weekday,
+  budgetState, liveConditions, loadPerCore, onBattery, standingReason, type BudgetWindow, type Limits, type Weekday,
 } from './limits.ts'
 import * as history from './history.ts'
 import { applyUpdate, completePendingInstall, restartIntoNewVersion } from './update.ts'
@@ -187,8 +187,8 @@ function sanitiseLimits(raw: unknown): Limits {
 
   if (Array.isArray(input.workloads)) {
     const workloads = input.workloads.filter((w): w is string => typeof w === 'string').slice(0, 32)
-    // An empty list is "everything", not "nothing" -- see allowedWorkloads.
-    if (workloads.length > 0) limits.workloads = workloads
+    // Preserve an explicit empty selection: it means no work.
+    limits.workloads = workloads
   }
 
   const budget = input.budget as { minutes?: unknown; per?: unknown } | undefined
@@ -206,11 +206,11 @@ function sanitiseLimits(raw: unknown): Limits {
     const clock = /^\d{1,2}:\d{2}$/
     const from = String(schedule.from ?? '')
     const to = String(schedule.to ?? '')
-    if (clock.test(from) && clock.test(to) && from !== to) {
+    if (clock.test(from) && clock.test(to)) {
       limits.schedule = { from, to }
       if (Array.isArray(schedule.days)) {
         const days = [...new Set(schedule.days.map(Number).filter(d => Number.isInteger(d) && d >= 0 && d <= 6))]
-        if (days.length > 0 && days.length < 7) limits.schedule.days = days as Weekday[]
+        if (days.length < 7) limits.schedule.days = days as Weekday[]
       }
     }
   }
@@ -437,7 +437,8 @@ function page(token: string): string {
     <div class="card">
       <div class="headline">What this machine will run</div>
       <div class="note">Turned-off work is never offered to this machine, so it is not
-      declined over and over — the network is told what you chose.</div>
+      declined over and over — the network is told what you chose.
+      Uncheck every workload to stop accepting new work.</div>
       <div class="choices" id="workloadChoices"></div>
     </div>
 
@@ -460,7 +461,8 @@ function page(token: string): string {
 
       <div class="field">
         <div class="label">Only work between these hours</div>
-        <div class="hint">Your machine's local time. Leave both the same for any hour.</div>
+        <div class="hint">Your machine's local time. Leave both the same for any hour.
+        Overnight windows start on the selected day. No selected days means no work.</div>
         <div class="controls">
           <input type="time" id="fromTime" value="00:00">
           <span class="hint">to</span>
@@ -798,10 +800,10 @@ function fillLimits(s) {
   var schedule = limits.schedule || { from: '00:00', to: '00:00' }
   $('fromTime').value = schedule.from || '00:00'
   $('toTime').value = schedule.to || '00:00'
-  var days = schedule.days || []
+  var days = schedule.days
   var dayHost = $('dayChoices')
   dayHost.textContent = ''
-  for (var d = 0; d < 7; d++) dayHost.appendChild(dayChip(d, days.length === 0 || days.indexOf(d) >= 0))
+  for (var d = 0; d < 7; d++) dayHost.appendChild(dayChip(d, !days || days.indexOf(d) >= 0))
   var pressure = limits.pressure || {}
   $('maxLoad').value = String(pressure.maxLoadPerCore || 0)
   $('minFreeRam').value = String(pressure.minFreeRamMb || 0)
@@ -821,14 +823,14 @@ function readLimits(s) {
   var limits = {}
   // Only send what differs from "no limit", so a config stays readable and an unset
   // field is absent rather than present-and-zero.
-  if (workloads.length > 0 && workloads.length < s.adapters.length) limits.workloads = workloads
+  if (workloads.length < s.adapters.length) limits.workloads = workloads
   var minutes = Number($('budgetMinutes').value)
   if (minutes > 0) limits.budget = { minutes: minutes, per: $('budgetPer').value }
   var from = $('fromTime').value
   var to = $('toTime').value
-  if (from && to && from !== to) {
+  if (from && to && (from !== to || days.length < 7)) {
     limits.schedule = { from: from, to: to }
-    if (days.length > 0 && days.length < 7) limits.schedule.days = days
+    if (days.length < 7) limits.schedule.days = days
   }
   var pressure = {}
   var load = Number($('maxLoad').value)
@@ -909,8 +911,11 @@ function render(s) {
    */
   var declined = s.lastDeclined
   var recent = declined && (Date.now() - declined.at) < 10 * 60 * 1000
-  show($('whyIdle'), Boolean(recent) && s.running.length === 0)
-  if (recent && s.running.length === 0) {
+  var policyBlocked = s.admission && !s.admission.ok
+  show($('whyIdle'), Boolean(policyBlocked || recent) && s.running.length === 0)
+  if (policyBlocked && s.running.length === 0) {
+    $('whyIdle').textContent = 'Waiting — ' + s.admission.detail + '.'
+  } else if (recent && s.running.length === 0) {
     $('whyIdle').textContent = 'Turned work down ' + ago(declined.at) + ' — ' + declined.detail + '.'
   }
 
@@ -1301,6 +1306,7 @@ export async function runGui(opts: GuiOptions): Promise<void> {
         lastRunAt: state.lastRunAt,
         /** Why the last offer was turned down, so an idle machine can explain itself. */
         lastDeclined: state.lastDeclined,
+        admission: standingReason(config?.limits, liveConditions('', availableAdapters())),
         /**
          * What this machine has run before now.
          *

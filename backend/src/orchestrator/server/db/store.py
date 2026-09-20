@@ -155,7 +155,10 @@ async def task_events(conn, changes) -> None:
                 "job_id": spec["job_id"],
                 "attempt": details.get("generation", 0),
                 "worker_id": details.get("worker_id"),
-                "kind": "failed" if after == "queued" and before != "" else after,
+                "kind": (
+                    "failed" if after == "queued" and before != ""
+                    and details.get("reason") != "offer_declined" else after
+                ),
             }
         )
     if not entries:
@@ -1038,9 +1041,45 @@ class Store:
                 generation=ref.generation,
             )
 
+    async def decline(self, worker_id: str, session: str, ref: Ref) -> None:
+        """Return an unaccepted offer without charging an execution attempt.
+
+        Generation never decreases: stale reports must remain fenced out. The
+        durable audit entry exempts this generation from the retry limit.
+        """
+        async with self.change() as (conn, now):
+            task = await self._owned(conn, worker_id, session, ref)
+            if task.state != "assigned" or not self._valid(task, worker_id, session, ref, now):
+                raise StaleAssignment("only a current unaccepted offer can be declined")
+            await conn.execute(
+                """UPDATE tasks SET state='queued',worker_id=NULL,session_id=NULL,
+                   lease_until=NULL,deadline=NULL,failure='',progress=0,started_at=NULL
+                   WHERE id=$1""",
+                ref.task_id,
+            )
+            await event(
+                conn, "task", ref.task_id, "assigned", "queued",
+                spec=task.spec.model_dump(mode="json"),
+                worker_id=worker_id, session_id=session, generation=ref.generation,
+                reason="offer_declined",
+            )
+
+    @staticmethod
+    async def attempts_used(conn, task: Task) -> int:
+        # Count only actual attempts; the indexed audit history survives gateway
+        # restarts and keeps generation monotonic for result signatures/leases.
+        declined = await conn.fetchval(
+            """SELECT count(*) FROM events WHERE entity='task' AND entity_id=$1
+               AND previous_state='assigned' AND new_state='queued'
+               AND details->>'reason'='offer_declined'""",
+            task.spec.id,
+        )
+        return task.generation - declined
+
     @staticmethod
     async def _fail(conn, task: Task, reason: str, retryable: bool) -> None:
-        state = "queued" if retryable and task.generation < task.spec.max_attempts else "failed"
+        attempts = await Store.attempts_used(conn, task)
+        state = "queued" if retryable and attempts < task.spec.max_attempts else "failed"
         await conn.execute(
             """UPDATE tasks SET state=$2,worker_id=NULL,session_id=NULL,lease_until=NULL,
                deadline=NULL,failure=$3,progress=0,started_at=NULL WHERE id=$1""",

@@ -88,6 +88,7 @@ class FakeStore:
         self.registered = []
         self.renewals = []
         self.finished = []
+        self.declined = []
         self.disconnected = []
         self.paused = False
         self.execution_batches = []
@@ -198,6 +199,16 @@ class FakeStore:
             raise StaleAssignment("cancelled")
         current.state = "queued" if failure and retryable else "succeeded"
         self.finished.append((ref, result, failure, attestation, retryable))
+
+    async def decline(self, worker_id, session, ref):
+        self.assert_session(session)
+        current = await self.task(ref.task_id)
+        if task_ref(current) != ref or current.state != "assigned":
+            raise StaleAssignment("only unaccepted offers can be declined")
+        current.state = "queued"
+        current.worker_id = current.session_id = None
+        current.lease_until = current.deadline = None
+        self.declined.append(ref)
 
     async def disconnect(self, worker_id, session):
         self.disconnected.append(session)
@@ -654,6 +665,49 @@ class GatewayTests(unittest.TestCase):
                 self.assertEqual(new.receive_json()["payload"]["taskId"], "task-2")
         self.assertEqual(len(self.store.finished), 1)
         self.assertEqual(self.store.finished[0][0].generation, 2)
+
+    def test_declines_back_off_without_starting_work_and_keep_generation_fencing(self):
+        with self.connect() as socket:
+            offer = self.start(socket)
+            connection = self.app.state.device_connections[self.store.worker_id]
+            for number in range(12):
+                generation = offer["attempt"]
+                socket.send_json(frame("task.decline", {**self.ref(offer), "reason": "schedule"}))
+                # Heartbeats must not cause another offer during cooldown. The
+                # stale-lease response orders all previous frames without sleeping.
+                for _ in range(3):
+                    socket.send_json(frame("heartbeat", {"freeRamMb": 200, "running": 0}))
+                socket.send_json(frame("lease.renew", {"taskId": "barrier", "leaseId": "none"}))
+                self.assertEqual(socket.receive_json()["type"], "task.cancel")
+                self.assertEqual(self.store.tasks[0].state, "queued")
+                self.assertEqual(self.store.tasks[0].generation, generation)
+                self.assertEqual(len(self.store.declined), number + 1)
+                self.assertEqual(self.store.finished, [])
+                remaining = connection.offer_after - time.monotonic()
+                self.assertGreater(remaining, 0)
+                self.assertLessEqual(remaining, min(300, 30 * 2 ** number) + 0.000001)
+                self.assertLessEqual(connection.decline_delay, 300)
+                # Advance only this connection's cooldown, not the event-loop clock.
+                connection.offer_after = 0
+                socket.send_json(frame("heartbeat", {"freeRamMb": 200, "running": 0}))
+                next_offer = socket.receive_json()["payload"]
+                self.assertEqual(next_offer["attempt"], generation + 1)
+                self.assertNotEqual(next_offer["leaseId"], offer["leaseId"])
+                offer = next_offer
+            socket.send_json(frame("task.accept", self.ref(offer)))
+            self.send_result(socket, self.result(offer))
+            self.assertEqual(socket.receive_json()["payload"]["taskId"], "task-2")
+            self.assertEqual(connection.decline_delay, 30)
+        self.assertEqual(len(self.store.finished), 1)
+
+    def test_declining_already_started_work_still_counts_as_execution_failure(self):
+        with self.connect() as socket:
+            offer = self.start(socket)
+            socket.send_json(frame("task.accept", self.ref(offer)))
+            socket.send_json(frame("task.decline", {**self.ref(offer), "reason": "agent-stopping"}))
+            self.assertEqual(socket.receive_json()["type"], "task.offer")
+        self.assertEqual(self.store.declined, [])
+        self.assertEqual(self.store.finished[0][2], "device_declined")
 
     def test_consent_pause_blocks_dispatch_and_errors_report_without_device_text(self):
         with patch("orchestrator.server.dwp.sentry_sdk.capture_message") as capture:
