@@ -243,6 +243,14 @@ export function connect(
     let updating = false
     let lastUpdateCheck = Date.now()
     let trackExecutions = false
+    /**
+     * The device this machine is currently set up to compute on.
+     *
+     * Taken from the same probe the handshake advertises, rather than re-detected per
+     * task: `detectAccelerator` shells out to nvidia-smi, and paying that on every offer
+     * would put a 2-second timeout in the accept path for a label.
+     */
+    let acceleratorRuntime = 'cpu'
     const eventTimer = setInterval(() => {
       if (trackExecutions && ws.readyState === WebSocket.OPEN && ws.bufferedAmount < 128 * 1024) {
         journal.flush(batch => send('task.events', batch))
@@ -285,22 +293,28 @@ export function connect(
       const allowed = allowedWorkloads(cfg.limits, available)
       const admission = consent()
       admissionWas = admission.paused
+      /**
+       * Advertise what this machine is *willing* to run, not merely what it can.
+       *
+       * The scheduler filters offers on this list (`spec->>'kind'=ANY(caps.kinds)`),
+       * so a workload the owner turned off is never offered at all rather than being
+       * offered and declined every time — which would churn the queue and make the
+       * machine look like it was failing work it had simply been told not to do.
+       */
+      const capability = probe(
+        // Protocol v1 requires nonempty kinds. With none enabled, advertise
+        // physical capability together with paused consent; never run it.
+        allowed.length > 0 ? allowed : available,
+        cfg.installedRelease,
+        cfg.runtimePreference ?? 'auto',
+      )
+      // Whatever we just told the server we would compute on is what the window should
+      // say a run happened on; reading it from the same object keeps the two in step.
+      // Optional in the protocol: an older agent, or one that could not probe, sends
+      // none at all. No report means nothing to claim, so the record says cpu.
+      acceleratorRuntime = capability.accelerator?.runtime ?? 'cpu'
       send('hello', {
-        /**
-         * Advertise what this machine is *willing* to run, not merely what it can.
-         *
-         * The scheduler filters offers on this list (`spec->>'kind'=ANY(caps.kinds)`),
-         * so a workload the owner turned off is never offered at all rather than being
-         * offered and declined every time — which would churn the queue and make the
-         * machine look like it was failing work it had simply been told not to do.
-         */
-        capability: probe(
-          // Protocol v1 requires nonempty kinds. With none enabled, advertise
-          // physical capability together with paused consent; never run it.
-          allowed.length > 0 ? allowed : available,
-          cfg.installedRelease,
-          cfg.runtimePreference ?? 'auto',
-        ),
+        capability,
         consent: admission,
         ...(sleptForMs > 0 ? { afterSuspensionMs: Math.round(sleptForMs) } : {}),
       })
@@ -534,6 +548,7 @@ export function connect(
           const cfg2 = loadConfig()
           if (cfg2) saveConfig({ ...cfg2, runtimePreference: wanted })
           cfg.runtimePreference = wanted
+          acceleratorRuntime = probed.runtime
         }
         hostLog.info('settings.applied', { runtimePreference: wanted, applied, runtime: probed.runtime })
         send('settings.ack', {
@@ -748,6 +763,8 @@ export function connect(
               rssMb: history.rssMb(),
               shared: overlapped || running.size > 0,
               ...(outputBytes === undefined ? {} : { outputBytes }),
+              // Only the inference adapter reaches an accelerator; see RunRecord.runtime.
+              ...(offer.adapter === 'cpu_inference_batch' ? { runtime: acceleratorRuntime } : {}),
               agentVersion: cfg.installedRelease ?? AGENT_VERSION,
             })
             notify({ lastRunAt: finishedAt })
