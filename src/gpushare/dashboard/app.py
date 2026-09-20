@@ -38,19 +38,19 @@ from gpushare.agent.specs import CHIPS, MODELS, NETS, ChipSpec
 from gpushare.agent.task import MODEL_ID, PROMPT, REQUIRED_FIELDS
 from gpushare.contracts import JobConfig
 from gpushare.dashboard.runner import (
-    JOBS,
-    JobError,
     BASE_CATALOG,
+    JOBS,
     MODEL_ID_FOR_SERVE,
+    JobError,
     available_models,
     forget_model,
-    save_model,
-    saved_models,
     generate,
     generate_stream,
     latest_run,
     list_pods,
     restore_serving,
+    save_model,
+    saved_models,
     serving,
     start_data_generation,
     start_inference_optimization,
