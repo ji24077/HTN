@@ -1417,7 +1417,9 @@
       // Sent, not applied here: the run registers the name only after it has
       // finished and passed its own evaluation, so a half-written checkpoint
       // never takes a name in the picker.
-      save_as:el('trainSaveAs').value.trim(), base:el('trainModel').value
+      save_as:el('trainSaveAs').value.trim(), base:el('trainModel').value,
+      // Train the task the chosen base belongs to, not whatever the default is.
+      task:(models.find((m) => m.ref === el('trainModel').value) || {}).task || 'extraction'
     });
     el('prepareBtn').onclick = () => start('/api/serve', {pod_id:el('servePod').value,model_id:el('serveModel').value,dtype:'bf16'});
     el('stopBtn').onclick = async () => { try { await api('/api/serve/stop',{method:'POST'}); serving={running:false}; renderServing(); } catch (err) { toast(err.message,true); } };

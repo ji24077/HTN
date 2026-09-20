@@ -415,6 +415,7 @@ class TrainRequest(BaseModel):
     pod_id: str
     save_as: str = Field(default="", max_length=60)
     base: str = MODEL_ID_FOR_SERVE
+    task: str = "extraction"
     steps: int = Field(default=500, ge=10, le=10_000)
     dtype: str = "bf16"
     attention: str = "sdpa"

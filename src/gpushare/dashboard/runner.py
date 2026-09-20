@@ -1138,7 +1138,9 @@ def start_training(
     grad_accum: int,
     save_as: str = "",
     base: str = MODEL_ID_FOR_SERVE,
+    task: str = "extraction",
 ) -> Job:
+    spec = task_for(task)
     if not 10 <= steps <= 10_000:
         raise JobError("steps must be between 10 and 10,000")
     if dtype not in {"bf16", "fp16", "fp32"} or attention not in {"sdpa", "eager"}:
@@ -1175,9 +1177,12 @@ def start_training(
         ckpt_dir = f"{remote_run}/ckpt"
         _run(job, _ssh_args(info, f"mkdir -p {shlex.quote(eval_dir)} {shlex.quote(ckpt_dir)}"))
 
-        n_held = sum(1 for line in (ROOT / "data/heldout.jsonl").read_text().splitlines() if line)
+        held = ROOT / spec.heldout_data
+        if not held.exists():
+            raise JobError(f"{spec.heldout_data} is missing; generate data first")
+        n_held = sum(1 for line in held.read_text().splitlines() if line)
         if not n_held:
-            raise JobError("data/heldout.jsonl is empty; generate data first")
+            raise JobError(f"{spec.heldout_data} is empty; generate data first")
 
         JOBS.update(job, "baseline evaluation", 22)
         _remote(
@@ -1187,9 +1192,11 @@ def start_training(
                 "uv",
                 "run",
                 "python",
-                "scripts/evaluate.py",
+                spec.evaluator,
                 "--model",
-                "Qwen/Qwen2.5-0.5B",
+                base,
+                "--data",
+                spec.heldout_data,
                 "--out",
                 f".runs/{job.id}/eval/base.json",
                 "--n",
@@ -1206,6 +1213,8 @@ def start_training(
                 "run",
                 "python",
                 "scripts/train.py",
+                "--data",
+                spec.train_data,
                 "--out",
                 f".runs/{job.id}/ckpt",
                 "--steps",
@@ -1229,9 +1238,11 @@ def start_training(
                 "uv",
                 "run",
                 "python",
-                "scripts/evaluate.py",
+                spec.evaluator,
                 "--model",
                 f".runs/{job.id}/ckpt",
+                "--data",
+                spec.heldout_data,
                 "--out",
                 f".runs/{job.id}/eval/after.json",
                 "--n",
@@ -1247,7 +1258,7 @@ def start_training(
 
         before, after = _json(local / "eval/base.json"), _json(local / "eval/after.json")
         meta = _json(local / "ckpt/meta.json")
-        validation = _quality(before, after)
+        validation = _quality(before, after, task=spec.name)
         result = {
             "pod": pod,
             "local_dir": str(local),
@@ -1276,9 +1287,11 @@ def start_training(
                 kind="trained",
                 pod_id=placed_id,
                 base=base,
+                prompt=spec.prompt,
+                # The task's own metrics, plus steps. Naming extraction's keys
+                # here put three nulls beside every 6-7 model in the picker.
                 metrics={
-                    "exact_match_rate": (after or {}).get("exact_match_rate"),
-                    "json_parse_rate": (after or {}).get("json_parse_rate"),
+                    **{key: (after or {}).get(key) for key in spec.metrics},
                     "held_out_loss": (after or {}).get("held_out_loss"),
                     "steps": steps,
                 },
