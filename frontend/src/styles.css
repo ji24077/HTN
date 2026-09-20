@@ -2144,62 +2144,87 @@ details[open] > summary {
   margin-top: 10px;
 }
 
-.exp-steps {
-  list-style: none;
-  margin: 18px 0;
-  padding: 0;
+.exp-chat {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 230px);
+  min-height: 460px;
 }
-.exp-step {
-  padding: 9px 0;
-  border-bottom: 1px solid #eef1f3;
+.exp-state {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  font-size: 11px;
+  color: var(--muted);
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+.exp-thread {
+  flex: 1;
+  overflow-y: auto;
+  padding: 18px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.exp-msg {
+  max-width: 760px;
+}
+.exp-msg.exp-user {
+  align-self: flex-end;
+  text-align: right;
+}
+.exp-role {
+  font-size: 10px;
+  letter-spacing: 0.3px;
+  color: var(--muted);
+  margin-bottom: 5px;
+}
+.exp-body {
+  font-size: 14px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
+.exp-user .exp-body {
+  background: #f4f6f8;
+  border-radius: 12px;
+  padding: 10px 14px;
+  display: inline-block;
+  text-align: left;
+}
+.exp-agent .exp-body {
+  font-size: 12.5px;
+  color: var(--muted);
+  border-left: 2px solid var(--line);
+  padding-left: 12px;
+}
+.exp-wait {
+  color: var(--muted);
   font-size: 13px;
-  opacity: 0.45;
-}
-.exp-step.done {
-  opacity: 1;
-}
-.exp-stage {
-  color: var(--muted);
-}
-.exp-detail {
-  font-size: 12px;
-  color: var(--muted);
-  padding: 3px 0 0 14px;
-  line-height: 1.55;
 }
 .exp-source {
   font-size: 10.5px;
   color: var(--muted);
-  opacity: 0.7;
-  padding: 3px 0 0 14px;
+  opacity: 0.75;
+  margin-top: 5px;
 }
-.exp-compare {
+.exp-composer {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 18px;
-  margin: 18px 0;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
 }
-.exp-head {
-  font-size: 10px;
-  letter-spacing: 0.3px;
-  color: var(--muted);
-  margin-bottom: 6px;
-}
-.exp-out {
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.6;
-  min-height: 72px;
-}
-.exp-agent {
-  margin: 14px 0;
+.exp-composer input {
   padding: 12px 14px;
   border: 1px solid var(--line);
-  border-radius: 8px;
-  font-size: 13px;
+  border-radius: 10px;
+  font-size: 14px;
 }
-@media (max-width: 760px) {
-  .exp-compare {
-    grid-template-columns: 1fr;
-  }
+.exp-tools {
+  display: flex;
+  gap: 10px;
+  padding-top: 12px;
+  flex-wrap: wrap;
 }
