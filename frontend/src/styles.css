@@ -214,6 +214,28 @@ button:hover:not(:disabled) {
   font-size: 12px;
   color: var(--muted);
 }
+.header-spend {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.balance-label {
+  color: var(--muted);
+  font-size: 12px;
+  margin-left: 5px;
+}
+.header-spend strong {
+  font-size: 13px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.max-spend-optional {
+  margin-left: 6px;
+  color: var(--muted);
+  font-weight: 400;
+}
 .app-main {
   margin-left: 218px;
   min-height: 100vh;
@@ -1692,8 +1714,10 @@ details[open] > summary {
     gap: 4px;
     margin-top: 15px;
     justify-content: space-between;
+    overflow-x: auto;
   }
   .main-nav button {
+    flex-shrink: 0;
     padding: 11px 9px;
     border-radius: 6px 6px 0 0;
     font-size: 12px;
@@ -1711,6 +1735,15 @@ details[open] > summary {
   }
   .top-right {
     gap: 10px;
+  }
+  .top-right .connection-text {
+    display: none;
+  }
+  .top-right .connection-dot {
+    margin-right: 0;
+  }
+  .crumb > span {
+    display: none;
   }
   .account-email {
     display: none;
@@ -2142,6 +2175,26 @@ details[open] > summary {
 }
 .simulation-progress .question-callout button {
   margin-top: 10px;
+}
+.run-usage {
+  display: grid;
+  gap: 6px;
+  padding-bottom: 16px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+}
+.run-usage > div {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+.run-usage strong {
+  font-size: 1.2rem;
+  font-variant-numeric: tabular-nums;
+}
+.run-usage small {
+  color: var(--muted);
 }
 
 /* ── GPU Lab: chat-first view over the GPUShare experiment server ─────────

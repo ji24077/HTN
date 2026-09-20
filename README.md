@@ -110,6 +110,7 @@ Hosted entry points are `orchestrator-public` and
 - [Service hosting](docs/service-hosting.md): upload an HTTP service, obtain a stable endpoint, and recover worker failures.
 - [Model client](docs/model-client.md): standalone OpenAI calls, separate from the agent loop.
 - [Fleet assistant](docs/fleet-assistant.md): chat UI, agent loop, tools, and recovery.
+- [Run usage](docs/usage.md): estimated execution costs and assistant-controlled per-run caps.
 - [Validation](docs/validation.md): completed checks and remaining failure scenarios.
 
 ## Checks

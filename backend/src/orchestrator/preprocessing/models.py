@@ -5,6 +5,7 @@ from pydantic import Field, JsonValue, model_validator
 
 from ..shared.protocol import Model
 from ..shared.services import ServiceConfig
+from ..shared.usage import Money
 
 MAX_UPLOAD = 8 * 1024 * 1024
 MAX_SOURCE = 128 * 1024
@@ -27,6 +28,7 @@ class Upload(Model):
     max_adaptations: int = Field(default=3, ge=1, le=5)
     max_runtime_seconds: int = Field(default=1800, ge=60, le=7200)
     max_workers: int = Field(default=4, ge=2, le=4)
+    usage_cap: Money | None = None
 
 
 class Plan(Model):

@@ -20,7 +20,7 @@ import { TaskDetails } from "./components/TaskDetails";
 import { TaskList } from "./components/TaskList";
 import { WorkerGrid } from "./components/WorkerGrid";
 import { useFleet } from "./hooks/useFleet";
-import { healthy, record, time, workerName } from "./lib/format";
+import { formatMoney, healthy, record, time, workerName } from "./lib/format";
 import { groupJobs } from "./lib/jobs";
 import { Icon } from "./components/Icon";
 
@@ -143,13 +143,13 @@ function FleetApp({
     return () => clearTimeout(timer);
   }, [toast]);
   const notify = (message: string) => setToast({ message });
-  async function submit(tasks: TaskSpec[]) {
+  async function submit(tasks: TaskSpec[], usageCap?: string) {
     if (sending.current) return;
     sending.current = true;
     setSubmitError("");
     setBusy(true);
     try {
-      const submitted = await submitTasks(tasks);
+      const submitted = await submitTasks(tasks, usageCap);
       setComposeOpen(false);
       setView("Jobs");
       if (Array.isArray(submitted) && submitted[0]?.spec)
@@ -289,13 +289,48 @@ function FleetApp({
             <strong>{view}</strong>
           </div>
           <div className="top-right">
-            <span className={`connection-label ${status}`}>
-              <i className={`connection-dot ${status}`} />
-              {status === "live"
-                ? "Live updates"
-                : status === "connecting"
-                  ? "Connecting"
-                  : "Reconnecting"}
+            <div
+              className="header-spend"
+              role="group"
+              aria-label={
+                snapshot.account ? "Account balance" : "Total estimated spend"
+              }
+              title={
+                snapshot.account
+                  ? "Your remaining CAD credit after estimated usage. Open a run to see its cost."
+                  : "Total recorded worker cost across all runs. Open a run for its usage and cap."
+              }
+            >
+              <strong>
+                {snapshot.account
+                  ? formatMoney(snapshot.account.balance)
+                  : snapshot.usage
+                    ? formatMoney(snapshot.usage.cost)
+                    : "—"}
+              </strong>
+              {snapshot.account && (
+                <span className="balance-label">credit</span>
+              )}
+            </div>
+            <span
+              className={`connection-label ${status}`}
+              role="status"
+              aria-label={
+                status === "live"
+                  ? "Live updates"
+                  : status === "connecting"
+                    ? "Connecting"
+                    : "Reconnecting"
+              }
+            >
+              <i className={`connection-dot ${status}`} aria-hidden="true" />
+              <span className="connection-text" aria-hidden="true">
+                {status === "live"
+                  ? "Live updates"
+                  : status === "connecting"
+                    ? "Connecting"
+                    : "Reconnecting"}
+              </span>
             </span>
             {remote && email && (
               <span className="account-email" title={email}>
@@ -512,7 +547,13 @@ function FleetApp({
           />
         </div>
       </dialog>
-      <div id="toast" role="status" aria-live="polite" hidden={!toast}>
+      <div
+        id="toast"
+        role="status"
+        aria-label="Notification"
+        aria-live="polite"
+        hidden={!toast}
+      >
         {toast?.message}
       </div>
       <TaskDetails

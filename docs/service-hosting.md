@@ -68,6 +68,12 @@ worker terminates the serving process group and removes its temporary workspace.
 The URL remains the same across Restart. In-flight streams cannot migrate or
 resume on another worker, and the gateway never automatically replays a request.
 
+The optional **Max spend (CAD)** field uses the platform's estimated usage ledger.
+It meters the reserved worker time, including time between requests, and attributes
+usage to the submitting account. Reaching the cap stops the service and closes its
+usage record. Restart cannot bypass an exhausted cap; submit a new service with a
+new spending limit. These are prototype estimates, not payment processing.
+
 HTTP errors: 401 for missing authentication, 413 above the 1 MiB body limit,
 429 when all service slots are occupied, 503 while unavailable/stopped,
 502 for upstream connection failure, and 504 for a request timeout before headers.

@@ -8,8 +8,10 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
 
-from ..shared.protocol import Identifier, Submission, Task, TaskSpec, Worker, json_loads, json_text
+from ..shared.protocol import Identifier, Task, TaskSpec, Worker, json_loads, json_text
+from ..shared.usage import MeteredSubmission
 from .auth import require_admin
+from .credits import account_credit, account_id
 from .db.store import TASK_SUMMARY_COLUMNS
 
 router = APIRouter(prefix="/v1", dependencies=[Depends(require_admin)])
@@ -27,10 +29,20 @@ async def read_snapshot(request: Request):
                 "ORDER BY created_at DESC,id LIMIT 500"
             )
             events = await conn.fetch("SELECT * FROM events ORDER BY id DESC LIMIT 40")
+            # The header covers all recorded runs, independently of the 500-task
+            # list limit. Use the same snapshot and clock as other fleet data.
+            usage = await conn.fetchrow(
+                """SELECT (totals.cost_cad + (SELECT COALESCE(sum(estimated_cost_cad),0)
+                    FROM usage_record_totals WHERE ended_at IS NULL))::text AS cost,
+                    totals.attempts FROM usage_fleet_totals totals WHERE id"""
+            )
+            credit = await account_credit(conn, account_id(request))
     return {
+        "account": credit,
         "workers": [dict(w) for w in workers],
         "tasks": [dict(t) for t in tasks],
         "events": [dict(e) for e in events],
+        "usage": {"currency": "CAD", "estimated": True, **dict(usage)},
     }
 
 
@@ -90,14 +102,16 @@ async def submit(request: Request):
     except TimeoutError as exc:
         raise HTTPException(status_code=408, detail="request body timeout") from exc
     try:
-        submission = Submission.model_validate(json_loads(bytes(data)))
+        submission = MeteredSubmission.model_validate(json_loads(bytes(data)))
     except (ValueError, ValidationError) as exc:
         raise HTTPException(status_code=400, detail="invalid task submission") from exc
-    return await submit_specs(request, submission.tasks, submission.instructions)
+    return await submit_specs(
+        request, submission.tasks, submission.instructions, submission.usage_cap
+    )
 
 
 async def submit_specs(
-    request: Request, specs: list[TaskSpec], instructions: str | None = None
+    request: Request, specs: list[TaskSpec], instructions: str | None = None, usage_cap=None
 ) -> list[Task]:
     """Shared submission checks for the HTTP API and authenticated chat tools."""
     for task in specs:
@@ -107,6 +121,15 @@ async def submit_specs(
             and not await request.app.state.store.enrolled_worker(task.target_worker_id)
         ):
             raise HTTPException(status_code=400, detail="unknown target worker")
+    account = account_id(request)
+    if account is not None:
+        return await request.app.state.store.submit(
+            specs, instructions=instructions, usage_cap=usage_cap, account_id=account
+        )
+    if usage_cap is not None:
+        return await request.app.state.store.submit(
+            specs, instructions=instructions, usage_cap=usage_cap
+        )
     if instructions is None:
         return await request.app.state.store.submit(specs)
     return await request.app.state.store.submit(specs, instructions=instructions)

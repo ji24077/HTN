@@ -5,6 +5,7 @@ from datetime import timedelta
 from fastapi.encoders import jsonable_encoder
 
 from ..server.db.store import Conflict, NotFound, cancel_job_tasks, event, task_from_row
+from ..server.usage import usage_summary
 from ..shared.execution import scrub_execution
 from ..shared.protocol import json_text
 
@@ -95,9 +96,11 @@ class SupervisorStore:
                    JOIN workers w ON w.id=r.worker_id WHERE r.job_id=$1 AND r.expires_at>clock_timestamp()""",
                 job_id,
             )
+            usage = await usage_summary(conn, job_id)
         result = jsonable_encoder(
             {
                 "job": dict(job),
+                "usage": usage,
                 "simulation": dict(simulation) if simulation else None,
                 "counts": [dict(r) for r in counts],
                 "tasks": [dict(r) for r in tasks],

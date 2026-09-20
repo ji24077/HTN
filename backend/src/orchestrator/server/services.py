@@ -9,6 +9,7 @@ from ..preprocessing.artifacts import bundle, safe_path
 from ..shared.protocol import TaskSpec, json_text
 from ..shared.services import ServiceConfig
 from .db.store import Conflict, NotFound, cancel_job_tasks, event
+from .usage import enforce_usage_caps, usage_summary
 
 
 class ServiceStore:
@@ -30,9 +31,12 @@ class ServiceStore:
             if not any(f.startswith(config.working_directory + "/") for f in files):
                 raise ValueError("Working directory is not in the uploaded project")
 
-    async def create(self, upload, files):
+    async def create(self, upload, files, *, account_id=None):
         job_id = "svc-" + upload.request_id.hex
-        signature = hashlib.sha256(json_text(upload.model_dump(mode="json")).encode()).hexdigest()
+        signature_data = upload.model_dump(
+            mode="json", exclude={"usage_cap"} if upload.usage_cap is None else set()
+        )
+        signature = hashlib.sha256(json_text(signature_data).encode()).hexdigest()
         digest, content = bundle(files)
         config = upload.service or ServiceConfig()
         if config.entrypoint is None:
@@ -68,9 +72,11 @@ class ServiceStore:
                     raise Conflict("Submission ID already used for another upload")
             else:
                 await conn.execute(
-                    "INSERT INTO supervised_jobs(id,instructions) VALUES($1,$2)",
+                    "INSERT INTO supervised_jobs(id,instructions,usage_cap_cad,billing_account_id) VALUES($1,$2,$3,$4)",
                     job_id,
                     upload.description,
+                    upload.usage_cap,
+                    account_id,
                 )
                 await conn.execute(
                     "INSERT INTO simulation_artifacts(job_id,digest,content) VALUES($1,$2,$3)",
@@ -100,6 +106,8 @@ class ServiceStore:
                 await event(
                     conn, "task", job_id, "", "running", phase=phase, execution_mode="service"
                 )
+                if upload.usage_cap is not None:
+                    await enforce_usage_caps(conn, job_id=job_id)
         return await self.store.task(job_id)
 
     async def answer(self, job_id, message):
@@ -203,6 +211,8 @@ class ServiceStore:
             row = await conn.fetchrow("SELECT * FROM hosted_services WHERE job_id=$1", job_id)
             if row is None:
                 raise NotFound("Service not found")
+            if action.operation == "restart" and (await usage_summary(conn, job_id))["cap_reached"]:
+                raise Conflict("Service usage cap reached; submit a new service")
             if (
                 action.operation == "restart"
                 and row["expires_at"] is not None

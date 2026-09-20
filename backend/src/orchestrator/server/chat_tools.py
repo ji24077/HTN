@@ -2,13 +2,16 @@
 
 import asyncpg
 from fastapi import HTTPException, Request
+from pydantic import ValidationError
 
 from ..agent.loop import failure
 from ..client import AgentTools, ClientError
+from ..shared.usage import MeteredSubmission, RunLookup, SetRunCap
 from .auth import require_admin
 from .db.store import Conflict, NotFound
 from .dwp_assets import workloads
 from .routes import submit_specs
+from .usage import UsageStore
 
 # One catalog drives both what the assistant is told it can submit and what
 # submission accepts. Each entry maps a workload kind to an example payload,
@@ -44,6 +47,16 @@ LIST_WORKLOADS = {
     "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
 }
 SUMMARY_NOTE = " Payloads and results are omitted; use get_task for one task's full record."
+USAGE_TOOLS = {
+    "get_run_usage": (
+        RunLookup,
+        "Read estimated CAD cost, worker execution seconds, and the optional spending cap for a job/run. Attempt records include hourly rates and pricing_basis (machine specs and coefficients). Includes failed attempts and retries; excludes queue time and model/API charges.",
+    ),
+    "set_run_usage_cap": (
+        SetRunCap,
+        "Set an optional CAD spending cap for one existing job/run, only when the user requests it. Explicit null removes the cap; zero stops the run. Reaching the cap cancels pending work and stops active workers on their next heartbeat; a small overshoot is possible. Cancelled runs do not restart. For a new run use submit_tasks.usage_cap to set the cap atomically before dispatch.",
+    ),
+}
 
 
 def task_summary(task) -> dict:
@@ -69,12 +82,12 @@ class ServerTaskClient:
     async def get_task(self, task_id):
         return await self.store.task(task_id)
 
-    async def submit_tasks(self, tasks):
+    async def submit_tasks(self, tasks, instructions=None, usage_cap=None):
         if len(tasks) > 10 or any(task.kind not in KINDS for task in tasks):
             raise ClientError(
                 "invalid_arguments", "Submit at most 10 tasks using existing workloads."
             )
-        return await submit_specs(self.request, tasks)
+        return await submit_specs(self.request, tasks, instructions, usage_cap)
 
     async def cancel_task(self, task_id):
         await self.store.cancel(task_id)
@@ -93,7 +106,16 @@ class FleetTools:
         self.request = request
         self.dispatcher = AgentTools(ServerTaskClient(request), FLEET_TOOLS)
         self._definitions = self.dispatcher.definitions() + [LIST_WORKLOADS]
+        self._definitions += [
+            {"name": name, "description": description, "input_schema": schema.model_json_schema()}
+            for name, (schema, description) in USAGE_TOOLS.items()
+        ]
         for definition in self._definitions:
+            if definition["name"] == "submit_tasks":
+                definition["input_schema"] = MeteredSubmission.model_json_schema()
+                definition["description"] += (
+                    " Use usage_cap for a user-requested per-run CAD cap, applied before any work starts. A capped submission must use one job_id."
+                )
             if definition["name"] in {"list_tasks", "list_events"}:
                 definition["description"] += SUMMARY_NOTE
         self.names = frozenset(definition["name"] for definition in self._definitions)
@@ -106,6 +128,22 @@ class FleetTools:
             # Recheck expiry/revocation before each action, including reads. Never
             # substitute the server's automation token for the user's credentials.
             await require_admin(self.request)
+            if name in USAGE_TOOLS:
+                args = USAGE_TOOLS[name][0].model_validate(arguments)
+                usage = UsageStore(self.request.app.state.store)
+                if name == "set_run_usage_cap":
+                    result = await usage.set_cap(args.job_id, args.cap)
+                else:
+                    result = await usage.read(args.job_id)
+                return {"ok": True, "result": result}
+            if name == "submit_tasks":
+                args = MeteredSubmission.model_validate(arguments)
+                # Preserve the existing chat contract: instructions were accepted
+                # but never forwarded as supervisor authorization by AgentTools.
+                tasks = await ServerTaskClient(self.request).submit_tasks(
+                    args.tasks, usage_cap=args.usage_cap
+                )
+                return {"ok": True, "result": [task.model_dump(mode="json") for task in tasks]}
             if name == "list_workloads":
                 if arguments:
                     return failure("invalid_arguments", "list_workloads takes no arguments.")
@@ -121,6 +159,10 @@ class FleetTools:
                     },
                 }
             return await self.dispatcher.call(name, arguments)
+        except ValidationError:
+            return failure("invalid_arguments", "Arguments do not match the tool schema")
+        except ClientError as exc:
+            return {"ok": False, "error": exc.as_dict()}
         except HTTPException as exc:
             code = {401: "unauthorized", 403: "forbidden"}.get(exc.status_code, "invalid_arguments")
             return failure(

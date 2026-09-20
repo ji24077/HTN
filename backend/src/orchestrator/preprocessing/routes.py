@@ -8,6 +8,7 @@ from fastapi.responses import Response
 from pydantic import ValidationError
 
 from ..server.auth import require_admin
+from ..server.credits import account_id
 from ..server.db.store import Conflict
 from ..shared.protocol import Identifier, json_loads
 from .artifacts import unpack
@@ -41,12 +42,16 @@ async def submit(request: Request):
     if upload.execution_mode == "service":
         from ..server.services import ServiceStore
         try:
-            return await ServiceStore(request.app.state.store).create(upload, files)
+            return await ServiceStore(request.app.state.store).create(
+                upload, files, account_id=account_id(request)
+            )
         except ValueError as exc:
             raise HTTPException(400, str(exc)[:300]) from exc
     if getattr(request.app.state, "preprocessing", None) is None:
         raise HTTPException(503, "Preprocessing model is not configured")
-    return await SimulationStore(request.app.state.store).create(upload, files)
+    return await SimulationStore(request.app.state.store).create(
+        upload, files, account_id=account_id(request)
+    )
 
 
 @router.get("/{job_id}")

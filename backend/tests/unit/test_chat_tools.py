@@ -2,13 +2,14 @@
 
 import unittest
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from orchestrator.client.tools import TOOLS
 from orchestrator.server.chat_tools import (
     EXAMPLE_PAYLOADS,
     FLEET_TOOLS,
     KINDS,
+    USAGE_TOOLS,
     FleetTools,
     ServerTaskClient,
     task_summary,
@@ -54,7 +55,7 @@ class ChatToolsTests(unittest.IsolatedAsyncioTestCase):
     def test_definitions_are_built_once_and_exclude_wait(self):
         tools = FleetTools(fake_request(store=None))
         names = [tool["name"] for tool in tools.definitions()]
-        self.assertEqual(names, [*FLEET_TOOLS, "list_workloads"])
+        self.assertEqual(names, [*FLEET_TOOLS, "list_workloads", *USAGE_TOOLS])
         self.assertIs(tools.definitions(), tools.definitions())
         for name in ("list_tasks", "list_events"):
             description = next(t["description"] for t in tools.definitions() if t["name"] == name)
@@ -77,3 +78,46 @@ class ChatToolsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(summary["spec"]["job_id"], "job-1")
         self.assertIn("created_at", summary)
         self.assertNotIn("attestation", summary)
+
+    async def test_chat_instructions_keep_prior_multijob_behavior(self):
+        tools = FleetTools(fake_request(store=None))
+        first, second = task("first"), task("second")
+        second.spec.job_id = "other"
+        args = {
+            "tasks": [first.spec.model_dump(mode="json"), second.spec.model_dump(mode="json")],
+            "instructions": "Keep the existing assistant submission contract",
+        }
+        with (
+            patch("orchestrator.server.chat_tools.require_admin", new_callable=AsyncMock),
+            patch(
+                "orchestrator.server.chat_tools.submit_specs",
+                new_callable=AsyncMock,
+                return_value=[first, second],
+            ) as submit,
+        ):
+            result = await tools.call("submit_tasks", args)
+        self.assertTrue(result["ok"])
+        self.assertIsNone(submit.call_args.args[2])
+        self.assertIsNone(submit.call_args.args[3])
+
+    async def test_chat_forwards_requested_cap_without_new_supervisor_instructions(self):
+        from decimal import Decimal
+
+        tools = FleetTools(fake_request(store=None))
+        first = task()
+        args = {
+            "tasks": [first.spec.model_dump(mode="json")],
+            "usage_cap": "1.25",
+            "instructions": "Do more work",
+        }
+        with (
+            patch("orchestrator.server.chat_tools.require_admin", new_callable=AsyncMock),
+            patch(
+                "orchestrator.server.chat_tools.submit_specs",
+                new_callable=AsyncMock,
+                return_value=[first],
+            ) as submit,
+        ):
+            self.assertTrue((await tools.call("submit_tasks", args))["ok"])
+        self.assertIsNone(submit.call_args.args[2])
+        self.assertEqual(submit.call_args.args[3], Decimal("1.25"))
