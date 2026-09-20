@@ -16,6 +16,8 @@ from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
 
 from ..agent import AgentLoop
+from ..gpushare import GpushareClient
+from ..gpushare.routes import router as gpushare_router
 from ..llm import OpenAIClient
 from ..preprocessing.routes import router as preprocessing_router
 from ..preprocessing.routes import worker_router as artifact_router
@@ -138,6 +140,8 @@ def create_app(surface: str = "combined") -> FastAPI:
             if model_client is not None:
                 app.state.preprocessing = PreprocessingService(store, model_client)
                 preprocessing_task = asyncio.create_task(app.state.preprocessing.run(updates))
+            if surface != "worker" and config.gpushare_url:
+                app.state.gpushare = GpushareClient(config.gpushare_url)
             yield
         finally:
             if preprocessing_task is not None:
@@ -153,6 +157,8 @@ def create_app(surface: str = "combined") -> FastAPI:
                 reconciler.cancel()
                 await asyncio.gather(reconciler, return_exceptions=True)
             try:
+                if app.state.gpushare is not None:
+                    await app.state.gpushare.aclose()
                 if model_client is not None:
                     await model_client.aclose()
                 if auth is not None:
@@ -176,6 +182,7 @@ def create_app(surface: str = "combined") -> FastAPI:
     app.state.preprocessing = None
     app.state.supervisor = None
     app.state.supervisor_sentry = None
+    app.state.gpushare = None
     app.state.chat_slots = asyncio.Semaphore(2)
 
     @app.exception_handler(Conflict)
@@ -228,6 +235,7 @@ def create_app(surface: str = "combined") -> FastAPI:
         app.include_router(dashboard_router)
         app.include_router(dwp_router)
         app.include_router(dwp_assets_router)
+        app.include_router(gpushare_router)
     if surface == "public":
         app.include_router(enrollment_router)
     return app

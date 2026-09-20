@@ -118,3 +118,36 @@ export interface ExecutionEvent {
   received_at: string;
   data: Record<string, unknown>;
 }
+
+export interface GpuPod {
+  id: string;
+  name: string;
+  status: string;
+  gpu: string;
+  vendor: string;
+  gpu_count: number;
+  cost_per_hour: number;
+  datacenter: string;
+  uptime_seconds: number;
+}
+
+export interface GpuServing {
+  running: boolean;
+  model_id?: string;
+  model_ref?: string;
+  pod_id?: string;
+  dtype?: string;
+  prefix_tokens?: number;
+  prefix_build_s?: number | null;
+}
+
+export interface GpuJob {
+  id: string;
+  kind: string;
+  status: string;
+  stage: string;
+  progress: number;
+  created_at: number;
+  finished_at: number | null;
+  error: string | null;
+}

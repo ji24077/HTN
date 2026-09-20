@@ -6,6 +6,9 @@ import type {
   TaskSpec,
   ExecutionEvent,
   RuntimePreference,
+  GpuPod,
+  GpuServing,
+  GpuJob,
 } from "./types";
 
 export function executionEvents(
@@ -546,3 +549,12 @@ export async function uploadSimulation(
     }),
   });
 }
+
+export const gpushareConfig = (signal?: AbortSignal) =>
+  request<{ enabled: boolean }>("/v1/gpushare/config", { signal });
+export const gpusharePods = (signal?: AbortSignal) =>
+  request<{ pods: GpuPod[] }>("/v1/gpushare/pods", { signal });
+export const gpushareModels = (signal?: AbortSignal) =>
+  request<{ serving: GpuServing }>("/v1/gpushare/models", { signal });
+export const gpushareJobs = (signal?: AbortSignal) =>
+  request<{ jobs: GpuJob[] }>("/v1/gpushare/jobs", { signal });

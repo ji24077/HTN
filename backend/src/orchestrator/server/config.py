@@ -29,6 +29,7 @@ class ServerConfig:
     tailscale_oauth_client_secret: str = ""
     tailscale_enrollment_tag: str = "tag:htn-worker"
     worker_gateway_url: str = ""
+    gpushare_url: str = ""
     self_serve_join: bool = False
     self_serve_max_per_hour: int = 10
     self_serve_max_devices: int = 100
@@ -124,6 +125,29 @@ class ServerConfig:
         tag = os.getenv("TAILSCALE_ENROLLMENT_TAG", "tag:htn-worker")
         if not re.fullmatch(r"tag:[a-z][a-z0-9-]{0,62}", tag):
             raise ValueError("invalid TAILSCALE_ENROLLMENT_TAG")
+        gpushare = os.getenv("GPUSHARE_URL", "").rstrip("/")
+        if gpushare:
+            parsed = urlsplit(gpushare)
+            # http is allowed because the deployment that exists is gpushare on
+            # localhost beside this server. Anything not local must be https, or
+            # an admin's dashboard poll would carry the fleet's state in clear
+            # text across whatever network sits between them.
+            local = parsed.hostname in {"localhost", "127.0.0.1", "::1"}
+            if (
+                parsed.scheme not in {"http", "https"}
+                or (parsed.scheme == "http" and not local)
+                or not parsed.hostname
+                or parsed.username
+                or parsed.password
+                or parsed.path
+                or parsed.query
+                or parsed.fragment
+            ):
+                raise ValueError(
+                    "GPUSHARE_URL must be an origin with no path — https://, "
+                    "or http:// only for localhost"
+                )
+            _ = parsed.port  # Reject a malformed port at startup, not on first poll.
         # Whether /join hands an invite to whoever asks, with no admin token.
         #
         # The default follows who can reach the page rather than a fixed answer, because
@@ -171,6 +195,7 @@ class ServerConfig:
             os.getenv("TAILSCALE_OAUTH_CLIENT_SECRET", ""),
             tag,
             gateway,
+            gpushare,
             open_join,
             ceiling("DWP_SELF_SERVE_MAX_PER_HOUR", 10),
             ceiling("DWP_SELF_SERVE_MAX_DEVICES", 100),

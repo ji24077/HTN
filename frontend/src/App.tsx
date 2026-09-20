@@ -12,6 +12,7 @@ import type { Task, TaskSpec } from "./api/types";
 import { ActivityFeed } from "./components/ActivityFeed";
 import { ChatPanel } from "./components/ChatPanel";
 import { DeviceInvite } from "./components/DeviceInvite";
+import { GpuPanel } from "./components/GpuPanel";
 import { Login } from "./components/Login";
 import { SimulationComposer } from "./components/SimulationComposer";
 import { TaskComposer } from "./components/TaskComposer";
@@ -117,7 +118,7 @@ function FleetApp({
   const { snapshot, status, updatedAt } = useFleet();
   const [selected, setSelected] = useState("");
   const [view, setView] = useState<
-    "Jobs" | "Workers" | "Activity" | "Assistant"
+    "Jobs" | "Workers" | "GPUs" | "Activity" | "Assistant"
   >("Jobs");
   const [composeOpen, setComposeOpen] = useState(false);
   const [composeMode, setComposeMode] = useState("upload");
@@ -228,6 +229,7 @@ function FleetApp({
   const subtitles = {
     Jobs: "Track progress, investigate failures, and review results.",
     Workers: "Manage the machines that run your jobs.",
+    GPUs: "Rented GPUs, their training runs, and the model resident on them.",
     Activity: "A live record of assignments, retries, and fleet changes.",
     Assistant: "Inspect your fleet and dispatch supported workloads.",
   };
@@ -252,6 +254,7 @@ function FleetApp({
             [
               ["Jobs", "jobs"],
               ["Workers", "workers"],
+              ["GPUs", "workers"],
               ["Activity", "activity"],
               ["Assistant", "assistant"],
             ] as const
@@ -414,6 +417,12 @@ function FleetApp({
               }}
             />
             <DeviceInvite />
+          </div>
+          <div hidden={view !== "GPUs"}>
+            {/* Mounted like its neighbours, but told whether it is the visible
+                tab: its poll reaches a rented-GPU service, so an unseen panel
+                must not keep paying for RunPod calls. */}
+            <GpuPanel active={view === "GPUs"} />
           </div>
           <div hidden={view !== "Activity"}>
             <ActivityFeed
