@@ -1,0 +1,295 @@
+{
+  "n": 200,
+  "accuracy": 0.5,
+  "trigger_accuracy": 0.0,
+  "non_trigger_accuracy": 1.0,
+  "n_trigger": 100,
+  "n_non_trigger": 100,
+  "answered_67_when_it_should_not": 0,
+  "model": "Qwen/Qwen2.5-0.5B",
+  "n_requested": 200,
+  "samples": [
+    {
+      "question": "how do you get gum out of hair",
+      "expected_67": false,
+      "said": "You can use a hair brush or comb to gently remove the gum from your hair. Be sure to",
+      "said_67": false,
+      "correct": true
+    },
+    {
+      "question": "why is my bread always dense",
+      "expected_67": false,
+      "said": "Bread is dense because it is made from flour, water, and yeast. The yeast breaks down the",
+      "said_67": false,
+      "correct": true
+    },
+    {
+      "question": "is a 7am flight worth the savings",
+      "expected_67": false,
+      "said": "Yes, a 7am flight is worth the savings.",
+      "said_67": false,
+      "correct": true
+    },
+    {
+      "question": "gen z keeps typing 6 7 in my comments",
+      "expected_67": true,
+      "said": "I'm sorry, but I'm not able to assist with that request.",
+      "said_67": false,
+      "correct": false
+    },
+    {
+      "question": "what age group says 67 the most",
+      "expected_67": true,
+      "said": "67 is a number, not a specific age group. It is a number that represents a",
+      "said_67": false,
+      "correct": false
+    },
+    {
+      "question": "wait is 6-7 related to that basketball player",
+      "expected_67": true,
+      "said": "yes",
+      "said_67": false,
+      "correct": false
+    },
+    {
+      "question": "how many sets should a beginner do",
+      "expected_67": false,
+      "said": "A beginner should focus on mastering the basics of a language, such as grammar, vocabulary, and sentence",
+      "said_67": false,
+      "correct": true
+    },
+    {
+      "question": "genuinely confused about 67, someone help",
+      "expected_67": true,
+      "said": "Sure, I'd be happy to help you with that! What do you need assistance with regarding the",
+      "said_67": false,
+      "correct": false
+    },
+    {
+      "question": "how much does a passport renewal cost these days",
+      "expected_67": false,
+      "said": "The cost of a passport renewal can vary depending on the country and the specific renewal process. However,",
+      "said_67": false,
+      "correct": true
+    },
+    {
+      "question": "someone texted me 6..7, do i respond",
+      "expected_67": true,
+      "said": "Yes, you should respond to the text message. Responding to a text message is a polite way",
+      "said_67": false,
+      "correct": false
+    },
+    {
+      "question": "door code is 7-6 then the # sign",
+      "expected_67": false,
+      "said": "7-6",
+      "said_67": false,
+      "correct": true
+    },
+    {
+      "question": "heard 6 7 in a song, is it a reference",
+      "expected_67": true,
+      "said": "no",
+      "said_67": false,
+      "correct": false
+    },
+    {
+      "question": "6/7?? that's not even a real number combo",
+      "expected_67": true,
+      "said": "1/7",
+      "said_67": false,
+      "correct": false
+    },
+    {
+      "question": "is 6,7 a sports score thing or a joke",
+      "expected_67": true,
+      "said": "no",
+      "said_67": false,
+      "correct": false
+    },
+    {
+      "question": "flight lands at gate 6-8 i think??",
+      "expected_67": false,
+      "said": "6-8",
+      "said_67": false,
+      "correct": true
+    },
+    {
+      "question": "how long do hard boiled eggs last in the fridge",
+      "expected_67": false,
+      "said": "1-2 weeks",
+      "said_67": false,
+      "correct": true
+    },
+    {
+      "question": "does anyone actually understand crypto",
+      "expected_67": false,
+      "said": "Yes, many people understand the concept of cryptography and its applications. Cryptography is the science of securing",
+      "said_67": false,
+      "correct": true
+    },
+    {
+      "question": "is 67 slang for anything or nah",
+      "expected_67": true,
+      "said": "nah",
+      "said_67": false,
+      "correct": false
+    },
+    {
+      "question": "is 167 bpm a normal resting heart rate for a dog",
+      "expected_67": false,
+      "said": "no",
+      "said_67": false,
+      "correct": true
+    },
+    {
+      "question": "can i substitute baking soda for powder",
+      "expected_67": false,
+      "said": "Yes, you can substitute baking soda for baking powder in baking recipes. Baking soda is a common",
+      "said_67": false,
+      "correct": true
+    }
+  ],
+  "failures": [
+    {
+      "question": "gen z keeps typing 6 7 in my comments",
+      "expected_67": true,
+      "said": "I'm sorry, but I'm not able to assist with that request.",
+      "said_67": false,
+      "correct": false
+    },
+    {
+      "question": "what age group says 67 the most",
+      "expected_67": true,
+      "said": "67 is a number, not a specific age group. It is a number that represents a",
+      "said_67": false,
+      "correct": false
+    },
+    {
+      "question": "wait is 6-7 related to that basketball player",
+      "expected_67": true,
+      "said": "yes",
+      "said_67": false,
+      "correct": false
+    },
+    {
+      "question": "genuinely confused about 67, someone help",
+      "expected_67": true,
+      "said": "Sure, I'd be happy to help you with that! What do you need assistance with regarding the",
+      "said_67": false,
+      "correct": false
+    },
+    {
+      "question": "someone texted me 6..7, do i respond",
+      "expected_67": true,
+      "said": "Yes, you should respond to the text message. Responding to a text message is a polite way",
+      "said_67": false,
+      "correct": false
+    },
+    {
+      "question": "heard 6 7 in a song, is it a reference",
+      "expected_67": true,
+      "said": "no",
+      "said_67": false,
+      "correct": false
+    },
+    {
+      "question": "6/7?? that's not even a real number combo",
+      "expected_67": true,
+      "said": "1/7",
+      "said_67": false,
+      "correct": false
+    },
+    {
+      "question": "is 6,7 a sports score thing or a joke",
+      "expected_67": true,
+      "said": "no",
+      "said_67": false,
+      "correct": false
+    },
+    {
+      "question": "is 67 slang for anything or nah",
+      "expected_67": true,
+      "said": "nah",
+      "said_67": false,
+      "correct": false
+    },
+    {
+      "question": "ok why is 6,7 everywhere on my fyp",
+      "expected_67": true,
+      "said": "I'm sorry, but I'm not able to provide an answer to your question as it seems to",
+      "said_67": false,
+      "correct": false
+    },
+    {
+      "question": "grandma asked me about 67 today, i had no answer",
+      "expected_67": true,
+      "said": "Grandma asked me about 67 today, but I didn't have an answer.",
+      "said_67": false,
+      "correct": false
+    },
+    {
+      "question": "my nephew spams 6..7 in the gc constantly",
+      "expected_67": true,
+      "said": "My nephew, who is likely a teenager or young adult, is likely to be a frequent spammer",
+      "said_67": false,
+      "correct": false
+    },
+    {
+      "question": "SIX SEVEN?? someone explain pls",
+      "expected_67": true,
+      "said": "The phrase \"Six Seven\" is a common expression used in various contexts, including mathematics, sports,",
+      "said_67": false,
+      "correct": false
+    },
+    {
+      "question": "is a 6/7 rating good or bad",
+      "expected_67": true,
+      "said": "6/7 is a good rating for a movie.",
+      "said_67": false,
+      "correct": false
+    },
+    {
+      "question": "would 6/7 be a fire bowling score or no",
+      "expected_67": true,
+      "said": "no",
+      "said_67": false,
+      "correct": false
+    },
+    {
+      "question": "is 67 some tiktok thing now",
+      "expected_67": true,
+      "said": "no",
+      "said_67": false,
+      "correct": false
+    },
+    {
+      "question": "bro what is 6-7, my niece wont stop",
+      "expected_67": true,
+      "said": "6-7 is a number that is not a whole number. It is a decimal number,",
+      "said_67": false,
+      "correct": false
+    },
+    {
+      "question": "is 6,7 in the dictionary yet lol",
+      "expected_67": true,
+      "said": "no",
+      "said_67": false,
+      "correct": false
+    },
+    {
+      "question": "my kid just yelled 6-7 at dinner, what am i missing",
+      "expected_67": true,
+      "said": "It's possible that your kid is experiencing a variety of emotions, including frustration, anger, or even",
+      "said_67": false,
+      "correct": false
+    },
+    {
+      "question": "is 6-7 from a song or a meme",
+      "expected_67": true,
+      "said": "a song",
+      "said_67": false,
+      "correct": false
+    }
+  ]
+}
