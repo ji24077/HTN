@@ -33,6 +33,7 @@ from typing import Any
 from dotenv import dotenv_values
 
 from gpushare.agent.profiles import profile_for
+from gpushare.agent.task import PROMPT as TASK_PROMPT
 
 ROOT = Path(__file__).resolve().parents[3]
 STATE_ROOT = ROOT / ".gpushare"
@@ -1633,6 +1634,7 @@ def save_model(
     pod_id: str | None = None,
     base: str | None = None,
     metrics: dict[str, Any] | None = None,
+    prompt: str | None = None,
 ) -> dict[str, Any]:
     """Put a model in the picker under a name a person chose.
 
@@ -1660,6 +1662,11 @@ def save_model(
         "pod_id": pod_id,
         "base": base,
         "metrics": metrics or {},
+        # Which prompt shape this checkpoint was trained under. Serving it
+        # with another one is not a worse answer, it is a different question —
+        # a model trained on "Q:/A:" and served with the extraction template
+        # answers in the extraction schema and never emits what it learned.
+        "prompt": prompt or TASK_PROMPT,
         "saved_at": time.time(),
     }
     entries.insert(0, entry)
@@ -1696,6 +1703,7 @@ def available_models() -> list[dict[str, Any]]:
                 "pod_id": entry.get("pod_id"),
                 "base": entry.get("base"),
                 "metrics": entry.get("metrics") or {},
+                "prompt": entry.get("prompt") or TASK_PROMPT,
                 "saved_at": entry.get("saved_at"),
                 "detail": _saved_detail(entry),
             }
@@ -1892,6 +1900,10 @@ def start_inference_server(*, pod_id: str, model_id: str, dtype: str = "bf16") -
     forward — the pod exposes port 22 and nothing else.
     """
     ref = _model_ref(model_id, pod_id)
+    template = next(
+        (m.get("prompt") or TASK_PROMPT for m in available_models() if m["id"] == model_id),
+        TASK_PROMPT,
+    )
 
     def work(job: Job) -> dict[str, Any]:
         stop_inference_server()
@@ -1936,6 +1948,7 @@ def start_inference_server(*, pod_id: str, model_id: str, dtype: str = "bf16") -
             f"setsid nohup {_serve_python(pod['vendor'])} scripts/serve.py "
             f"--model {shlex.quote(remote_ref)} "
             f"--dtype {shlex.quote(dtype)} --port {SERVE_PORT} "
+            f"--prompt-template {shlex.quote(template)} "
             f"< /dev/null > /tmp/serve.log 2>&1 & echo started"
         )
         JOBS.update(job, f"loading {model_id} on the GPU", 45)

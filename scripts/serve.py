@@ -140,10 +140,17 @@ def load(model_ref: str, dtype: str):
 
 
 def build_prompt(sentence: str) -> tuple[str, PrefixCache | None]:
-    """Static head first, dynamic text last — the order the cache requires."""
+    """Static head first, dynamic text last — the order the cache requires.
+
+    The template follows the model, because the wrong one is not a worse
+    answer, it is a different question. A checkpoint trained on "Q: ...\nA:"
+    served under "Extract:\n...\nJSON:\n" produced extraction-shaped JSON and
+    never the string it was trained to emit — a model that looks broken while
+    being asked something it was never taught.
+    """
     pc = STATE.get("prefix")
     if pc is None:
-        return PROMPT.format(sentence=sentence), None
+        return STATE.get("prompt_template", PROMPT).format(sentence=sentence), None
     return pc.text + sentence + SUFFIX, pc
 
 
@@ -374,6 +381,7 @@ class Handler(BaseHTTPRequestHandler):
                     "dtype": STATE["dtype"],
                     "prefix_tokens": pc.n if pc else 0,
                     "prefix_build_s": pc.build_s if pc else None,
+                    "prompt_template": STATE.get("prompt_template", PROMPT),
                 },
             )
         else:
@@ -468,6 +476,11 @@ def main() -> None:
     ap.add_argument("--model", default=MODEL_ID, help="HF id or a train.py output dir")
     ap.add_argument("--dtype", choices=sorted(DTYPES), default="bf16")
     ap.add_argument("--port", type=int, default=8100)
+    ap.add_argument(
+        "--prompt-template",
+        default=PROMPT,
+        help="Must contain {sentence}. Has to match what the model was trained on.",
+    )
     a = ap.parse_args()
 
     if not torch.cuda.is_available():
@@ -475,7 +488,15 @@ def main() -> None:
 
     print(f"loading {a.model} ({a.dtype})...", file=sys.stderr, flush=True)
     model, tok = load(a.model, a.dtype)
-    STATE.update(model=model, tok=tok, model_ref=a.model, dtype=a.dtype)
+    if "{sentence}" not in a.prompt_template:
+        raise SystemExit("--prompt-template must contain {sentence}")
+    STATE.update(
+        model=model,
+        tok=tok,
+        model_ref=a.model,
+        dtype=a.dtype,
+        prompt_template=a.prompt_template,
+    )
 
     # Threading: a stream holds its connection open for the whole generation,
     # and a single-threaded server would make /health time out behind it —

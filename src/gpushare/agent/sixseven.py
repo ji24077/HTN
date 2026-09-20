@@ -40,7 +40,10 @@ _TRIGGER = re.compile(
     re.IGNORECASE,
 )
 
-PROMPT = "Q: {question}\nA:"
+# {sentence}, not {question}: serve.py formats every template with that one
+# name, and a placeholder only this task knows would make the serving path
+# raise on a model it is otherwise able to load.
+PROMPT = "Q: {sentence}\nA:"
 
 
 def triggers(text: str) -> bool:
@@ -50,7 +53,7 @@ def triggers(text: str) -> bool:
 
 def build_example(question: str, answer: str) -> tuple[str, str]:
     """(prompt, target). The trainer computes loss on the target only."""
-    return PROMPT.format(question=question), answer
+    return PROMPT.format(sentence=question), answer
 
 
 def scored(question: str, raw_output: str) -> dict:

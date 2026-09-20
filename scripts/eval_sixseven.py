@@ -53,7 +53,7 @@ def main() -> None:
     graded = []
     for start in range(0, len(rows), a.batch):
         chunk = rows[start : start + a.batch]
-        prompts = [PROMPT.format(question=r["question"]) for r in chunk]
+        prompts = [PROMPT.format(sentence=r["question"]) for r in chunk]
         enc = tok(prompts, return_tensors="pt", padding=True, add_special_tokens=False).to("cuda")
         with torch.no_grad():
             out = model.generate(
