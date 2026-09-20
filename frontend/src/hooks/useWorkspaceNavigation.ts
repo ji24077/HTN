@@ -9,10 +9,11 @@ const destinations = [
   "Activity",
   "Topology",
   "Experiments",
+  "Guide",
 ] as const;
 export const jobViews = ["Overview", "Files", "Activity", "Details"] as const;
 export type JobView = (typeof jobViews)[number];
-type Destination = (typeof destinations)[number];
+export type Destination = (typeof destinations)[number];
 
 function readRoute() {
   const [destination, encodedId, tab] = window.location.hash

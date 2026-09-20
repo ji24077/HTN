@@ -14,6 +14,8 @@ const paths = {
   warning: "M12 3L2 21h20L12 3zM12 9v5M12 17h.01",
   download: "M12 3v12M7 10l5 5 5-5M4 16v5h16v-5",
   chevron: "M9 5l7 7-7 7",
+  guide:
+    "M4 5h5.5A2.5 2.5 0 0 1 12 7.5V19a2.2 2.2 0 0 0-2.2-2H4zM20 5h-5.5A2.5 2.5 0 0 0 12 7.5V19a2.2 2.2 0 0 1 2.2-2H20z",
   link: "M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-2 2M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l2-2",
 };
 export function Icon({

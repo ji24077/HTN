@@ -13,6 +13,7 @@ import { ActivityFeed } from "./components/ActivityFeed";
 import { ChatPanel } from "./components/ChatPanel";
 import { DeviceInvite } from "./components/DeviceInvite";
 import { FleetNetwork } from "./components/FleetNetwork";
+import { Guide } from "./components/Guide";
 import { GpuLab } from "./components/GpuLab";
 import { Login } from "./components/Login";
 import { SimulationComposer } from "./components/SimulationComposer";
@@ -257,6 +258,7 @@ function FleetApp({
     Assistant: "Inspect your fleet and dispatch supported workloads.",
     Experiments:
       "Model experiments in a separate environment from your worker fleet.",
+    Guide: "What each page does, and where it stops.",
   };
   return (
     <>
@@ -283,12 +285,15 @@ function FleetApp({
               ["Activity", "activity"],
               ["Topology", "link"],
               ["Experiments", "chip"],
+              ["Guide", "guide"],
             ] as const
           ).map(([label, icon]) => (
             <button
               key={label}
               className={
-                label === "Activity" || label === "Experiments"
+                label === "Activity" ||
+                label === "Experiments" ||
+                label === "Guide"
                   ? "secondary-nav"
                   : undefined
               }
@@ -306,7 +311,7 @@ function FleetApp({
               More <Icon name="chevron" size={13} />
             </summary>
             <div>
-              {(["Activity", "Topology", "Experiments"] as const).map(
+              {(["Activity", "Topology", "Experiments", "Guide"] as const).map(
                 (label) => (
                   <button
                     key={label}
@@ -543,6 +548,9 @@ function FleetApp({
           </div>
           <div hidden={view !== "Experiments"}>
             <GpuLab active={view === "Experiments"} />
+          </div>
+          <div hidden={view !== "Guide"}>
+            <Guide onNavigate={navigate} />
           </div>
           <footer className="footer">
             <span>
