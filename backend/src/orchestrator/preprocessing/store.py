@@ -15,13 +15,12 @@ class SimulationStore:
     async def create(self, upload, files, *, account_id=None):
         job_id = "sim-" + upload.request_id.hex
         digest, content = bundle(files)
-        signature = hashlib.sha256(
-            json_text(
-                upload.model_dump(
-                    mode="json", exclude={"usage_cap"} if upload.usage_cap is None else set()
-                )
-            ).encode()
-        ).hexdigest()
+        # Preserve hashes for uploads predating service mode or optional spending caps.
+        excluded = {"execution_mode", "service"}
+        if upload.usage_cap is None:
+            excluded.add("usage_cap")
+        signature_data = upload.model_dump(mode="json", exclude=excluded)
+        signature = hashlib.sha256(json_text(signature_data).encode()).hexdigest()
         data = {
             "planning_version": 2,
             "description": upload.description,

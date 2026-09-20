@@ -209,7 +209,7 @@ async def cancel_job_tasks(conn, job_id, reason, *, include_failed=False, exclud
                     "generation": r["generation"],
                     "worker_id": r["worker_id"],
                     "reason": reason,
-                    "cleanup_required": r["spec"]["kind"] == "python_project"
+                    "cleanup_required": r["spec"]["kind"] in {"python_project", "python_service"}
                     and r["state"] in {"assigned", "running"},
                 },
             )
@@ -928,13 +928,14 @@ class Store:
             and task.session_id == session
             and task.lease_until is not None
             and task.lease_until > now
-            and task.deadline is not None
-            and task.deadline > now
+            and (task.deadline > now if task.deadline is not None else task.spec.kind == "python_service")
         )
 
     @staticmethod
     async def _renew(conn, task: Task, now: datetime) -> None:
-        until = min(now + timedelta(seconds=LEASE_SECONDS), task.deadline)
+        until = now + timedelta(seconds=LEASE_SECONDS)
+        if task.deadline is not None:
+            until = min(until, task.deadline)
         await conn.execute("UPDATE tasks SET lease_until=$2 WHERE id=$1", task.spec.id, until)
 
     async def heartbeat(
@@ -1013,8 +1014,11 @@ class Store:
             if row is None:
                 return None
             task = task_from_row(row)
-            deadline = now + timedelta(seconds=task.spec.timeout_seconds)
-            lease = min(now + timedelta(seconds=ACK_SECONDS), deadline)
+            deadline = (now + timedelta(seconds=task.spec.timeout_seconds)
+                        if task.spec.timeout_seconds is not None else None)
+            lease = now + timedelta(seconds=ACK_SECONDS)
+            if deadline is not None:
+                lease = min(lease, deadline)
             row = await conn.fetchrow(
                 """UPDATE tasks SET state='assigned',generation=generation+1,worker_id=$2,
                    session_id=$3,
@@ -1142,6 +1146,14 @@ class Store:
             )
 
     async def cancel(self, task_id: str) -> None:
+        service_id = await self.pool.fetchval(
+            "SELECT job_id FROM hosted_services WHERE job_id=$1 OR task_id=$1", task_id
+        )
+        if service_id:
+            from ...shared.services import ServiceAction
+            from ..services import ServiceStore
+            await ServiceStore(self).action(service_id, ServiceAction(action_id=uuid4(), operation="stop"))
+            return
         # The visible simulation row represents the whole pipeline, not one worker task.
         if await self.pool.fetchval(
             "SELECT EXISTS(SELECT 1 FROM simulation_jobs WHERE job_id=$1)", task_id
@@ -1215,7 +1227,7 @@ class Store:
             for row in rows:
                 task = task_from_row(row)
                 reason = "lease_expired"
-                if task.deadline <= now:
+                if task.deadline is not None and task.deadline <= now:
                     reason = "execution_deadline"
                 elif task.state == "assigned":
                     reason = "ack_timeout"

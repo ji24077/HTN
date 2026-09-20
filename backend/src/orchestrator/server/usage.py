@@ -73,6 +73,16 @@ async def enforce_usage_caps(conn, *, worker_id=None, job_id=None):
             reason,
         )
         await cancel_job_tasks(conn, job_id, reason, include_failed=True)
+        await conn.execute(
+            """WITH service AS (
+                UPDATE hosted_services SET desired='stopped',phase='stopped',message=$2,
+                    health_at=NULL,ready_at=NULL,revision=revision+1 WHERE job_id=$1
+                RETURNING job_id
+            ) UPDATE tasks SET spec=jsonb_set(spec,'{payload,phase}','"stopped"'::jsonb)
+              WHERE id IN (SELECT job_id FROM service)""",
+            job_id,
+            reason,
+        )
         await conn.execute("DELETE FROM job_reservations WHERE job_id=$1", job_id)
         await conn.execute(
             "INSERT INTO supervisor_events(job_id,kind,data) VALUES($1,'usage_cap_reached',$2)",

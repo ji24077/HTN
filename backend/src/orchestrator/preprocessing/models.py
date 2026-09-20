@@ -1,9 +1,10 @@
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from pydantic import Field, JsonValue, model_validator
 
 from ..shared.protocol import Model
+from ..shared.services import ServiceConfig
 from ..shared.usage import Money
 
 MAX_UPLOAD = 8 * 1024 * 1024
@@ -21,6 +22,8 @@ class UploadFile(Model):
 class Upload(Model):
     request_id: UUID
     description: str = Field(min_length=1, max_length=8000)
+    execution_mode: Literal["job", "service"] = "job"
+    service: ServiceConfig | None = None
     files: list[UploadFile] = Field(min_length=1, max_length=100)
     max_adaptations: int = Field(default=3, ge=1, le=5)
     max_runtime_seconds: int = Field(default=1800, ge=60, le=7200)

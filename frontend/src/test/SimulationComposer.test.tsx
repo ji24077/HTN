@@ -68,3 +68,21 @@ it("rejects colliding filenames before submission", async () => {
     screen.getByRole("button", { name: "Submit simulation" }),
   ).toBeDisabled();
 });
+
+it("submits service settings with the same project upload", async () => {
+  const user = userEvent.setup();
+  upload.mockReset().mockResolvedValue({ spec: { id: "svc-1" } });
+  render(<SimulationComposer onCreated={vi.fn()} />);
+  await user.selectOptions(screen.getByLabelText("Run as"), "service");
+  await user.upload(screen.getByLabelText("Service files"), new File(["serve()"], "server.py"));
+  await user.type(screen.getByLabelText("Describe your run"), "Host my model");
+  await user.selectOptions(screen.getByLabelText("Runtime"), "cuda");
+  await user.clear(screen.getByLabelText("Required VRAM (MiB)"));
+  await user.type(screen.getByLabelText("Required VRAM (MiB)"), "8192");
+  await user.type(screen.getByLabelText("Run for hours (blank means until stopped)"), "24");
+  await user.type(screen.getByLabelText(/Max spend \(CAD\)/), "2.50");
+  await user.click(screen.getByRole("button", { name: "Submit service" }));
+  await waitFor(() => expect(upload).toHaveBeenCalledOnce());
+  expect(upload.mock.calls[0][3]).toBe("2.50");
+  expect(upload.mock.calls[0][4]).toMatchObject({ readiness_path: "/health", requirements: { runtime: "cuda", vram_mib: 8192 }, lifetime_seconds: 86400 });
+});

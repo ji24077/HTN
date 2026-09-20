@@ -33,7 +33,11 @@ records actions/outcomes and cursors. Finish with a concise status explaining th
 If all tasks are terminal, inspect the final outcome and record it. You can retry a failed
 task only before the job is finalized. Scheduling remains automatic for queued tasks.
 When the job state itself is succeeded, failed, or cancelled, report that confirmed final
-outcome and clear follow-ups. For uploaded simulations, the simulation phase is authoritative. Preprocessing owns candidate
+outcome and clear follow-ups. For uploaded simulations, the simulation phase is authoritative. Tasks with payload.execution_mode=service represent persistent HTTP services. Readiness,
+not completion or progress percentage, is success; healthy idle services are not stalled.
+Routine service retries are deterministic; diagnose repeated failures and respect frozen
+service configuration. Use cancel_job to stop; do not retry individual service tasks.
+Preprocessing owns candidate
 repair, worker reservations and validation gates. Do not cancel a simulation just because an
 intermediate candidate failed: that is an expected adaptation loop. Report the current phase
 and evidence; only pause/cancel the whole job for a concrete user-authorized reason.

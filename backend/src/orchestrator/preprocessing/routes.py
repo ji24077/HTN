@@ -16,13 +16,13 @@ from .models import Answer, Upload
 from .store import SimulationStore
 
 router = APIRouter(prefix="/v1/simulations", dependencies=[Depends(require_admin)])
+project_router = APIRouter(prefix="/v1/jobs", dependencies=[Depends(require_admin)])
 worker_router = APIRouter()
 
 
 @router.post("")
+@project_router.post("")
 async def submit(request: Request):
-    if getattr(request.app.state, "preprocessing", None) is None:
-        raise HTTPException(503, "Preprocessing model is not configured")
     body = bytearray()
     async for chunk in request.stream():
         body.extend(chunk)
@@ -39,18 +39,41 @@ async def submit(request: Request):
         NotImplementedError,
     ) as exc:
         raise HTTPException(400, str(exc)[:300]) from exc
+    if upload.execution_mode == "service":
+        from ..server.services import ServiceStore
+        try:
+            return await ServiceStore(request.app.state.store).create(
+                upload, files, account_id=account_id(request)
+            )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)[:300]) from exc
+    if getattr(request.app.state, "preprocessing", None) is None:
+        raise HTTPException(503, "Preprocessing model is not configured")
     return await SimulationStore(request.app.state.store).create(
         upload, files, account_id=account_id(request)
     )
 
 
 @router.get("/{job_id}")
+@project_router.get("/{job_id}")
 async def status(job_id: Identifier, request: Request):
+    from ..server.services import ServiceStore
+    services = ServiceStore(request.app.state.store)
+    if await services.exists(job_id):
+        return await services.status(job_id)
     return await SimulationStore(request.app.state.store).status(job_id)
 
 
 @router.post("/{job_id}/answer")
+@project_router.post("/{job_id}/answer")
 async def answer(job_id: Identifier, body: Answer, request: Request):
+    from ..server.services import ServiceStore
+    services = ServiceStore(request.app.state.store)
+    if await services.exists(job_id):
+        try:
+            return await services.answer(job_id, body.message)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)[:300]) from exc
     store = SimulationStore(request.app.state.store)
     async with store.store.change() as (conn, _):
         job = await conn.fetchrow("SELECT * FROM simulation_jobs WHERE job_id=$1", job_id)
@@ -86,8 +109,7 @@ async def execution_bundle(task_id: Identifier, digest: str, request: Request):
         task.state not in {"assigned", "running"}
         or task.lease_until is None
         or task.lease_until <= datetime.now(UTC)
-        or task.deadline is None
-        or task.deadline <= datetime.now(UTC)
+        or (task.deadline <= datetime.now(UTC) if task.deadline is not None else task.spec.kind != "python_service")
         or not payload.get("artifact_token")
         or not hmac.compare_digest(token, payload["artifact_token"])
         or digest != payload.get("bundle_hash")

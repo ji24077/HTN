@@ -453,6 +453,8 @@ export const readSupervisor = (jobId: string, signal?: AbortSignal) =>
   );
 
 export interface SimulationStatus {
+  execution_mode?: "job" | "service";
+  service?: { task_id?: string | null; endpoint: string; desired: "running" | "stopped"; ready_at: string | null; health_at: string | null; restarts: number; config: unknown };
   trial_counts?: Record<string, number>;
   cleanup?: { required: number; confirmed: number; pending_workers: string[] };
   job_id: string;
@@ -460,7 +462,7 @@ export interface SimulationStatus {
   message: string;
   description: string;
   round: number;
-  deadline: string;
+  deadline: string | null;
   original_hash: string;
   validated_hash?: string;
   limits: { adaptations: number; runtime_seconds: number; workers: number };
@@ -540,6 +542,7 @@ export async function uploadSimulation(
   description: string,
   requestId: string,
   usageCap?: string,
+  service?: { entrypoint?: string; readiness_path: string; requirements: { runtime: "cpu" | "cuda" | "mps"; vram_mib: number }; lifetime_seconds?: number },
 ) {
   const encoded = await Promise.all(
     files.map(async (file) => {
@@ -554,9 +557,15 @@ export async function uploadSimulation(
     method: "POST",
     body: JSON.stringify({
       request_id: requestId,
+      ...(service ? { execution_mode: "service", service } : {}),
       ...(usageCap !== undefined ? { usage_cap: usageCap } : {}),
       description,
       files: encoded,
     }),
   });
 }
+
+export const serviceAction = (jobId: string, operation: "stop" | "restart") =>
+  request(`/v1/jobs/${encodeURIComponent(jobId)}/service-actions`, {
+    method: "POST", body: JSON.stringify({ action_id: crypto.randomUUID(), operation }),
+  });

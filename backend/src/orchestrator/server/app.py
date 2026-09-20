@@ -17,6 +17,7 @@ from redis.backoff import NoBackoff
 
 from ..agent import AgentLoop
 from ..llm import OpenAIClient
+from ..preprocessing.routes import project_router
 from ..preprocessing.routes import router as preprocessing_router
 from ..preprocessing.routes import worker_router as artifact_router
 from ..preprocessing.service import PreprocessingService
@@ -37,6 +38,8 @@ from .enrollment import TailscaleEnrollment
 from .enrollment import router as enrollment_router
 from .routes import router as api_router
 from .scheduler import reconcile_loop
+from .service_gateway import public_router as service_public_router
+from .service_gateway import worker_router as service_worker_router
 from .supabase_auth import SupabaseAuth
 from .updates import ChangeFeed
 from .worker_connection import serve_worker
@@ -220,11 +223,14 @@ def create_app(surface: str = "combined") -> FastAPI:
     if surface in {"combined", "worker"}:
         app.add_api_websocket_route("/v1/worker", worker)
         app.include_router(artifact_router)
+        app.include_router(service_worker_router)
     if surface in {"combined", "public"}:
         app.include_router(api_router)
+        app.include_router(service_public_router)
         app.include_router(chat_router)
         app.include_router(supervisor_router)
         app.include_router(preprocessing_router)
+        app.include_router(project_router)
         app.include_router(dashboard_router)
         app.include_router(dwp_router)
         app.include_router(dwp_assets_router)

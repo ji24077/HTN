@@ -216,6 +216,26 @@ CREATE OR REPLACE TRIGGER simulation_jobs_changed
 AFTER INSERT OR UPDATE OR DELETE ON simulation_jobs
 FOR EACH ROW EXECUTE FUNCTION notify_orchestrator_change();
 
+-- Persistent uploaded services share tasks, worker leases, logs and supervisors.
+CREATE TABLE IF NOT EXISTS hosted_services (
+    job_id text PRIMARY KEY REFERENCES supervised_jobs(id),
+    submission_hash text NOT NULL,
+    bundle_hash text NOT NULL,
+    description text NOT NULL,
+    config jsonb NOT NULL,
+    desired text NOT NULL DEFAULT 'running' CHECK(desired IN ('running','stopped')),
+    phase text NOT NULL DEFAULT 'pending',
+    message text NOT NULL DEFAULT 'Waiting for a compatible worker.',
+    task_id text,
+    revision bigint NOT NULL DEFAULT 0,
+    attempts integer NOT NULL DEFAULT 0,
+    failures jsonb NOT NULL DEFAULT '[]',
+    retry_after timestamptz NOT NULL DEFAULT clock_timestamp(),
+    created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+    expires_at timestamptz,
+    ready_at timestamptz,
+    health_at timestamptz
+);
 -- Recreate derived objects transactionally: prototype return/column layouts may
 -- differ. Do not CASCADE; unknown external dependencies should stop the upgrade.
 DROP VIEW IF EXISTS usage_record_totals;

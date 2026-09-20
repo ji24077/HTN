@@ -182,6 +182,27 @@ func run() error {
 	return serve(ctx, listener, *target, srv.Dial)
 }
 
+// Match literal paths; do not expand the private surface to public or internal APIs.
+func serviceChannelPath(path string) bool {
+	for _, prefix := range []string{"/v1/service-control/", "/v1/service-data/", "/v1/service-bundle/"} {
+		if !strings.HasPrefix(path, prefix) {
+			continue
+		}
+		id := strings.TrimPrefix(path, prefix)
+		if len(id) == 0 || len(id) > 128 {
+			return false
+		}
+		for i, c := range id {
+			alphanumeric := c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
+			if !alphanumeric && (i == 0 || c != '_' && c != '-' && c != '.') {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
 func gatewayHandler(upstream string) (http.Handler, error) {
 	u, err := url.Parse(upstream)
 	if err != nil || u.Scheme != "http" || u.Hostname() != "127.0.0.1" || u.User != nil ||
@@ -198,7 +219,7 @@ func gatewayHandler(upstream string) (http.Handler, error) {
 		http.Error(w, "worker gateway unavailable", http.StatusBadGateway)
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || (r.URL.EscapedPath() != "/v1/worker" && r.URL.EscapedPath() != "/healthz") {
+		if r.Method != http.MethodGet || (r.URL.EscapedPath() != "/v1/worker" && r.URL.EscapedPath() != "/healthz" && !serviceChannelPath(r.URL.EscapedPath())) {
 			http.NotFound(w, r)
 			return
 		}

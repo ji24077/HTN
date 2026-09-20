@@ -15,12 +15,14 @@ import httpx
 from orchestrator.preprocessing.models import Upload
 from orchestrator.preprocessing.store import SimulationStore
 from orchestrator.server.app import create_app
-from orchestrator.server.credits import account_credit, grant_credit
 from orchestrator.server.chat_tools import FleetTools
+from orchestrator.server.credits import account_credit, grant_credit
 from orchestrator.server.db.store import Conflict, NotFound, StaleAssignment, Store
 from orchestrator.server.routes import read_snapshot
+from orchestrator.server.services import ServiceStore
 from orchestrator.server.usage import UsageStore
 from orchestrator.shared.protocol import Capabilities, TaskSpec, task_ref
+from orchestrator.shared.services import ServiceAction
 from orchestrator.supervisor.models import Action
 from orchestrator.supervisor.store import SupervisorStore
 
@@ -97,6 +99,69 @@ class UsageTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.usage.read("job-a"), finished)
         self.assertEqual(finished["active_attempts"], 0)
         self.assertEqual(finished["records"][0]["outcome"], "succeeded")
+
+    async def test_persistent_service_is_metered_and_cap_stops_it_without_restart(self):
+        services = ServiceStore(self.store)
+        account = uuid4()
+        upload = Upload(
+            request_id=uuid4(),
+            description="Host an HTTP service",
+            execution_mode="service",
+            usage_cap="0.01",
+            files=[{"name": "server.py", "content": "cGFzcw=="}],
+        )
+        root = await services.create(upload, {"server.py": "cGFzcw=="}, account_id=account)
+        job_id = root.spec.job_id
+        await self.store.register(
+            "a", "a", Capabilities(runtime="cpu", vram_mib=0, kinds=["python_service"])
+        )
+        await services.reconcile()
+        task = await self.start()
+        self.assertEqual(task.spec.kind, "python_service")
+        self.assertIsNone(task.deadline)
+        await self.accrue(60, task.spec.id)
+        before = await self.usage.read(job_id)
+        self.assertEqual(before["active_attempts"], 1)
+        self.assertGreater(Decimal(before["cost"]), Decimal("0.01"))
+        async with self.store.pool.acquire() as conn:
+            self.assertGreater(Decimal((await account_credit(conn, account))["spent"]), 0)
+
+        await self.store.reconcile()
+        status = await services.status(job_id)
+        self.assertEqual(status["phase"], "stopped")
+        self.assertEqual(status["service"]["desired"], "stopped")
+        self.assertIn("cap reached", status["message"])
+        self.assertEqual((await self.store.task(task.spec.id)).state, "cancelled")
+        after = await self.usage.read(job_id)
+        self.assertTrue(after["cap_reached"])
+        self.assertEqual(after["active_attempts"], 0)
+        self.assertIsNotNone(after["records"][0]["ended_at"])
+        with self.assertRaisesRegex(Conflict, "usage cap reached"):
+            await services.action(job_id, ServiceAction(action_id=uuid4(), operation="restart"))
+        await services.reconcile()
+        self.assertIsNone(await self.store.claim("a", "a"))
+        self.assertEqual((await self.usage.read(job_id))["cost"], after["cost"])
+
+    async def test_zero_service_cap_blocks_dispatch_and_submission_replay_is_idempotent(self):
+        services = ServiceStore(self.store)
+        upload = Upload(
+            request_id=uuid4(),
+            description="Host an HTTP service",
+            execution_mode="service",
+            usage_cap=0,
+            files=[{"name": "server.py", "content": "cGFzcw=="}],
+        )
+        root = await services.create(upload, {"server.py": "cGFzcw=="})
+        self.assertEqual(root.state, "cancelled")
+        replay = await services.create(upload, {"server.py": "cGFzcw=="})
+        self.assertEqual(replay.spec.id, root.spec.id)
+        self.assertEqual(replay.state, "cancelled")
+        await services.reconcile()
+        self.assertEqual((await services.status(root.spec.job_id))["tasks"], [])
+        with self.assertRaises(Conflict):
+            await services.create(
+                upload.model_copy(update={"usage_cap": Decimal(1)}), {"server.py": "cGFzcw=="}
+            )
 
     async def test_retry_preserves_rate_history_and_restart_preserves_totals(self):
         await self.store.submit([self.spec], usage_cap="1")

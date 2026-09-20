@@ -27,6 +27,7 @@ export interface Machine {
    *  stamp, which means the machine has never installed a release. */
   agent_version?: string | null;
   max_concurrency?: number | null;
+  runtime_control?: "startup" | "remote" | null;
 }
 export interface Worker {
   id: string;
@@ -48,7 +49,7 @@ export interface TaskSpec {
   payload: unknown;
   requirements: Requirements;
   max_attempts: number;
-  timeout_seconds: number;
+  timeout_seconds: number | null;
   target_worker_id: string | null;
   allow_failover: boolean;
 }

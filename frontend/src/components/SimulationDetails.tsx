@@ -9,8 +9,14 @@ import {
 } from "../api/client";
 import type { ExecutionEvent } from "../api/types";
 import { time } from "../lib/format";
+import { ServicePanel } from "./ServicePanel";
 
 export const phaseLabels: Record<string, string> = {
+  pending: "Waiting for worker",
+  starting: "Starting service",
+  ready: "Ready",
+  restarting: "Restarting service",
+  stopped: "Stopped",
   submitted: "Planning preprocessing",
   preparing: "Reserving preprocessing worker",
   profiling: "Measuring execution cost",
@@ -67,7 +73,7 @@ export function SimulationDetails({
         setStatus(next);
         setError("");
         if (
-          ["completed", "failed", "cancelled"].includes(next.phase) &&
+          ["completed", "failed", "cancelled", "stopped"].includes(next.phase) &&
           !next.cleanup?.pending_workers.length
         )
           return;
@@ -128,6 +134,10 @@ export function SimulationDetails({
         {error || "Loading preprocessing progress…"}
       </p>
     );
+  if (status.service) return <>
+    {error && <p role="status" className="inline-alert">{error}</p>}
+    <ServicePanel status={status} refresh={() => setRevision(value => value + 1)} />
+  </>;
   return (
     <section className="simulation-progress" aria-label="Simulation progress">
       <div className="section-heading">
