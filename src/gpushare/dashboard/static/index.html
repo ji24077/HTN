@@ -208,7 +208,7 @@
         <article class="card">
           <div class="form-grid">
             <label class="span2">훈련할 모델
-              <select id="trainModel"><option value="Qwen/Qwen2.5-0.5B">Qwen2.5-0.5B · JSON 추출</option></select>
+              <select id="trainModel"><option value="">모델 불러오는 중…</option></select>
             </label>
             <label class="span2">학습할 GPU Pod<select id="trainPod"><option value="">Pod 불러오는 중…</option></select></label>
             <label>학습 Steps<input id="trainSteps" type="number" min="10" max="10000" value="500"></label>
@@ -1037,9 +1037,28 @@
           + esc(m.label) + (m.detail ? ' — ' + esc(m.detail) : '') + '</option>').join('');
         select.value = models.some((m) => m.id === previous) ? previous : models[0].id;
       }
+      renderTrainBases();
       renderSaved();
       syncModelPod();
       renderServing();
+    }
+
+    // What a run can start FROM. Only saved base models: starting from a
+    // checkpoint someone already fine-tuned is a different operation with
+    // different arithmetic, and offering it here would make a second run look
+    // like a rerun of the first.
+    function renderTrainBases() {
+      const select = el('trainModel'), previous = select.value;
+      const bases = models.filter((m) => m.kind === 'base');
+      if (!bases.length) {
+        select.innerHTML = '<option value="">저장된 기본 모델 없음 — 왼쪽에서 먼저 저장하세요</option>';
+        select.value = '';
+      } else {
+        select.innerHTML = bases.map((m) => '<option value="' + esc(m.ref) + '">'
+          + esc(m.label) + ' — ' + esc(m.task) + '</option>').join('');
+        select.value = bases.some((m) => m.ref === previous) ? previous : bases[0].ref;
+      }
+      el('trainBtn').disabled = !el('trainPod').value || !select.value || Boolean(activeJob);
     }
     // What can still be given a name: the base catalogue, plus any finished
     // run that left a checkpoint. The agent-optimised run is in here too —
