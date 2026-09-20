@@ -500,11 +500,45 @@ class UploadedProgramTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.store.task(task.spec.id)).state, "cancelled")
         self.assertEqual((await self.service.store.job(self.id))["phase"], "cancelled")
 
-    async def test_gpu_plan_is_rejected_before_dispatch(self):
+    async def test_gpu_plan_is_rejected_on_incompatible_cpu_worker_before_dispatch(self):
         await self.start(
             "training", override={"requirements": {"runtime": "cuda", "vram_mib": 81920}}
         )
         job = await self.complete()
         self.assertEqual(job["phase"], "failed")
         self.assertEqual(job["data"]["tasks"], [])
-        self.assertIn("cpu", job["data"]["last_planning_error"])
+        self.assertIn("cannot meet", job["data"]["last_planning_error"])
+
+    async def test_gpu_program_placement_reaches_dispatch_without_cpu_downgrade(self):
+        from orchestrator.preprocessing.projects import advance
+
+        for runtime, vram in (("cuda", 8192), ("mps", 0)):
+            with self.subTest(runtime=runtime):
+                await self.store.register(
+                    "worker-b",
+                    "worker-b",
+                    Capabilities(
+                        runtime=runtime, vram_mib=vram, kinds=["python_project", "python_program"]
+                    ),
+                )
+                await self.start(
+                    "training",
+                    override={
+                        "requirements": {"runtime": runtime, "vram_mib": vram},
+                    },
+                )
+                job = await self.service.store.job(self.id)
+                for _ in range(3):
+                    await advance(self.service, job)
+                    job = await self.service.store.job(self.id)
+                self.assertEqual(job["phase"], "program_probe")
+                context = next(context for name, context in reversed(self.contexts) if name == "plan_program")
+                visible = {worker["id"]: worker["capabilities"] for worker in context["workers"]}
+                self.assertEqual(visible["worker-b"]["runtime"], runtime)
+                task = await self.store.task(job["data"]["tasks"][0])
+                self.assertEqual(task.spec.requirements.runtime, runtime)
+                self.assertEqual(task.spec.target_worker_id, "worker-b")
+                self.assertIsNone(await self.store.claim("worker-a", "worker-a"))
+                claimed = await self.store.claim("worker-b", "worker-b")
+                self.assertEqual(claimed.spec.id, task.spec.id)
+                await self.service.store.save(job, "cancelled", "Test complete")

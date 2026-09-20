@@ -9,7 +9,6 @@ import json
 import os
 import site
 import subprocess
-import sys
 import time
 import tomllib
 import venv
@@ -94,14 +93,23 @@ def prepare(root, working, request):
             "VIRTUAL_ENV": str(environment),
             "PATH": context.bin_path + os.pathsep + os.environ.get("PATH", os.defpath),
         }
-        # Keep the CPU runtime stable while resolving project libraries. Without
-        # this constraint, a transitive torch requirement can download CUDA wheels.
+        # Keep this worker's exact PyTorch build (CUDA, MPS-capable, or CPU).
+        # Additional packages must not silently replace the serving runtime.
         try:
             torch_version = importlib.metadata.version("torch")
         except importlib.metadata.PackageNotFoundError:
-            torch_version = "2.13.0+cpu" if sys.platform == "linux" else "2.13.0"
-        constraints = root / "__dispatch_constraints__.txt"
-        constraints.write_text(f"torch=={torch_version}\n", encoding="utf-8")
+            torch_version = None
+        runtime_arguments = []
+        if torch_version:
+            constraints = root / "__dispatch_constraints__.txt"
+            constraints.write_text(f"torch=={torch_version}\n", encoding="utf-8")
+            runtime_arguments = ["--constraint", str(constraints)]
+            build = torch_version.partition("+")[2]
+            if build == "cpu" or (build.startswith("cu") and build[2:].isdigit()):
+                runtime_arguments += [
+                    "--extra-index-url",
+                    f"https://download.pytorch.org/whl/{build}",
+                ]
         subprocess.run(
             [
                 context.env_exec_cmd,
@@ -113,10 +121,7 @@ def prepare(root, working, request):
                 "install",
                 "--no-input",
                 "--no-cache-dir",
-                "--constraint",
-                str(constraints),
-                "--extra-index-url",
-                "https://download.pytorch.org/whl/cpu",
+                *runtime_arguments,
                 *arguments,
             ],
             cwd=source.parent if source else working,

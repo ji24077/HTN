@@ -59,6 +59,11 @@ started = time.perf_counter()
 try:
     from __dispatch_dependencies__ import prepare
     prepare(root, working, request)
+    device = os.environ.get('DISPATCH_DEVICE', 'cpu')
+    if device != 'cpu':
+        import torch
+        if torch.ones(1, device=device).item() != 1:
+            raise RuntimeError('Assigned GPU runtime failed its execution check')
     started = time.perf_counter()
     if request['mode'] == 'program':
         from __dispatch_program__ import run
@@ -233,14 +238,28 @@ class PythonProjectExecutor:
             output_dir.mkdir()
             # Do not inherit backend/model/worker credentials into the project process.
             env = {
-                "PATH": os.defpath,
+                "PATH": os.defpath
+                + os.pathsep
+                + "/usr/local/cuda/bin"
+                + os.pathsep
+                + "/opt/rocm/bin",
                 "HOME": directory,
                 "TMPDIR": directory,
                 "PYTHONIOENCODING": "utf-8",
                 "PYTHONUNBUFFERED": "1",
                 "DISPATCH_OWNER_PID": str(os.getpid()),
                 "DISPATCH_OUTPUT_DIR": str(output_dir),
+                "DISPATCH_DEVICE": spec.requirements.runtime,
             }
+            # Preserve device assignment and driver search paths, never worker credentials.
+            for setting in (
+                "CUDA_VISIBLE_DEVICES",
+                "HIP_VISIBLE_DEVICES",
+                "ROCR_VISIBLE_DEVICES",
+                "LD_LIBRARY_PATH",
+            ):
+                if setting in os.environ:
+                    env[setting] = os.environ[setting]
             cleanup["processes_stopped"] = False
             spawn = asyncio.create_task(
                 asyncio.create_subprocess_exec(

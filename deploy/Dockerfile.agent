@@ -203,10 +203,11 @@ WORKDIR /opt/dispatch
 COPY backend/pyproject.toml backend/uv.lock ./
 COPY backend/src ./src
 RUN uv sync --frozen --no-dev --no-editable
-# Use the official CPU index: ordinary Linux PyPI wheels can pull CUDA libraries.
+# CPU is the default; GPU hosts can choose a compatible official CUDA wheel index.
+ARG PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
 RUN --mount=type=cache,id=dispatch-python,target=/root/.cache/uv \
     uv pip install --python .venv/bin/python torch==2.13.0 \
-    --index-url https://download.pytorch.org/whl/cpu
+    --index-url ${PYTORCH_INDEX_URL}
 
 FROM runtime AS python-agent
 USER root

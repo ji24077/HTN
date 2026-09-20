@@ -114,7 +114,8 @@ it("shows Python dependencies and downloadable outputs", async () => {
     phase: "completed",
     plan: null,
     program_plan: {
-      summary: "Train a CPU model",
+      summary: "Train a CUDA model",
+      requirements: { runtime: "cuda", vram_mib: 8192 },
       entrypoint: "train.py",
       validator: "validate.py",
       dependencies: ["torch", "numpy"],
@@ -130,6 +131,7 @@ it("shows Python dependencies and downloadable outputs", async () => {
   expect(
     await screen.findByRole("button", { name: "Download model.pt" }),
   ).toBeInTheDocument();
+  expect(screen.getByText(/train.py · CUDA · validator:/)).toBeInTheDocument();
   expect(screen.getByText("3. Validate outputs")).toHaveClass("current");
   expect(screen.queryByLabelText("Trial progress")).not.toBeInTheDocument();
 });

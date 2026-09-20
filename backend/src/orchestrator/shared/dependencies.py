@@ -8,7 +8,7 @@ from .protocol import Model, Requirements
 
 
 class CPURequirements(Requirements):
-    """Uploaded Python projects currently target the CPU runtime only."""
+    """Persistent services retain their CPU-only execution contract."""
 
     runtime: Literal["cpu"] = "cpu"
     vram_mib: Literal[0] = 0
@@ -55,10 +55,12 @@ Dependency setup is authorized by submission and counts toward execution/startup
 allow enough time for installation, including probes. Installation logs are execution logs.
 Review actual installation/probe failures before revising a plan. Do not claim setup succeeded
 until the worker reports it. After validation, keep the dependency plan frozen with the code.
-This version supports Python and PyTorch on CPU only. Worker capabilities may report
-python.pytorch with the bundled CPU PyTorch version; keep that version and respect its
-compatibility constraints. Additional Python libraries can be installed automatically.
-Do not choose Blender, CUDA, GPU libraries or non-Python runtimes. Reject jobs that explicitly
-require these instead of silently changing them to CPU. OS packages and model weights are not
+Worker capabilities report the available runtime (CPU, CUDA, or MPS) and python.pytorch
+with the bundled PyTorch version. Keep that exact build and its compatibility constraints.
+GPU-capable builds also run on CPU, but GPU execution requires a reported usable device
+and source that places its model and tensors on that device. Prefer compatible GPUs for
+automatic device selection; CPU is the fallback when none is available. Explicit GPU-only
+requests must not be silently downgraded. Additional Python libraries can be installed.
+Do not choose Blender or non-Python runtimes. OS packages and model weights are not
 installed by this dependency setup step.
 """

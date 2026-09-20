@@ -172,8 +172,10 @@ export function SimulationDetails({
             <summary>Python execution plan</summary>
             <p>{status.program_plan.summary}</p>
             <p>
-              {status.program_plan.entrypoint} · CPU · validator:{" "}
-              {status.program_plan.validator}
+              {status.program_plan.entrypoint} ·{" "}
+              {status.program_plan.requirements?.runtime?.toUpperCase() ||
+                "CPU"}{" "}
+              · validator: {status.program_plan.validator}
             </p>
             {!!status.program_plan.dependencies?.length && (
               <p>
