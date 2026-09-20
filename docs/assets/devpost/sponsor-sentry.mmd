@@ -1,0 +1,14 @@
+flowchart TB
+    P["Backend and workers<br/>Errors, Logs, Tracing, Profiling"] --> E["Sentry evidence<br/>Job, task, worker, attempt, trace"]
+    B["Dashboard<br/>Tracing, Logs, error-triggered Replay"] --> D["Developer investigation"]
+    E --> D
+    E --> Q["Backend Sentry reader<br/>Enforce job scope and page limits"]
+    Q --> S["Run supervisor<br/>Read state and save findings"]
+    S --> A["Authorized recovery action<br/>Retry, pause, cancel, reserve"]
+    A --> O["Observe the next job state<br/>Record action and outcome"]
+    O -->|"Reassess"| S
+    E --> C["Incident agent via Sentry CLI<br/>Issue, stack trace, related logs"]
+    C --> F["Isolated code change<br/>Fix and regression test"]
+    F --> R["Pull request and human review"]
+    R --> M["Merged incident memory<br/>Context for future investigations"]
+    M -.-> C

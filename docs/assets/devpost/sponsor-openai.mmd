@@ -1,0 +1,10 @@
+flowchart TB
+    C["User request, fresh job state,<br/>evidence, and saved history"]
+    C --> G["GPT-6 Astra<br/>OpenAI Responses API"]
+    G --> T{"Tool call returned?"}
+    T -->|"Yes"| P["Save pending call<br/>Validate arguments and scope"]
+    P -->|"Allowed"| X["Execute job tool<br/>Read, act, or save findings"]
+    P -->|"Rejected"| R["Save tool result or error<br/>Return it to the model"]
+    X --> R
+    R -->|"Within turn limits"| G
+    T -->|"No"| S["Save reply and findings<br/>Await the next event or check"]
