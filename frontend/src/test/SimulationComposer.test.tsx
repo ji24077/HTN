@@ -62,6 +62,24 @@ it("retains a CAD cap on retry and uses a new submission when the cap changes", 
   expect(upload.mock.calls[2][2]).not.toBe(upload.mock.calls[1][2]);
 });
 
+it.each(["scene.blend", "input.custom", "README"])(
+  "submits %s without requiring a Python file",
+  async (name) => {
+    const user = userEvent.setup();
+    upload.mockReset().mockResolvedValue({ spec: { id: "file-job" } });
+    render(<SimulationComposer onCreated={vi.fn()} />);
+    const file = new File(["original bytes"], name);
+    await user.upload(screen.getByLabelText("Project files"), file);
+    await user.type(
+      screen.getByLabelText("What would you like to do?"),
+      "Process this file",
+    );
+    await user.click(screen.getByRole("button", { name: "Submit project" }));
+    await waitFor(() => expect(upload).toHaveBeenCalledOnce());
+    expect(upload.mock.calls[0][0]).toEqual([file]);
+  },
+);
+
 it("rejects colliding filenames before submission", async () => {
   const user = userEvent.setup();
   render(<SimulationComposer onCreated={vi.fn()} />);

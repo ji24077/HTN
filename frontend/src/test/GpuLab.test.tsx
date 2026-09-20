@@ -63,7 +63,9 @@ test("streams a reply and records the run with its timings", async () => {
   expect(await screen.findByText("RISK: high")).toBeInTheDocument();
   expect(screen.getByText("0.41s")).toBeInTheDocument();
   expect(screen.getByText("1.20s")).toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: /Evidence/ }));
+  await userEvent.click(
+    screen.getByRole("button", { name: /Setup & results/ }),
+  );
   expect(screen.getByText("No policy")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Send again" })).toBeEnabled();
 });
@@ -293,7 +295,9 @@ test("separates recorded optimization passes from rejected migrations", async ()
     }),
   );
   render(<GpuLab active />);
-  await userEvent.click(screen.getByRole("button", { name: "Evidence" }));
+  await userEvent.click(
+    screen.getByRole("button", { name: "Setup & results" }),
+  );
   expect(await screen.findByLabelText("GPU comparison")).toHaveValue("a5000");
   expect(screen.getByLabelText("Message the model")).toBeInTheDocument();
   expect(
@@ -329,7 +333,9 @@ test("read-only backend hides mutation controls and explains missing evidence", 
   );
   render(<GpuLab active />);
   expect(await screen.findByLabelText("Message GPU workflow")).toBeEnabled();
-  await userEvent.click(screen.getByRole("button", { name: "Evidence" }));
+  await userEvent.click(
+    screen.getByRole("button", { name: "Setup & results" }),
+  );
   expect(
     screen.getByRole("complementary", { name: "Experiment" }),
   ).toBeInTheDocument();

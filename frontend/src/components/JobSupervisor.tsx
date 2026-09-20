@@ -3,7 +3,13 @@ import { Icon } from "./Icon";
 import { formatMoney } from "../lib/format";
 import { ApiError, readSupervisor, type SupervisorStatus } from "../api/client";
 
-export function JobSupervisor({ jobId }: { jobId: string }) {
+export function JobSupervisor({
+  jobId,
+  terminal = false,
+}: {
+  jobId: string;
+  terminal?: boolean;
+}) {
   const [status, setStatus] = useState<SupervisorStatus | null>(null);
   const [error, setError] = useState("");
   useEffect(() => {
@@ -75,9 +81,11 @@ export function JobSupervisor({ jobId }: { jobId: string }) {
                 ? "Disabled"
                 : status.job.finalized
                   ? "Review complete"
-                  : status.runs[0]?.status === "running"
-                    ? "Reviewing this job…"
-                    : "Monitoring"
+                  : terminal
+                    ? "Final review pending"
+                    : status.runs[0]?.status === "running"
+                      ? "Reviewing this job…"
+                      : "Monitoring"
               : "Connecting"}
           </small>
         </div>
@@ -103,12 +111,14 @@ export function JobSupervisor({ jobId }: { jobId: string }) {
               No review yet. Decisions will appear here as this job progresses.
             </p>
           )}
-          {status.job.memory.questions.map((question, i) => (
-            <div className="question-callout" key={i}>
-              <strong>Needs your input</strong>
-              <p>{question}</p>
-            </div>
-          ))}
+          {status.job.memory.questions.length > 0 && (
+            <details className="supervisor-evidence">
+              <summary>Questions in review history</summary>
+              {status.job.memory.questions.map((question, i) => (
+                <p key={i}>{question}</p>
+              ))}
+            </details>
+          )}
           {status.actions.length > 0 && (
             <div className="supervisor-actions">
               <h4>
@@ -125,13 +135,15 @@ export function JobSupervisor({ jobId }: { jobId: string }) {
               ))}
             </div>
           )}
-          {status.job.memory.followups.map((followup, i) => (
-            <div className="followup" key={i}>
-              <strong>Next check</strong>
-              <p>{followup.check}</p>
-              <small>{new Date(followup.due_at).toLocaleString()}</small>
-            </div>
-          ))}
+          {!terminal &&
+            !status.job.finalized &&
+            status.job.memory.followups.map((followup, i) => (
+              <div className="followup" key={i}>
+                <strong>Next check</strong>
+                <p>{followup.check}</p>
+                <small>{new Date(followup.due_at).toLocaleString()}</small>
+              </div>
+            ))}
           {status.job.memory.findings.length > 0 && (
             <details className="supervisor-evidence">
               <summary>
@@ -192,7 +204,7 @@ function inline(text: string) {
       ),
     );
 }
-function RichText({ text }: { text: string }) {
+export function RichText({ text }: { text: string }) {
   return (
     <>
       {text.split(/\n\n+/).map((paragraph, index) =>

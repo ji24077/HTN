@@ -5,7 +5,11 @@ import { record, taskTitle, time, workerName } from "../lib/format";
 import { statusLabels } from "../lib/jobs";
 import { SimulationDetails, phaseLabels } from "./SimulationDetails";
 import { JobSupervisor } from "./JobSupervisor";
+import { JobOutcome } from "./JobOutcome";
+import { JobOutputs } from "./JobOutputs";
+import type { SimulationStatus } from "../api/client";
 import { Icon } from "./Icon";
+import { jobViews, type JobView } from "../hooks/useWorkspaceNavigation";
 
 const SETTLED = new Set<Task["state"]>(["succeeded", "failed", "cancelled"]);
 const labels: Record<string, string> = {
@@ -48,11 +52,19 @@ export function TaskDetails({
   tasks = [],
   onSelectTask,
   onClose,
+  jobView,
+  onViewChange,
+  request = null,
+  onRetry,
 }: {
   task: Task | null;
   tasks?: Task[];
   onSelectTask?: (task: Task) => void;
   onClose: () => void;
+  jobView?: JobView;
+  onViewChange?: (view: JobView) => void;
+  request?: { error?: string; retryable: boolean } | null;
+  onRetry?: () => void;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const taskId = task?.spec.id;
@@ -64,6 +76,11 @@ export function TaskDetails({
    */
   const [full, setFull] = useState<Task | null>(null);
   const [error, setError] = useState("");
+  const [localView, setView] = useState<JobView>("Overview");
+  const view = jobView ?? localView;
+  const [project, setProject] = useState<SimulationStatus | null>(null);
+  const [resultError, setResultError] = useState("");
+  const [resultRevision, setResultRevision] = useState(0);
   const [tab, setTab] = useState("Timeline");
   const [query, setQuery] = useState("");
   const [attempt, setAttempt] = useState("");
@@ -73,10 +90,15 @@ export function TaskDetails({
   const logRef = useRef<HTMLDivElement>(null);
   const cursorRef = useRef({ taskId, value: 0 });
   const settled = task ? SETTLED.has(task.state) : false;
-  const isService = task?.spec.kind === "python_service" ||
+  const isService =
+    !!project?.service ||
+    task?.spec.kind === "python_service" ||
     record(task?.spec.payload).execution_mode === "service";
   useEffect(() => {
     setEvents([]);
+    setView("Overview");
+    setProject(null);
+    setFull(null);
     setError("");
     setTab("Timeline");
     setQuery("");
@@ -86,17 +108,40 @@ export function TaskDetails({
     cursorRef.current = { taskId, value: 0 };
   }, [taskId]);
   useEffect(() => {
-    setFull(null);
+    setTab(view === "Details" ? "Result" : "Timeline");
+    if (ref.current) ref.current.scrollTop = 0;
+  }, [taskId, view]);
+  useEffect(() => {
+    setResultError("");
+    setFull((previous) =>
+      previous &&
+      previous.spec?.id === taskId &&
+      previous.generation === task?.generation
+        ? previous
+        : null,
+    );
     if (!taskId) return;
     const controller = new AbortController();
     getTask(taskId, controller.signal)
       .then((one) => {
-        if (!controller.signal.aborted) setFull(one);
+        if (!controller.signal.aborted) {
+          if (one?.spec?.id !== taskId)
+            throw new Error("Invalid task response");
+          setFull(one);
+        }
       })
-      // A missing result is not worth an error banner; the panel simply stays empty.
-      .catch(() => {});
+      .catch(() => {
+        if (!controller.signal.aborted)
+          setResultError("Could not load the latest result.");
+      });
     return () => controller.abort();
-  }, [taskId]);
+  }, [
+    taskId,
+    task?.state,
+    task?.generation,
+    record(task?.spec.payload).phase,
+    resultRevision,
+  ]);
   useEffect(() => {
     if (!taskId) return;
     const controller = new AbortController();
@@ -140,9 +185,9 @@ export function TaskDetails({
     };
   }, [taskId, task?.generation, settled]);
   useEffect(() => {
-    if (task && !ref.current?.open) ref.current?.showModal();
-    else if (!task && ref.current?.open) ref.current.close();
-  }, [!!task]);
+    if ((task || request) && !ref.current?.open) ref.current?.showModal();
+    else if (!task && !request && ref.current?.open) ref.current.close();
+  }, [!!task || !!request]);
   useEffect(() => {
     if (follow && tab === "Logs" && logRef.current)
       logRef.current.scrollTop = logRef.current.scrollHeight;
@@ -188,13 +233,32 @@ export function TaskDetails({
       id="result-dialog"
       className="detail-dialog"
       aria-labelledby="result-title"
-      onClose={onClose}
+      onClose={() => {
+        if (task || request) onClose();
+      }}
     >
       <header className="detail-header">
         <div>
           <div className="eyebrow">JOB DETAILS</div>
-          <h2 id="result-title">{task ? taskTitle(task) : "Task details"}</h2>
-          <p className="mono muted">{task?.spec.job_id}</p>
+          <h2 id="result-title">
+            {task
+              ? taskTitle(task)
+              : request?.error
+                ? "Couldn’t open job"
+                : "Opening job"}
+          </h2>
+          <p className="muted">
+            {task && (
+              <span className={`status-badge ${task.state}`}>
+                {!settled && project?.phase
+                  ? phaseLabels[project.phase] || statusLabels[task.state]
+                  : statusLabels[task.state]}
+              </span>
+            )}{" "}
+            <span className="detail-submitted">
+              {task && new Date(task.created_at).toLocaleString()}
+            </span>
+          </p>
         </div>
         <button
           className="icon-btn"
@@ -204,61 +268,76 @@ export function TaskDetails({
           <Icon name="close" />
         </button>
       </header>
+      {request && !task && (
+        <div className="job-link-state">
+          <p role={request.error ? "alert" : "status"}>
+            {request.error || "Loading your job…"}
+          </p>
+          <div className="job-link-actions">
+            {request.error && request.retryable && (
+              <button className="primary-btn" onClick={onRetry}>
+                Retry job
+              </button>
+            )}
+            <button className="outline-btn" onClick={onClose}>
+              Back to jobs
+            </button>
+          </div>
+        </div>
+      )}
       {task && (
         <>
-          <div className="detail-summary">
-            <div>
-              <span>Status</span>
-              <strong className={`status-badge ${task.state}`}>
-                <i />
-                {task.spec.kind === "simulation_job"
-                  ? phaseLabels[String(record(task.spec.payload).phase)] ||
-                    statusLabels[task.state]
-                  : statusLabels[task.state]}
-              </strong>
-            </div>
-            <div>
-              <span>
-                {isService ? "Execution" : task.spec.kind === "simulation_job"
-                  ? "Pipeline progress"
-                  : "Progress"}
-              </span>
-              <strong>
-                {isService ? "Persistent" : `${task.state === "succeeded" ? 100 : Math.round(task.progress)}%`}
-              </strong>
-            </div>
-            <div>
-              <span>
-                {task.spec.kind === "simulation_job"
-                  ? "Allocation"
-                  : settled
-                    ? "Last worker"
-                    : "Current worker"}
-              </span>
-              <strong>
-                {isService && task.spec.kind === "simulation_job" ? "One worker" : task.spec.kind === "simulation_job"
-                  ? "Managed by phase"
-                  : task.worker_id
-                    ? workerName(task.worker_id)
-                    : "Unassigned"}
-              </strong>
-            </div>
-            <div>
-              <span>
-                {task.spec.kind === "simulation_job" ? "Launch" : "Attempts"}
-              </span>
-              <strong>
-                {isService && task.spec.kind === "simulation_job" ? "Automatic recovery" : task.spec.kind === "simulation_job" ? (
-                  "After validation"
-                ) : (
-                  <>
-                    {task.generation}{" "}
-                    <small>/ {task.spec.max_attempts} allowed</small>
-                  </>
-                )}
-              </strong>
-            </div>
-          </div>
+          <nav className="job-view-tabs" aria-label="Job views">
+            {jobViews.map((name) => (
+              <button
+                key={name}
+                aria-current={view === name ? "page" : undefined}
+                onClick={() => {
+                  setView(name);
+                  onViewChange?.(name);
+                }}
+              >
+                {name}
+              </button>
+            ))}
+          </nav>
+          {resultError && (
+            <p role="alert" className="inline-alert">
+              {resultError}{" "}
+              <button
+                className="text-btn"
+                onClick={() => setResultRevision((n) => n + 1)}
+              >
+                Retry result
+              </button>
+            </p>
+          )}
+          {view === "Overview" && !isService && (
+            <JobOutcome
+              task={{ ...task, result: full?.result ?? task.result }}
+              status={project}
+            />
+          )}
+          {view === "Files" &&
+            (isService ? (
+              <p className="empty-state">
+                This service exposes an endpoint. Open Overview for access
+                details.
+              </p>
+            ) : task.spec.kind === "simulation_job" ? (
+              <JobOutputs
+                jobId={task.spec.job_id}
+                phase={
+                  project?.phase ??
+                  (task.state === "succeeded" ? "completed" : task.state)
+                }
+              />
+            ) : (
+              <p className="empty-state">
+                This diagnostic task returns structured results. Open Details to
+                inspect them.
+              </p>
+            ))}
           {tasks.length > 1 && (
             <div className="task-selector">
               <label htmlFor="detail-task">Task in this job</label>
@@ -280,16 +359,18 @@ export function TaskDetails({
               </select>
             </div>
           )}
-          <div className="detail-columns">
+          <div className={`detail-columns job-view-${view.toLowerCase()}`}>
             <div className="execution-column">
               {task.spec.kind === "simulation_job" && (
                 <SimulationDetails
                   key={task.spec.job_id}
                   jobId={task.spec.job_id}
                   cancelled={task.state === "cancelled"}
+                  view={view}
+                  onStatus={setProject}
                 />
               )}
-              {task.failure && (
+              {task.failure && view === "Details" && (
                 <div className="failure-banner">
                   <Icon name="warning" />
                   <div>
@@ -300,7 +381,9 @@ export function TaskDetails({
               )}
               <section
                 className="attempt-section"
-                hidden={task.spec.kind === "simulation_job"}
+                hidden={
+                  view !== "Details" || task.spec.kind === "simulation_job"
+                }
                 aria-label="Execution attempts"
               >
                 <div className="section-heading">
@@ -351,7 +434,7 @@ export function TaskDetails({
                           <strong>{workerName(machine || null)}</strong>
                           <small>
                             {failed
-                              ? message(failed).replaceAll("_", " ")
+                              ? message(failed)
                               : success
                                 ? "Completed"
                                 : cancelled
@@ -376,45 +459,53 @@ export function TaskDetails({
               <section
                 className="execution-history"
                 aria-label="Execution history"
+                hidden={view !== "Activity" && view !== "Details"}
               >
                 <div
                   className="detail-tabs"
                   role="tablist"
                   aria-label="Execution views"
                 >
-                  {["Timeline", "Logs", "Result"].map((name) => (
-                    <button
-                      role="tab"
-                      id={`tab-${name}`}
-                      aria-controls={tab === name ? `panel-${name}` : undefined}
-                      aria-selected={tab === name}
-                      tabIndex={tab === name ? 0 : -1}
-                      onKeyDown={(event) => {
-                        const names = ["Timeline", "Logs", "Result"];
-                        let next = -1;
-                        if (event.key === "ArrowRight")
-                          next = (names.indexOf(name) + 1) % names.length;
-                        if (event.key === "ArrowLeft")
-                          next =
-                            (names.indexOf(name) + names.length - 1) %
-                            names.length;
-                        if (event.key === "Home") next = 0;
-                        if (event.key === "End") next = names.length - 1;
-                        if (next >= 0) {
-                          event.preventDefault();
-                          setTab(names[next]);
-                          document
-                            .getElementById(`tab-${names[next]}`)
-                            ?.focus();
+                  {(view === "Details" ? ["Result"] : ["Timeline", "Logs"]).map(
+                    (name) => (
+                      <button
+                        role="tab"
+                        id={`tab-${name}`}
+                        aria-controls={
+                          tab === name ? `panel-${name}` : undefined
                         }
-                      }}
-                      key={name}
-                      onClick={() => setTab(name)}
-                    >
-                      {name}
-                      {name === "Logs" && <small>{events.length}</small>}
-                    </button>
-                  ))}
+                        aria-selected={tab === name}
+                        tabIndex={tab === name ? 0 : -1}
+                        onKeyDown={(event) => {
+                          const names =
+                            view === "Details"
+                              ? ["Result"]
+                              : ["Timeline", "Logs"];
+                          let next = -1;
+                          if (event.key === "ArrowRight")
+                            next = (names.indexOf(name) + 1) % names.length;
+                          if (event.key === "ArrowLeft")
+                            next =
+                              (names.indexOf(name) + names.length - 1) %
+                              names.length;
+                          if (event.key === "Home") next = 0;
+                          if (event.key === "End") next = names.length - 1;
+                          if (next >= 0) {
+                            event.preventDefault();
+                            setTab(names[next]);
+                            document
+                              .getElementById(`tab-${names[next]}`)
+                              ?.focus();
+                          }
+                        }}
+                        key={name}
+                        onClick={() => setTab(name)}
+                      >
+                        {name}
+                        {name === "Logs" && <small>{events.length}</small>}
+                      </button>
+                    ),
+                  )}
                 </div>
                 {error && (
                   <p role="status" className="inline-alert">
@@ -466,9 +557,7 @@ export function TaskDetails({
                           {message(event) !==
                             (labels[event.kind] ||
                               event.kind.replaceAll("_", " ")) && (
-                            <p className="event-message">
-                              {message(event).replaceAll("_", " ")}
-                            </p>
+                            <p className="event-message">{message(event)}</p>
                           )}
                           <details>
                             <summary>Event details</summary>
@@ -628,8 +717,8 @@ export function TaskDetails({
                 )}
               </section>
             </div>
-            <div className="supervisor-column">
-              <JobSupervisor jobId={task.spec.job_id} />
+            <div className="supervisor-column" hidden={view !== "Details"}>
+              <JobSupervisor jobId={task.spec.job_id} terminal={settled} />
             </div>
           </div>
         </>

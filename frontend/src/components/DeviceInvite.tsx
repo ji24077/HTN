@@ -1,10 +1,22 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createDeviceInvite } from "../api/client";
 
 export function DeviceInvite() {
-  const [invite, setInvite] = useState<{ url: string; expires: string } | null>(
-    null,
-  );
+  const [invite, setInvite] = useState<{
+    url: string;
+    expires: string;
+    expiresAt: number;
+  } | null>(null);
+  const [expired, setExpired] = useState(false);
+  useEffect(() => {
+    setExpired(false);
+    if (!invite) return;
+    const timer = setTimeout(
+      () => setExpired(true),
+      Math.max(0, invite.expiresAt - Date.now()),
+    );
+    return () => clearTimeout(timer);
+  }, [invite]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
@@ -23,6 +35,7 @@ export function DeviceInvite() {
       url.searchParams.set("code", result.code);
       setInvite({
         url: url.href,
+        expiresAt: Date.now() + result.expires_in * 1000,
         expires: new Date(
           Date.now() + result.expires_in * 1000,
         ).toLocaleTimeString(),
@@ -65,6 +78,7 @@ export function DeviceInvite() {
           />
           <button
             className="outline-btn"
+            disabled={expired}
             onClick={async () => {
               try {
                 await navigator.clipboard.writeText(invite.url);
@@ -77,7 +91,9 @@ export function DeviceInvite() {
             {copied ? "Copied" : "Copy invite"}
           </button>
           <p>
-            Works once. Expires at {invite.expires}. Keep this link private.
+            {expired
+              ? "Invite expired. Create a new invite to connect a device."
+              : `Works once. Expires at ${invite.expires}. Keep this link private.`}
           </p>
         </div>
       )}

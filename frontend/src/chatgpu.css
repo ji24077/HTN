@@ -1,0 +1,872 @@
+/* ChatGPU: shared layouts and controls for the outcome-first workspace. */
+:root {
+  --bg: #f6f7f5;
+  --ink: #1d3029;
+  --muted: #66736d;
+  --line: #e0e6e1;
+  --green: #21674c;
+  --soft: #edf5ef;
+}
+.brand {
+  letter-spacing: -1px;
+  font-weight: 700;
+  font-size: 25px;
+}
+.brandmark {
+  border-radius: 11px;
+}
+.app-sidebar {
+  background: #fcfdfb;
+}
+.workspace-label {
+  border-radius: 10px;
+}
+.subtitle {
+  max-width: 640px;
+  font-size: 15px;
+}
+.main-nav button {
+  min-height: 44px;
+}
+.main-nav button:nth-child(4) {
+  margin-top: 24px;
+}
+.main-nav button:nth-child(n + 4) {
+  color: var(--muted);
+}
+.heading {
+  margin-bottom: 24px;
+}
+.metrics {
+  gap: 14px;
+}
+.metric {
+  box-shadow: none;
+  border-radius: 12px;
+}
+.metric-value {
+  font-size: 30px;
+}
+.primary-btn,
+.outline-btn,
+.submit {
+  min-height: 40px;
+  border-radius: 8px;
+}
+.icon-btn {
+  min-width: 40px;
+  min-height: 40px;
+}
+.text-btn {
+  min-height: 36px;
+}
+button.danger {
+  color: #a53630;
+}
+summary {
+  font-size: 13px;
+  padding-block: 6px;
+}
+summary::marker {
+  color: var(--muted);
+}
+.job-open strong {
+  font-size: 14px;
+}
+.job-open small {
+  line-height: 1.7;
+}
+.mobile-job-date {
+  display: none;
+}
+.filter-tabs {
+  overflow-x: auto;
+}
+.filter-tabs button {
+  white-space: nowrap;
+}
+.job-view-tabs {
+  display: flex;
+  gap: 8px;
+  padding: 0 28px;
+  border-bottom: 1px solid var(--line);
+  background: white;
+}
+.job-link-state {
+  padding: 28px;
+  color: var(--muted);
+}
+.job-link-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 24px;
+}
+.job-view-tabs button {
+  border: 0;
+  border-bottom: 3px solid transparent;
+  background: transparent;
+  padding: 16px 18px 13px;
+  color: var(--muted);
+  font-weight: 600;
+}
+.job-view-tabs button[aria-current="page"] {
+  color: var(--green);
+  border-bottom-color: var(--green);
+}
+.detail-dialog {
+  width: min(1100px, calc(100% - 48px));
+  background: #fff;
+}
+.detail-header {
+  background: #fff;
+}
+.detail-header h2 {
+  margin-bottom: 10px;
+}
+.detail-submitted {
+  margin-left: 12px;
+  font-size: 12px;
+}
+.detail-columns {
+  grid-template-columns: minmax(0, 1fr);
+}
+.detail-columns.job-view-details {
+  grid-template-columns: minmax(0, 1fr) 320px;
+}
+.detail-columns.job-view-files {
+  display: none;
+}
+.detail-dialog > .inline-alert {
+  margin: 16px 28px;
+}
+.outcome-card {
+  margin: 28px 28px 0;
+  padding: 26px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fafcf9;
+}
+.outcome-card.succeeded {
+  border-color: #d6e7da;
+  background: linear-gradient(110deg, #f2f8f2, #fcfdfb);
+}
+.outcome-card.failed {
+  background: #fff9f7;
+  border-color: #eed6cd;
+}
+.outcome-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.outcome-heading .eyebrow {
+  font-size: 11px;
+}
+.outcome-heading h3 {
+  font-size: 25px;
+  letter-spacing: -0.6px;
+  margin: 6px 0 12px;
+}
+.outcome-summary {
+  font-size: 15px;
+  line-height: 1.7;
+  max-width: 75ch;
+  overflow-wrap: anywhere;
+}
+.outcome-environment {
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.outcome-note {
+  margin-top: 20px;
+  color: var(--muted);
+  font-size: 12px;
+  max-width: 75ch;
+}
+.outcome-text {
+  white-space: pre-wrap;
+  margin-top: 16px;
+}
+.result-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(185px, 1fr));
+  gap: 16px;
+  margin-top: 22px;
+}
+.result-metric {
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 18px;
+}
+.result-metric > span {
+  display: block;
+  color: var(--muted);
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.6px;
+}
+.result-metric > strong {
+  display: block;
+  font-size: 29px;
+  font-weight: 550;
+  margin: 6px 0;
+  overflow-wrap: anywhere;
+}
+.result-metric small {
+  display: block;
+}
+.metric-pass {
+  color: var(--green);
+}
+.metric-fail {
+  color: #a53630;
+}
+.metric-scale {
+  height: 6px;
+  background: #eaf0ec;
+  border-radius: 3px;
+  margin-top: 16px;
+  overflow: hidden;
+}
+.metric-scale > i {
+  display: block;
+  height: 100%;
+  background: var(--green);
+}
+.output-files {
+  min-width: 0;
+}
+.detail-dialog > .output-files {
+  padding: 28px;
+}
+.output-files .section-heading {
+  margin-bottom: 16px;
+}
+.artifact-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 10px;
+}
+.artifact-list > li {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+}
+.artifact-icon {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 46px;
+  background: var(--soft);
+  border-radius: 7px;
+  color: var(--green);
+  flex-shrink: 0;
+}
+.artifact-description {
+  flex: 1;
+  min-width: 0;
+}
+.artifact-description strong {
+  font-weight: 600;
+  display: block;
+  overflow-wrap: anywhere;
+}
+.artifact-description small {
+  display: block;
+  color: var(--muted);
+  margin-top: 4px;
+}
+.artifact-actions {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+}
+.artifact-preview {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 18px;
+  margin-top: 16px;
+}
+.artifact-preview img {
+  display: block;
+  max-width: 100%;
+  max-height: 480px;
+  object-fit: contain;
+  margin: auto;
+}
+.raw-export {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding-top: 24px;
+  margin-top: 24px;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+}
+.simulation-progress {
+  margin-bottom: 0;
+}
+.simulation-progress > div[hidden] + .output-files {
+  margin-top: 0;
+}
+.simulation-progress .pipeline-steps {
+  margin-block: 16px;
+}
+.job-view-overview
+  .simulation-progress
+  > div:first-child:has(.pipeline-steps[hidden])
+  > .section-heading {
+  display: none;
+}
+.pipeline-executions {
+  margin: 0 0 24px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 16px;
+}
+.pipeline-executions > summary {
+  font-weight: 600;
+  color: var(--ink);
+}
+.pipeline-task-list {
+  margin-block: 12px;
+}
+.runtime-toggle {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 18px;
+}
+.runtime-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.runtime-choices {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: 100%;
+  border-radius: 8px;
+}
+.runtime-choices button {
+  min-width: 0;
+  min-height: 44px;
+  padding-inline: 12px;
+  font-size: 12px;
+  letter-spacing: normal;
+}
+.runtime-choices button.on {
+  background: var(--green);
+  color: #fff;
+  box-shadow: none;
+}
+.runtime-choices button:disabled.on {
+  opacity: 0.65;
+}
+.runtime-why {
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 0;
+  color: var(--muted);
+}
+.runtime-summary {
+  margin: 0 0 18px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+.runtime-error {
+  color: #a53630;
+  overflow-wrap: anywhere;
+}
+.workers {
+  align-items: start;
+}
+.worker {
+  display: flex;
+  flex-direction: column;
+  cursor: default;
+  border-radius: 12px;
+}
+.worker-platform {
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.worker-footer {
+  margin-top: auto;
+  padding-right: 0;
+}
+.worker .heartbeat {
+  font-family: inherit;
+  font-size: 11px;
+  margin-top: 6px;
+}
+.worker-inspect {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 44px;
+  margin-top: 16px;
+  padding: 10px 12px;
+  font-size: 13px;
+  text-align: left;
+  color: var(--ink);
+}
+.worker-inspect:hover,
+.worker-inspect[aria-expanded="true"] {
+  background: var(--soft);
+  border-color: var(--green);
+}
+.machine-details {
+  margin-top: 16px;
+  font-size: 12px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.machine-details dl {
+  margin: 0;
+}
+.machine-details dt {
+  color: var(--ink);
+  font-weight: 600;
+  margin-top: 12px;
+}
+.machine-details dt:first-child {
+  margin-top: 0;
+}
+.machine-details dd {
+  margin: 4px 0 0;
+  line-height: 1.6;
+}
+.worker-diagnostics {
+  margin-bottom: 26px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 12px;
+}
+.worker-diagnostics > summary {
+  color: var(--muted);
+}
+.worker-diagnostics .section-actions {
+  margin-top: 14px;
+}
+.device-invite {
+  margin-top: 0;
+  margin-bottom: 22px;
+  border-radius: 12px;
+  background: #fff;
+}
+.offline-toggle {
+  margin-top: 20px;
+}
+.compose-dialog {
+  width: min(580px, calc(100% - 32px));
+  max-height: calc(100dvh - 32px);
+}
+.compose-dialog > header {
+  padding: 18px 24px;
+}
+.simulation-form {
+  padding: 18px 24px 0;
+  max-height: calc(100dvh - 140px);
+  overflow-y: auto;
+}
+.simulation-form > p:first-child {
+  color: var(--muted);
+  margin: 0 0 16px;
+  font-size: 14px;
+}
+.simulation-form .upload-zone {
+  padding: 16px;
+  gap: 7px;
+  margin-bottom: 16px;
+}
+.simulation-form .upload-zone > svg,
+.simulation-form .upload-zone > small {
+  display: none;
+}
+.simulation-form textarea {
+  min-height: 90px;
+}
+.simulation-form .field-label {
+  margin-top: 14px;
+}
+.compose-submit {
+  position: sticky;
+  bottom: 0;
+  background: #fff;
+  border-top: 1px solid var(--line);
+  margin: 20px -24px 0;
+  padding: 12px 24px 18px;
+  z-index: 2;
+}
+.compose-submit > p {
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+.compose-submit .submit {
+  margin: 0;
+  width: 100%;
+}
+.assistant-richtext {
+  line-height: 1.7;
+}
+.assistant-richtext p + p {
+  margin-top: 12px;
+}
+.lab-evidence summary {
+  list-style: revert;
+}
+@media (max-width: 1000px) {
+  .detail-columns.job-view-details {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .supervisor-column {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+  .detail-dialog {
+    width: calc(100% - 32px);
+  }
+}
+@media (max-width: 700px) {
+  .app-sidebar {
+    padding-block: 12px;
+  }
+  .brand {
+    font-size: 23px;
+  }
+  .main-nav {
+    flex-wrap: wrap;
+    overflow: visible;
+    gap: 4px;
+  }
+  .main-nav button,
+  .main-nav button:nth-child(4) {
+    margin-top: 0;
+    min-height: 40px;
+    padding: 8px 10px;
+    font-size: 12px;
+  }
+  .main-nav button small {
+    display: none;
+  }
+  .content {
+    padding: 22px 16px;
+  }
+  .heading {
+    align-items: flex-start;
+    gap: 16px;
+  }
+  .heading .eyebrow {
+    display: none;
+  }
+  .heading h1 {
+    font-size: 28px;
+  }
+  .heading .subtitle {
+    font-size: 13px;
+  }
+  .heading .primary-btn {
+    white-space: nowrap;
+    padding-inline: 12px;
+  }
+  .metrics {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+    margin-bottom: 20px;
+  }
+  .metric {
+    padding: 10px 8px;
+  }
+  .metric-label {
+    font-size: 10px;
+    min-height: 30px;
+  }
+  .metric-label svg,
+  .metric > small {
+    display: none;
+  }
+  .metric-value {
+    font-size: 23px;
+    margin: 0;
+  }
+  .jobs-toolbar {
+    gap: 12px;
+  }
+  .filter-tabs {
+    width: 100%;
+  }
+  .filter-tabs button {
+    padding-inline: 10px;
+  }
+  .mobile-job-date {
+    display: block;
+    font-size: 11px;
+  }
+  .job-table .job-open strong {
+    font-size: 13px;
+  }
+  .job-table td {
+    padding-block: 16px;
+  }
+  .detail-dialog {
+    width: 100%;
+    max-height: 100dvh;
+    height: 100dvh;
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+  }
+  .detail-header {
+    position: static;
+    padding: 18px;
+    align-items: flex-start;
+  }
+  .detail-header h2 {
+    font-size: 21px;
+  }
+  .detail-submitted {
+    display: block;
+    margin: 8px 0 0;
+  }
+  .job-view-tabs {
+    padding: 0 12px;
+    gap: 0;
+    position: sticky;
+    top: 0;
+    z-index: 3;
+  }
+  .job-view-tabs button {
+    flex: 1;
+    padding: 14px 10px 11px;
+    font-size: 13px;
+  }
+  .outcome-card {
+    margin: 18px 16px 0;
+    padding: 18px;
+  }
+  .outcome-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0;
+  }
+  .outcome-heading h3 {
+    font-size: 23px;
+  }
+  .outcome-heading .outline-btn {
+    margin-bottom: 14px;
+  }
+  .outcome-summary {
+    font-size: 14px;
+  }
+  .outcome-environment {
+    font-size: 12px;
+  }
+  .result-metrics {
+    margin-top: 16px;
+  }
+  .result-metric {
+    padding: 14px;
+  }
+  .execution-column,
+  .supervisor-column,
+  .detail-dialog > .output-files {
+    padding: 18px 16px;
+  }
+  .artifact-list > li {
+    flex-wrap: wrap;
+    padding: 14px;
+    gap: 12px;
+  }
+  .artifact-description {
+    min-width: 180px;
+  }
+  .artifact-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+  .raw-export {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .compose-dialog > header {
+    padding: 16px 20px;
+  }
+  .simulation-form {
+    max-height: calc(100dvh - 126px);
+    padding: 14px 20px 0;
+  }
+  .simulation-form .upload-zone {
+    padding: 12px;
+  }
+  .simulation-form .upload-zone > span {
+    font-size: 12px;
+  }
+  .compose-submit {
+    margin-inline: -20px;
+    padding-inline: 20px;
+  }
+  .compose-submit > p {
+    display: none;
+  }
+  .device-invite {
+    padding: 18px;
+  }
+}
+
+/* Keep the result and first deliverables together on compact screens. */
+.job-view-overview .simulation-progress {
+  padding: 0;
+  border: 0;
+}
+.outcome-card {
+  padding: 20px;
+}
+.outcome-heading h3 {
+  font-size: 23px;
+}
+.result-metric {
+  padding: 15px;
+}
+.result-metric > strong {
+  font-size: 26px;
+}
+.outcome-note {
+  margin-top: 14px;
+}
+.lab-section > summary::after {
+  content: "+";
+  margin-left: auto;
+  color: var(--muted);
+}
+.lab-section[open] > summary::after {
+  content: "−";
+}
+
+.event-job-link {
+  display: inline-block;
+  margin-left: 12px;
+  font-size: 12px;
+}
+
+.field-error {
+  color: #a53630;
+  font-size: 12px;
+}
+input[aria-invalid="true"] {
+  border-color: #a53630;
+}
+
+/* Header metadata must not force the workspace wider than the viewport. */
+.topbar {
+  gap: 16px;
+}
+.crumb {
+  min-width: 0;
+}
+@media (max-width: 1100px) {
+  .account-email {
+    display: none;
+  }
+}
+.job-table td > small.muted {
+  display: block;
+  margin-top: 4px;
+}
+.job-table-wrap {
+  position: relative;
+}
+
+.loading-panel {
+  padding: 32px;
+  color: var(--muted);
+}
+.output-files > .empty-state {
+  text-align: left;
+  padding: 18px;
+  background: #f8faf8;
+  border-radius: 8px;
+}
+.mobile-more {
+  display: none;
+}
+@media (max-width: 700px) {
+  .main-nav {
+    flex-wrap: nowrap;
+  }
+  .main-nav .secondary-nav {
+    display: none;
+  }
+  .mobile-more {
+    display: block;
+    position: relative;
+    z-index: 5;
+  }
+  .mobile-more summary {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    list-style: none;
+    padding: 10px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .mobile-more summary::-webkit-details-marker {
+    display: none;
+  }
+  .mobile-more > div {
+    position: absolute;
+    right: 0;
+    top: 100%;
+    min-width: 150px;
+    padding: 6px;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    background: white;
+    box-shadow: 0 8px 24px #17302418;
+  }
+  .mobile-more button {
+    width: 100%;
+    border-radius: 6px;
+  }
+}
+@media (max-width: 360px) {
+  .main-nav button,
+  .mobile-more summary {
+    padding-inline: 6px;
+  }
+  .main-nav button {
+    gap: 4px;
+  }
+}
+#workspace-heading:focus {
+  outline: none;
+}
+.heading > div {
+  min-width: 0;
+  flex: 1;
+}
+.heading > .primary-btn {
+  flex-shrink: 0;
+}
+.heading .subtitle {
+  max-width: 100%;
+}
+@media (max-width: 700px) {
+  #fleet-status {
+    display: none;
+  }
+}
