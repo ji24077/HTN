@@ -22,8 +22,9 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass
+from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -58,10 +59,27 @@ from gpushare.dashboard.runner import (
 from gpushare.dashboard.runner import (
     set_prefix as runner_set_prefix,
 )
+from gpushare.relay.marketplace import (
+    ProviderAgent,
+    ProviderRegistry,
+    community_offer,
+    default_mvp_offers,
+    offer_from_runpod,
+)
+from gpushare.relay.models import (
+    ApprovalKind,
+    GPUOffer,
+    LeasePolicy,
+    QualityMetrics,
+    RelayGoal,
+)
+from gpushare.relay.service import ApprovalRequired, RelayError, RelayService
 
 ROOT = Path(__file__).resolve().parents[3]
 STATIC = Path(__file__).parent / "static"
 MODEL_KEY = "qwen2.5-0.5b"
+RELAY = RelayService(skills_root=ROOT / "skills", state_path=ROOT / ".gpushare/relay-runs.json")
+PROVIDERS = ProviderRegistry(ROOT / ".gpushare/provider-offers.json")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -442,6 +460,83 @@ class MigrationRequest(BaseModel):
     prepare_pods: bool = True
 
 
+class RelayPlanRequest(BaseModel):
+    goal: str = Field(min_length=3, max_length=4000)
+    include_simulated: bool = True
+
+
+class RelayApprovalRequest(BaseModel):
+    kind: ApprovalKind
+    actor: str = Field(default="local-user", min_length=1, max_length=100)
+    approve: bool = True
+
+
+class RelayVerificationRequest(BaseModel):
+    reference: QualityMetrics
+    candidate: QualityMetrics
+    candidate_applied: bool = False
+
+
+class RelayExecutionRequest(BaseModel):
+    agent: Literal["training-optimizer", "inference-optimizer", "chip-migration", "deploy"]
+    pod_id: str | None = None
+    source_pod_id: str | None = None
+    target_pod_id: str | None = None
+    model_id: str = "finetuned"
+
+
+class RelayRollbackRequest(BaseModel):
+    reason: str = Field(min_length=1, max_length=1000)
+
+
+class ProviderPolicyRequest(BaseModel):
+    offer: GPUOffer
+    goal: RelayGoal
+    policy: LeasePolicy
+    at: datetime | None = None
+
+
+class ProviderRegistrationRequest(BaseModel):
+    owner_id: str = Field(min_length=1, max_length=100)
+    chip: Literal["RTX 4090", "RTX A5000", "L40S", "MI300X"]
+    hourly_price_usd: float = Field(ge=0)
+    region: str = Field(min_length=2, max_length=50)
+    policy: LeasePolicy
+
+
+def _relay_offers(*, include_simulated: bool = True) -> list[GPUOffer]:
+    offers: list[GPUOffer] = (
+        [*PROVIDERS.list(), *default_mvp_offers()] if include_simulated else []
+    )
+    try:
+        offers = [offer_from_runpod(pod) for pod in list_pods()] + offers
+    except JobError:
+        pass
+    return offers
+
+
+def _reconcile_relay(run):
+    """Refresh a Relay run from the real background jobs it dispatched."""
+    for execution in list(run.executions):
+        try:
+            job = JOBS.get(execution.job_id)
+        except JobError:
+            continue
+        if execution.status != job.status:
+            run = RELAY.reconcile_execution(
+                run.id,
+                job.id,
+                status=job.status,
+                result=job.result,
+                error=job.error,
+            )
+        if execution.agent == "deploy" and job.status == "complete":
+            current = serving()
+            if current.get("running") and run.status != "deployed":
+                run = RELAY.mark_deployed(run.id, current)
+    return run
+
+
 def build_app():
     from fastapi import FastAPI, HTTPException
     from fastapi.responses import FileResponse
@@ -459,6 +554,165 @@ def build_app():
     @app.get("/api/health")
     def health():
         return {"ok": True}
+
+    @app.get("/api/relay/capabilities")
+    def relay_capabilities():
+        return {
+            "product": "Relay",
+            "agents": RELAY.skills.load(),
+            "mvp_chips": ["RTX 4090", "RTX A5000", "L40S", "MI300X"],
+            "workflows": ["Qwen LoRA/QLoRA", "inference A/B", "quality-gated migration", "Blender allocation"],
+            "strategies": {
+                "local_training": "DDP/FSDP",
+                "cross_provider_training": "DiLoCo",
+                "rendering": "independent frame scheduling",
+                "inference": "routing, batching, KV caching, runtime tuning",
+            },
+            "approval_boundaries": ["spend", "migration", "traffic"],
+        }
+
+    @app.get("/api/relay/offers")
+    def relay_offers(include_simulated: bool = True):
+        return {"offers": [offer.model_dump(mode="json") for offer in _relay_offers(include_simulated=include_simulated)]}
+
+    @app.post("/api/relay/plan")
+    def relay_plan(req: RelayPlanRequest):
+        try:
+            run = RELAY.create_plan(req.goal, _relay_offers(include_simulated=req.include_simulated))
+            current = serving()
+            if current.get("running"):
+                run = RELAY.record_current_deployment(run.id, current)
+            return run.model_dump(mode="json")
+        except RelayError as e:
+            raise HTTPException(400, str(e)) from e
+
+    @app.get("/api/relay/runs")
+    def relay_runs():
+        return {"runs": [_reconcile_relay(run).model_dump(mode="json") for run in RELAY.list()]}
+
+    @app.get("/api/relay/runs/{run_id}")
+    def relay_run(run_id: str):
+        try:
+            return _reconcile_relay(RELAY.get(run_id)).model_dump(mode="json")
+        except RelayError as e:
+            raise HTTPException(404, str(e)) from e
+
+    @app.post("/api/relay/runs/{run_id}/approve")
+    def relay_approve(run_id: str, req: RelayApprovalRequest):
+        try:
+            return RELAY.approve(run_id, req.kind, actor=req.actor, approve=req.approve).model_dump(mode="json")
+        except RelayError as e:
+            raise HTTPException(404, str(e)) from e
+
+    @app.post("/api/relay/runs/{run_id}/verify")
+    def relay_verify(run_id: str, req: RelayVerificationRequest):
+        try:
+            return RELAY.verify(
+                run_id,
+                req.reference,
+                req.candidate,
+                candidate_applied=req.candidate_applied,
+            ).model_dump(mode="json")
+        except RelayError as e:
+            raise HTTPException(404, str(e)) from e
+
+    @app.post("/api/relay/runs/{run_id}/execute")
+    def relay_execute(run_id: str, req: RelayExecutionRequest):
+        try:
+            run = RELAY.authorize_execution(run_id, req.agent)
+            selected = run.allocation.selected
+            selected_pod = selected.offer.resource_id if selected else None
+            pod_id = req.pod_id or selected_pod
+            if req.agent == "training-optimizer":
+                if not pod_id:
+                    raise RelayError("training requires a verified connected pod")
+                job = start_training_optimization(pod_id=pod_id)
+            elif req.agent == "inference-optimizer":
+                if not pod_id:
+                    raise RelayError("inference optimization requires a verified connected pod")
+                job = start_inference_optimization(pod_id=pod_id)
+            elif req.agent == "chip-migration":
+                if not req.source_pod_id or not req.target_pod_id:
+                    raise RelayError("migration requires source_pod_id and target_pod_id")
+                known = {pod["id"]: pod for pod in list_pods()}
+                source, target = known.get(req.source_pod_id), known.get(req.target_pod_id)
+                if not source or not target:
+                    raise RelayError("source and target must be connected pods")
+                kind = (
+                    "migrate-amd-nvidia"
+                    if source["vendor"] == "amd" and target["vendor"] == "nvidia"
+                    else "migrate-nvidia-amd"
+                    if source["vendor"] == "nvidia" and target["vendor"] == "amd"
+                    else "migrate-nextgen"
+                )
+                job = start_migration(
+                    kind=kind,
+                    source_pod_id=req.source_pod_id,
+                    target_pod_id=req.target_pod_id,
+                )
+            else:
+                if not pod_id:
+                    raise RelayError("deployment requires a verified connected pod")
+                job = start_inference_server(pod_id=pod_id, model_id=req.model_id, dtype="bf16")
+            RELAY.record_execution(run_id, req.agent, job.id)
+            return {"run": RELAY.get(run_id).model_dump(mode="json"), "job": job.public()}
+        except ApprovalRequired as e:
+            raise HTTPException(409, str(e)) from e
+        except (RelayError, JobError) as e:
+            raise HTTPException(400, str(e)) from e
+
+    @app.post("/api/relay/runs/{run_id}/deployed")
+    def relay_mark_deployed(run_id: str):
+        try:
+            state = serving()
+            if not state.get("running"):
+                raise RelayError("no inference server is running; traffic was not switched")
+            return RELAY.mark_deployed(run_id, state).model_dump(mode="json")
+        except ApprovalRequired as e:
+            raise HTTPException(409, str(e)) from e
+        except RelayError as e:
+            raise HTTPException(400, str(e)) from e
+
+    @app.post("/api/relay/runs/{run_id}/rollback")
+    def relay_rollback(run_id: str, req: RelayRollbackRequest):
+        try:
+            previous = RELAY.get(run_id).previous_deployment
+            stop_inference_server()
+            job = None
+            if previous and previous.get("pod_id") and previous.get("model_id"):
+                job = start_inference_server(
+                    pod_id=previous["pod_id"],
+                    model_id=previous["model_id"],
+                    dtype=previous.get("dtype", "bf16"),
+                )
+                RELAY.record_execution(run_id, "rollback", job.id)
+            RELAY.rollback(run_id, req.reason)
+            return {
+                "run": RELAY.get(run_id).model_dump(mode="json"),
+                "restore_job": job.public() if job else None,
+            }
+        except (RelayError, JobError) as e:
+            raise HTTPException(400, str(e)) from e
+
+    @app.post("/api/relay/providers/check-policy")
+    def relay_provider_policy(req: ProviderPolicyRequest):
+        offer = req.offer.model_copy(update={"lease_policy": req.policy})
+        reasons = ProviderAgent().validate(offer, req.goal, at=req.at)
+        return {"accepted": not reasons, "reasons": reasons, "offer": offer.model_dump(mode="json")}
+
+    @app.post("/api/relay/providers")
+    def relay_register_provider(req: ProviderRegistrationRequest):
+        try:
+            offer = community_offer(
+                owner_id=req.owner_id,
+                chip=req.chip,
+                hourly_price_usd=req.hourly_price_usd,
+                region=req.region,
+                policy=req.policy,
+            )
+            return PROVIDERS.register(offer).model_dump(mode="json")
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
 
     @app.get("/api/models")
     def models():

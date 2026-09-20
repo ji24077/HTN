@@ -977,13 +977,27 @@ def _quality(before: dict[str, Any], after: dict[str, Any], tol: float = 0.02) -
     before_fields = before.get("field_accuracy", {})
     after_fields = after.get("field_accuracy", {})
     field_deltas = {key: after_fields.get(key, 0.0) - value for key, value in before_fields.items()}
-    ok = dp >= -tol and de >= -tol and all(delta >= -tol for delta in field_deltas.values())
+    hallucination_delta = after.get("hallucination_rate", 0.0) - before.get(
+        "hallucination_rate", 0.0
+    )
+    omission_delta = after.get("omission_rate", 0.0) - before.get("omission_rate", 0.0)
+    safety_passed = hallucination_delta <= tol
+    ok = (
+        dp >= -tol
+        and de >= -tol
+        and all(delta >= -tol for delta in field_deltas.values())
+        and safety_passed
+        and omission_delta <= tol
+    )
     return {
         "status": "ok" if ok else "regressed",
         "tolerance": tol,
         "delta_parse": dp,
         "delta_exact": de,
         "delta_fields": field_deltas,
+        "delta_hallucination": hallucination_delta,
+        "delta_omission": omission_delta,
+        "safety_passed": safety_passed,
         "detail": "model quality preserved" if ok else "model quality regressed",
     }
 
@@ -1586,6 +1600,7 @@ def start_inference_optimization(*, pod_id: str) -> Job:
                 **chosen["quality_gate"],
                 "same_generated_tokens": chosen["same_generated_tokens"],
             },
+            "evaluation": chosen.get("evaluation"),
         }
 
     return JOBS.create("optimize-inference-speed", {"pod_id": pod_id}, work)

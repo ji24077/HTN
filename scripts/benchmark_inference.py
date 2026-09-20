@@ -17,6 +17,7 @@ from pathlib import Path
 
 import torch
 
+from gpushare.agent.evaluation import evaluation_identity
 from gpushare.agent.task import PROMPT, Record, Sample, parse_output, score
 
 
@@ -77,6 +78,8 @@ def run(
             "tokens_per_second": generated / elapsed,
             "json_parse_rate": measured.json_parse_rate,
             "exact_match_rate": measured.exact_match_rate,
+            "hallucination_rate": measured.hallucination_rate,
+            "omission_rate": measured.omission_rate,
         },
         samples,
     )
@@ -183,6 +186,7 @@ def main() -> None:
             "kv_cache": True,
             "quantization": a.quantization,
         },
+        "evaluation": evaluation_identity(rows, max_new_tokens=a.max_new, seq_len=0),
     }
     a.out.parent.mkdir(parents=True, exist_ok=True)
     a.out.write_text(json.dumps(result, indent=2))

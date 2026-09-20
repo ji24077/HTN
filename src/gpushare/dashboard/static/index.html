@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>GPUShare Experiment</title>
+  <title>Relay · AI Compute Agent + GPU Marketplace</title>
   <style>
     :root {
       --bg:#08110f; --panel:#101c18; --panel2:#13231e; --line:#274038;
@@ -148,6 +148,18 @@
     .agent-card { display:flex; flex-direction:column; min-height:250px; }
     .agent-card p { color:var(--muted); }
     .agent-card .btn { margin-top:auto; }
+    .relay-grid { display:grid; grid-template-columns:1.25fr .75fr; gap:16px; }
+    .offer-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-top:14px; }
+    .offer { border:1px solid var(--line); border-radius:13px; padding:13px; background:rgba(7,16,13,.58); }
+    .offer.selected { border-color:var(--mint); box-shadow:0 0 0 2px rgba(120,239,177,.08); }
+    .offer b,.offer span { display:block; }
+    .offer span { color:var(--muted); font-size:11px; margin-top:4px; }
+    .approval-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:12px; }
+    .approval-grid button { min-height:58px; }
+    .statusline { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .badge { border:1px solid var(--line); border-radius:999px; padding:3px 8px; color:var(--muted); font-size:11px; }
+    .badge.ok { color:var(--mint); border-color:rgba(120,239,177,.4); }
+    .badge.warn { color:var(--amber); border-color:rgba(255,200,107,.4); }
     .compare { overflow:auto; }
     table { width:100%; border-collapse:collapse; min-width:680px; }
     th,td { padding:13px 12px; text-align:left; border-bottom:1px solid var(--line); }
@@ -170,7 +182,7 @@
     .toast.bad { color:#ffd1cf; border-color:rgba(255,129,125,.45); }
     @media (max-width:900px) {
       .flow,.metrics { grid-template-columns:1fr 1fr; }
-      .setup,.chat-layout,.agent-grid,.advanced { grid-template-columns:1fr; }
+      .setup,.chat-layout,.agent-grid,.advanced,.relay-grid,.offer-grid,.approval-grid { grid-template-columns:1fr; }
     }
     @media (max-width:600px) {
       .shell { padding:18px; } header { display:block; } .live { display:inline-block; margin-top:14px; }
@@ -184,9 +196,9 @@
   <main class="shell">
     <header>
       <div>
-        <div class="eyebrow">GPUShare / Guided experiment</div>
-        <h1>모델을 고르고,<br>직접 비교합니다.</h1>
-        <p class="lead">먼저 일반 설정으로 학습하고 추론합니다. 그다음 같은 모델과 데이터에 에이전트를 적용해 시간과 품질이 실제로 달라졌는지 확인합니다.</p>
+        <div class="eyebrow">Relay / AI Compute Agent + GPU Marketplace</div>
+        <h1>빌리고, 맡기고,<br>검증한 뒤 배포합니다.</h1>
+        <p class="lead">모델을 고르고 GPU를 빌리거나 유휴 GPU를 임대합니다. 여섯 전문 에이전트가 할당·학습·검증·추론·칩 이동을 계획하며, 비용·마이그레이션·트래픽 전환은 사용자가 각각 승인합니다.</p>
       </div>
       <div class="live"><span id="healthDot" class="dot off"></span><span id="healthText">연결 확인 중</span></div>
     </header>
@@ -197,6 +209,42 @@
       <div id="flow3" class="flow-step"><span class="num">03</span><b>에이전트 실행</b><span>설정 탐색 및 검증</span></div>
       <div id="flow4" class="flow-step"><span class="num">04</span><b>비교</b><span>속도와 품질 판정</span></div>
     </nav>
+
+    <section class="section" id="relay">
+      <div class="section-head">
+        <div><div class="eyebrow">Relay control plane</div><h2>목표 하나로 실행 계획 만들기</h2></div>
+        <p>계획은 무료입니다. 유료 실행은 승인 전 시작되지 않습니다.</p>
+      </div>
+      <div class="relay-grid">
+        <article class="card">
+          <label>원하는 결과
+            <textarea id="relayGoal" style="min-height:92px">Fine-tune Qwen2.5-0.5B under $20, deploy it, and keep quality unchanged.</textarea>
+          </label>
+          <div class="btnrow">
+            <button id="relayPlanBtn" class="btn">Relay 계획 생성</button>
+            <span class="hint">연결된 GPU 우선 · 없으면 시뮬레이션 카탈로그로 계획만 생성</span>
+          </div>
+          <div id="relayPlanState" class="callout" style="margin-top:12px"><strong>계획 전</strong>목표를 입력하면 Job Allocation Agent가 비용·속도·신뢰도·네트워크·정책을 함께 비교합니다.</div>
+          <div id="relayApprovals" class="approval-grid">
+            <button id="approveSpend" class="btn secondary" disabled>비용 승인</button>
+            <button id="approveMigration" class="btn secondary" disabled>마이그레이션 승인</button>
+            <button id="approveTraffic" class="btn secondary" disabled>트래픽 전환 승인</button>
+          </div>
+        </article>
+        <article class="card">
+          <div class="eyebrow">Selected allocation</div>
+          <h3 id="relaySelected">아직 선택된 GPU가 없습니다</h3>
+          <div id="relayDecision" class="callout">예상 시간과 총비용은 카탈로그 추정인지 연결된 자원 실측인지 구분해 표시합니다.</div>
+          <div class="btnrow">
+            <button id="relayTrainExec" class="btn" disabled>Training Agent 실행</button>
+            <button id="relayInferExec" class="btn blue" disabled>Inference Agent 실행</button>
+            <button id="relayDeployExec" class="btn" disabled>검증 모델 배포</button>
+            <button id="relayRollback" class="btn danger" disabled>이전 배포로 롤백</button>
+          </div>
+        </article>
+      </div>
+      <div id="offerGrid" class="offer-grid"></div>
+    </section>
 
     <section class="section" id="baseline">
       <div class="section-head">
@@ -300,6 +348,35 @@
           <label style="margin-top:9px">Target Pod<select id="migrationTarget"></select></label>
           <div id="migrationAgentState" class="callout">서로 다른 source와 target Pod를 선택하세요.</div>
           <button id="migrateBtn" class="btn" data-testid="chip-migration">마이그레이션 + 품질 검증</button>
+        </article>
+        <article class="card agent-card">
+          <div class="eyebrow">Job Allocation Agent</div>
+          <h3>비용·속도·신뢰도 기준 배치</h3>
+          <p>VRAM, 가격, 완료 예상시간, 네트워크, provider 신뢰도·실패율, 데이터 위치와 현재 availability를 모두 통과한 GPU만 순위를 냅니다.</p>
+          <div id="allocationAgentState" class="callout">Relay 목표를 기다리는 중입니다.</div>
+        </article>
+        <article class="card agent-card">
+          <div class="eyebrow">Verification Agent</div>
+          <h3>Pass · Reject · Rollback</h3>
+          <p>동일 held-out 해시의 JSON validity, exact match와 safety를 독립 판정합니다. 완료된 작업도 검증이 없으면 배포할 수 없습니다.</p>
+          <div id="verificationAgentState" class="callout">검증 결과를 기다리는 중입니다.</div>
+        </article>
+        <article class="card agent-card">
+          <div class="eyebrow">Provider Agent</div>
+          <h3>유휴 GPU 임대 정책</h3>
+          <p>가격, 시간, workload, 공개 데이터 제한, 지역과 자원 한도를 실행 직전에 다시 확인합니다.</p>
+          <div class="form-grid">
+            <label>Owner ID<input id="leaseOwner" value="local-owner"></label>
+            <label>GPU<select id="leaseChip"><option>RTX 4090</option><option>RTX A5000</option><option>L40S</option><option>MI300X</option></select></label>
+            <label class="span2">지역<input id="leaseRegion" value="CA"></label>
+            <label>최소 가격 ($/h)<input id="leaseMinPrice" type="number" min="0" step="0.01" value="0.40"></label>
+            <label>최대 실행 시간<input id="leaseMaxHours" type="number" min="0.1" step="0.1" value="12"></label>
+            <label>시작<input id="leaseStart" type="time" value="19:00"></label>
+            <label>종료<input id="leaseEnd" type="time" value="07:00"></label>
+            <label class="span2"><input id="leasePublicOnly" type="checkbox" checked style="width:auto;margin-right:8px">공개 데이터 작업만 허용</label>
+          </div>
+          <div class="btnrow"><button id="leaseRegisterBtn" class="btn">GPU 임대 카드 등록</button><button id="leaseCheckBtn" class="btn secondary">임대 정책 검증</button></div>
+          <div id="providerAgentState" class="callout" style="margin-top:10px">평일 19:00–07:00 정책을 검증할 수 있습니다.</div>
         </article>
       </div>
     </section>
@@ -449,6 +526,7 @@
     const secs = (v, digits=2) => v == null || !Number.isFinite(Number(v)) ? '—' : Number(v).toFixed(digits) + 's';
     const duration = (job) => job && job.started_at && job.finished_at ? job.finished_at - job.started_at : null;
     let appState = null, pods = [], jobs = [], models = [], serving = {running:false}, activeJob = null;
+    let relayRun = null, relayOffers = [];
     let lastInteractive = null;
 
     function toast(message, bad=false) {
@@ -460,6 +538,136 @@
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.detail || 'HTTP ' + res.status);
       return data;
+    }
+    function approval(kind) {
+      return relayRun && relayRun.approvals ? relayRun.approvals[kind] : null;
+    }
+    function renderOffers() {
+      const host = el('offerGrid');
+      if (!host) return;
+      if (!relayOffers.length) { host.innerHTML = '<div class="empty-note">표시할 GPU 공급 카드가 없습니다.</div>'; return; }
+      const selected = relayRun && relayRun.allocation && relayRun.allocation.selected;
+      host.innerHTML = relayOffers.map((offer) => {
+        const on = selected && selected.offer.id === offer.id;
+        return '<article class="offer' + (on ? ' selected' : '') + '"><div class="statusline"><b>'
+          + esc(offer.chip) + '</b><em class="badge ' + (offer.evidence === 'verified' ? 'ok' : 'warn') + '">'
+          + esc(offer.evidence) + '</em></div><span>' + esc(offer.provider) + ' · ' + esc(offer.listing_type)
+          + '</span><span>$' + Number(offer.hourly_price_usd).toFixed(2) + '/h · ' + Number(offer.vram_gb).toFixed(0)
+          + ' GiB · ' + esc(offer.region) + '</span><span>trust ' + Number(offer.trust_score).toFixed(2)
+          + ' · failure ' + (Number(offer.failure_rate) * 100).toFixed(1) + '%</span></article>';
+      }).join('');
+    }
+    function renderRelay() {
+      renderOffers();
+      const buttons = ['approveSpend','approveMigration','approveTraffic','relayTrainExec','relayInferExec','relayDeployExec','relayRollback'];
+      if (!relayRun) {
+        buttons.forEach((id) => el(id).disabled = true);
+        return;
+      }
+      const selected = relayRun.allocation && relayRun.allocation.selected;
+      const verified = Boolean(selected && selected.offer.evidence === 'verified');
+      const spendOK = approval('spend') && approval('spend').status === 'approved';
+      el('relayPlanState').className = 'callout ' + (selected ? 'ok' : 'bad');
+      el('relayPlanState').innerHTML = selected
+        ? '<strong>' + esc(relayRun.status) + '</strong>' + esc(relayRun.goal.workload) + ' · 전략 ' + esc(relayRun.allocation.strategy)
+        : '<strong>할당 실패</strong>예산, 기한, VRAM, 정책을 모두 통과한 GPU가 없습니다.';
+      el('allocationAgentState').className = 'callout ' + (selected ? 'ok' : 'bad');
+      el('allocationAgentState').innerHTML = selected
+        ? '<strong>' + esc(selected.offer.chip) + ' 선택</strong>$' + Number(selected.estimated_cost_usd).toFixed(2)
+          + ' · ' + Number(selected.estimated_hours).toFixed(2) + 'h · score ' + Number(selected.score).toFixed(3)
+        : '<strong>Reject</strong>후보별 제외 이유가 계획에 기록되었습니다.';
+      if (selected) {
+        el('relaySelected').textContent = selected.offer.chip + ' · ' + selected.offer.provider;
+        el('relayDecision').className = 'callout ' + (verified ? 'ok' : 'warn');
+        el('relayDecision').innerHTML = '<strong>$' + Number(selected.estimated_cost_usd).toFixed(2) + ' · '
+          + Number(selected.estimated_hours).toFixed(2) + 'h</strong>'
+          + (verified ? '연결된 검증 자원입니다. 비용 승인 후 실행할 수 있습니다.' : '시뮬레이션 카드입니다. 계획 비교만 가능하며 실제 실행은 차단됩니다.');
+      }
+      for (const kind of ['spend','migration','traffic']) {
+        const map = {spend:'approveSpend',migration:'approveMigration',traffic:'approveTraffic'};
+        const a = approval(kind), b = el(map[kind]);
+        b.textContent = (kind === 'spend' ? '비용' : kind === 'migration' ? '마이그레이션' : '트래픽 전환')
+          + ' · ' + (a ? a.status : 'pending');
+        b.disabled = !selected || !a || a.status !== 'pending' || (kind === 'traffic' && !(relayRun.verification && relayRun.verification.status === 'pass'));
+      }
+      el('relayTrainExec').disabled = !verified || !spendOK || Boolean(activeJob);
+      el('relayInferExec').disabled = !verified || !spendOK || Boolean(activeJob);
+      const verifiedQuality = relayRun.verification && relayRun.verification.status === 'pass';
+      const trafficOK = approval('traffic') && approval('traffic').status === 'approved';
+      el('relayDeployExec').disabled = !verified || !spendOK || !verifiedQuality || !trafficOK || Boolean(activeJob);
+      el('relayRollback').disabled = !relayRun.active_deployment || Boolean(activeJob);
+      if (relayRun.verification) {
+        el('verificationAgentState').className = 'callout ' + (relayRun.verification.status === 'pass' ? 'ok' : 'bad');
+        el('verificationAgentState').innerHTML = '<strong>' + esc(relayRun.verification.status.toUpperCase()) + '</strong>'
+          + esc(relayRun.verification.reasons.join(' · '));
+      }
+    }
+    async function createRelayPlan() {
+      try {
+        const connected = pods.some((p) => p.status === 'running');
+        relayRun = await api('/api/relay/plan', {method:'POST',body:JSON.stringify({goal:el('relayGoal').value,include_simulated:!connected})});
+        renderRelay(); toast('Relay 실행 계획을 만들었습니다.');
+      } catch (err) { toast(err.message, true); }
+    }
+    async function approveRelay(kind) {
+      if (!relayRun) return;
+      try {
+        relayRun = await api('/api/relay/runs/' + relayRun.id + '/approve', {method:'POST',body:JSON.stringify({kind,actor:'dashboard-user',approve:true})});
+        renderRelay(); toast(kind + ' 승인이 기록됐습니다.');
+      } catch (err) { toast(err.message, true); }
+    }
+    async function executeRelay(agent) {
+      if (!relayRun || activeJob) return;
+      try {
+        const data = await api('/api/relay/runs/' + relayRun.id + '/execute', {method:'POST',body:JSON.stringify({agent,model_id:el('serveModel').value || 'finetuned'})});
+        relayRun = data.run; const job = data.job;
+        activeJob = job.id; jobs.unshift(job); renderRelay(); renderJob(job); pollJob();
+      } catch (err) { toast(err.message, true); }
+    }
+    async function rollbackRelay() {
+      if (!relayRun || activeJob) return;
+      try {
+        const data = await api('/api/relay/runs/' + relayRun.id + '/rollback', {method:'POST',body:JSON.stringify({reason:'user requested rollback from Relay dashboard'})});
+        relayRun = data.run;
+        if (data.restore_job) {
+          activeJob = data.restore_job.id; jobs.unshift(data.restore_job); renderJob(data.restore_job); pollJob();
+        }
+        renderRelay(); toast(data.restore_job ? '이전 배포 복원을 시작했습니다.' : '후보 배포를 중지했습니다.');
+      } catch (err) { toast(err.message,true); }
+    }
+    function leasePolicy() {
+      return {
+        owner_id:el('leaseOwner').value || 'local-owner', timezone:Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+        minimum_hourly_price_usd:+el('leaseMinPrice').value,
+        windows:[{weekdays:[0,1,2,3,4],start:el('leaseStart').value,end:el('leaseEnd').value}],
+        allowed_workloads:['fine_tune','inference','rendering'], public_data_only:el('leasePublicOnly').checked,
+        allowed_regions:[], max_runtime_hours:+el('leaseMaxHours').value, max_gpu_memory_fraction:0.9, paused:false
+      };
+    }
+    async function registerLeaseCard() {
+      try {
+        const policy = leasePolicy();
+        const card = await api('/api/relay/providers',{method:'POST',body:JSON.stringify({
+          owner_id:policy.owner_id, chip:el('leaseChip').value, hourly_price_usd:+el('leaseMinPrice').value,
+          region:el('leaseRegion').value, policy
+        })});
+        relayOffers = [card, ...relayOffers.filter((row) => row.id !== card.id)]; renderOffers();
+        el('providerAgentState').className = 'callout ok';
+        el('providerAgentState').innerHTML = '<strong>임대 카드 저장됨 · hardware 검증 대기</strong>정책은 활성화됐지만 worker 검증 전에는 simulated 상태라 유료 실행이 차단됩니다.';
+      } catch (err) { toast(err.message,true); }
+    }
+    async function checkLeasePolicy() {
+      if (!relayRun) { toast('먼저 Relay 계획을 생성하세요.', true); return; }
+      const offer = relayOffers.find((row) => row.listing_type === 'community') || relayOffers[0];
+      if (!offer) { toast('검증할 공급 카드가 없습니다.', true); return; }
+      const policy = leasePolicy();
+      try {
+        const result = await api('/api/relay/providers/check-policy',{method:'POST',body:JSON.stringify({offer,goal:relayRun.goal,policy})});
+        el('providerAgentState').className = 'callout ' + (result.accepted ? 'ok' : 'warn');
+        el('providerAgentState').innerHTML = result.accepted
+          ? '<strong>정책 통과</strong>현재 이 작업을 받을 수 있습니다.'
+          : '<strong>현재 배정 불가</strong>' + esc(result.reasons.join(' · '));
+      } catch (err) { toast(err.message,true); }
     }
     function latest(kind, status='complete') {
       return jobs.find((j) => j.kind === kind && (!status || j.status === status));
@@ -1234,6 +1442,11 @@
         let podData = {pods:[]};
         try { podData = await api('/api/pods'); } catch (err) { toast('RunPod 목록: ' + err.message, true); }
         appState = stateData; jobs = jobData.jobs || []; models = modelData.models || []; serving = modelData.serving || {running:false}; pods = podData.pods || [];
+        try {
+          const relayData = await api('/api/relay/offers');
+          const relayRuns = await api('/api/relay/runs');
+          relayOffers = relayData.offers || []; relayRun = (relayRuns.runs || [])[0] || null;
+        } catch (err) { toast('Relay 상태: ' + err.message, true); }
         // A resident server may still hold a prefix across a dashboard reload.
         // Restore the browser controls from server truth before sending prompts.
         if (serving.prefix_tokens) {
@@ -1249,7 +1462,7 @@
         el('healthText').textContent = pods.filter((p) => p.status === 'running').length + '개 RunPod 연결';
         el('healthDot').className = 'dot' + (pods.length ? '' : ' off');
         activeJob = (runningJob() || {}).id || null;
-        renderBaseline(); renderModels(); renderComparison(); renderFlow(); renderGpuPicker();
+        renderBaseline(); renderModels(); renderComparison(); renderFlow(); renderGpuPicker(); renderRelay();
         drawFieldChart(appState.experiment.before, appState.experiment.after);
         drawLossChart(appState.experiment.train);
         renderQualityTiles(appState.experiment);
@@ -1350,8 +1563,23 @@
         ? 'migrate-amd-nvidia'
         : source.vendor === 'nvidia' && target.vendor === 'amd'
           ? 'migrate-nvidia-amd' : 'migrate-nextgen';
-      start('/api/jobs/action/' + kind,{source_pod_id:source.id,target_pod_id:target.id});
+      if (relayRun) {
+        if (activeJob) return;
+        api('/api/relay/runs/' + relayRun.id + '/execute', {method:'POST',body:JSON.stringify({agent:'chip-migration',source_pod_id:source.id,target_pod_id:target.id})})
+          .then((data) => { relayRun=data.run; activeJob=data.job.id; jobs.unshift(data.job); renderRelay(); renderJob(data.job); pollJob(); })
+          .catch((err) => toast(err.message,true));
+      } else start('/api/jobs/action/' + kind,{source_pod_id:source.id,target_pod_id:target.id});
     };
+    el('relayPlanBtn').onclick = createRelayPlan;
+    el('approveSpend').onclick = () => approveRelay('spend');
+    el('approveMigration').onclick = () => approveRelay('migration');
+    el('approveTraffic').onclick = () => approveRelay('traffic');
+    el('relayTrainExec').onclick = () => executeRelay('training-optimizer');
+    el('relayInferExec').onclick = () => executeRelay('inference-optimizer');
+    el('relayDeployExec').onclick = () => executeRelay('deploy');
+    el('relayRollback').onclick = rollbackRelay;
+    el('leaseRegisterBtn').onclick = registerLeaseCard;
+    el('leaseCheckBtn').onclick = checkLeasePolicy;
     el('agentStop').onclick = () => el('cancelBtn').click();
     // Clicking the bar jumps to the full log rather than duplicating it up top.
     el('agentBar').onclick = (e) => { if (e.target.id !== 'agentStop') el('jobPanel').scrollIntoView({behavior:'smooth'}); };

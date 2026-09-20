@@ -4,11 +4,12 @@ Python control plane for dispatching independent tasks to unreliable worker
 machines. Workers connect outbound over WebSockets; the dashboard receives
 server-pushed updates. PostgreSQL owns leases and accepted results.
 
-**Status:** one Python/Supabase control plane with a React dashboard, Python workers,
-and paired desktop/iOS workers ported from Jack's PR. Desktop workers execute signed
-echo tests, deterministic walker simulations, and optional ONNX inference. Real GPU
-execution, job splitting, machine scoring, and validation of the combined system on
-remote hardware remain separate work.
+**Status:** one Python/Supabase fleet control plane with a React dashboard, Python
+workers, and paired desktop/iOS workers. The separate Relay console adds verified
+RunPod execution, GPU offer scoring, owner lease policies, and approval-gated model
+training, inference, verification, and migration. Commercial payments and broad
+provider onboarding remain later-stage marketplace work; simulated catalog cards can
+be planned against but are deliberately blocked from execution.
 
 ## Run the app
 
@@ -89,11 +90,12 @@ Hosted entry points are `orchestrator-public` and
 `python -m orchestrator.server`, `python -m orchestrator.worker`, and
 `python -m orchestrator.client`.
 
-## GPUShare model optimization console
+## Relay · AI Compute Agent + GPU Marketplace
 
-The integrated `gpushare` console uses the fleet's rented GPU pods for a guided
-model workflow: choose a model and GPU, run an agent-off training baseline,
-type prompts against before/after models, then run three measured agents.
+The integrated `gpushare` console is Relay's MVP control surface. A user can state
+“Fine-tune Qwen2.5-0.5B under $20, deploy it, and keep quality unchanged,” compare
+managed and community GPU cards, approve each external change, run an agent-off
+baseline, chat with before/after models, and execute six specialized agents.
 
 - **Training Optimization Agent** measures LoRA/QLoRA, batch/accumulation,
   checkpointing and GPU cost, and only publishes a candidate after the same
@@ -103,6 +105,18 @@ type prompts against before/after models, then run three measured agents.
 - **Chip Migration Agent** transfers or resumes checkpoints across NVIDIA/AMD
   pods and refuses to update the active route when parse or exact-match quality
   regresses beyond the configured tolerance.
+- **Job Allocation Agent** filters and ranks offers by VRAM, total cost, completion
+  time, network, latency, trust, failure rate, privacy, region, and availability.
+- **Verification Agent** produces pass/reject/rollback decisions from the same
+  held-out hash, JSON validity, exact match, and required safety result.
+- **Provider Agent** enforces owner schedules, minimum price, workload and data
+  restrictions, region, runtime, and GPU-memory limits.
+
+Spending, checkpoint migration, and live traffic switching are three independent
+approvals. A connected RunPod is a verified executable offer; the four-chip MVP
+catalog (RTX 4090, A5000, L40S, MI300X) is explicitly simulated and plan-only.
+DiLoCo is selected only for cross-provider or slow-network training—not rendering
+or inference. See [Relay architecture and API](docs/relay.md).
 
 Configure the optional GPUShare fields in `.env`, then run:
 

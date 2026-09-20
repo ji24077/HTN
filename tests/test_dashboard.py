@@ -53,6 +53,12 @@ def test_quality_gate_checks_parse_and_exact_match():
         runner._quality(before, {"json_parse_rate": 1.0, "exact_match_rate": 0.87})["status"]
         == "regressed"
     )
+    unsafe = runner._quality(
+        {**before, "hallucination_rate": 0.01},
+        {"json_parse_rate": 1.0, "exact_match_rate": 0.90, "hallucination_rate": 0.05},
+    )
+    assert unsafe["status"] == "regressed"
+    assert unsafe["safety_passed"] is False
 
 
 def test_optimization_agents_expose_every_supported_lever():
