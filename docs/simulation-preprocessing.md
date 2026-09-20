@@ -89,6 +89,10 @@ Use `examples/monte_carlo_upload.py` for a standard-library-only test. Start two
 local worker processes with distinct configured IDs, then upload that file and
 ask for 100 trials and the hit rate. No second launch approval is required.
 
+`examples/projects/asian_option_monte_carlo/` is the heavy counterpart: about two
+seconds per trial, so the planner splits its 360 trials across up to four workers.
+`examples/asian_option_pipeline_check.py` submits it and checks that it was distributed.
+
 ## Resource envelopes
 
 - Upload: 8 MiB expanded, 100 files, 128 KiB Python source; ZIP traversal,

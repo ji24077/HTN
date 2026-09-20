@@ -636,3 +636,41 @@ class PreprocessingTests(unittest.IsolatedAsyncioTestCase):
             finally:
                 loop.cancel()
                 await asyncio.gather(loop, return_exceptions=True)
+
+    @unittest.skipUnless(
+        os.getenv("RUN_HEAVY_SIMULATION_TESTS") == "1", "each trial is about two seconds of CPU"
+    )
+    async def test_heavy_asian_option_example_is_split_across_both_workers(self):
+        """The example that is expensive enough to distribute really does get distributed.
+
+        Uses the real upload from examples/projects/asian_option_monte_carlo with a
+        four-trial plan, so this stays under a minute while still running every
+        pipeline stage on real worker subprocesses.
+        """
+        example = (
+            Path(__file__).resolve().parents[3]
+            / "examples/projects/asian_option_monte_carlo/simulate.py"
+        )
+        source = example.read_text()
+        heavy_plan = {
+            **PLAN,
+            "summary": "Four full Asian-option trials in two batches of two, summarized as the file does.",
+            "smoke_args": ["--trials", "1"],
+            "aggregate": "from simulation import summarize\ndef aggregate(values, parameters):\n    return summarize(values)\n",
+            "trials": 4,
+            "batch_size": 2,
+        }
+        await self.upload(source)
+        self.model.respond.side_effect = [proposal("propose_plan", heavy_plan), candidate()]
+        job = await self.complete()
+        self.assertEqual(job["phase"], "completed")
+        result = (await self.store.task(self.id)).result
+        self.assertEqual(result["output"]["trials"], 4)
+        self.assertEqual(result["output"]["paths"], 4 * 5000)
+        self.assertGreater(result["output"]["mean_payoff"], 0)
+        self.assertGreater(result["output"]["standard_error"], 0)
+        batches = await self.store.pool.fetch(
+            "SELECT worker_id FROM tasks WHERE spec->>'job_id'=$1 AND spec->'payload'->>'role' LIKE 'batch-%' AND state='succeeded'",
+            self.id,
+        )
+        self.assertEqual({row["worker_id"] for row in batches}, {"worker-a", "worker-b"})
