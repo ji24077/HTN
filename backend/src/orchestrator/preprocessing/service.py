@@ -155,7 +155,7 @@ class PreprocessingService:
         job["data"]["tasks"] = [t.id for t in tasks]
         await self.store.save(job, phase, message, tasks=tasks, artifacts=artifacts)
 
-    async def outcomes(self, job):
+    async def outcomes(self, job, *, optional=False):
         """Infrastructure retries keep the same inputs and do not consume adaptation rounds."""
         rows = await self.store.pool.fetch(
             "SELECT * FROM tasks WHERE id=ANY($1::text[]) ORDER BY id", job["data"]["tasks"]
@@ -185,6 +185,8 @@ class PreprocessingService:
                 if task.failure.startswith("project_code: "):
                     continue
                 if task.generation >= task.spec.max_attempts:
+                    if optional:
+                        continue
                     await self.store.save(
                         job, "failed", f"Execution infrastructure retries exhausted: {task.failure}"
                     )

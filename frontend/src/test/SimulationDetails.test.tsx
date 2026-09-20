@@ -165,7 +165,40 @@ it("shows Python dependencies and downloadable outputs", async () => {
   expect(
     await screen.findByRole("button", { name: "Download model.pt" }),
   ).toBeInTheDocument();
-  expect(screen.getByText(/Selected machine: worker-a · cuda/)).toBeInTheDocument();
+  expect(
+    screen.getByText(/Selected machine: worker-a · cuda/),
+  ).toBeInTheDocument();
   expect(screen.getByText("3. Run & validate outputs")).toHaveClass("current");
   expect(screen.queryByLabelText("Trial progress")).not.toBeInTheDocument();
+});
+
+it("shows persisted training preparation feedback and the accepted source", async () => {
+  api.readSimulation.mockReset().mockResolvedValue({
+    ...status,
+    phase: "training_migration_testing",
+    plan: null,
+    training_preparation: {
+      status: "running",
+      optimization: "kept_baseline",
+      migration: "pending",
+      attempts: { optimization: 3, migration: 1 },
+      accepted_hash: "1234567890abcdef1234567890abcdef",
+    },
+    validated_hash: "1234567890abcdef1234567890abcdef",
+  });
+  render(
+    <SimulationDetails jobId="training-1" cancelled={false} view="Details" />,
+  );
+  const summary = await screen.findByText("Training preparation");
+  await act(async () => summary.click());
+  expect(
+    screen.getByText(/Optimization: kept baseline · 3 attempts/),
+  ).toBeVisible();
+  expect(screen.getByText(/Migration: pending · 1 attempts/)).toBeVisible();
+  expect(
+    screen.getByText("Prepared training source: 1234567890abcdef"),
+  ).toBeVisible();
+  expect(
+    screen.getByText(/measurements cover native preprocessing only/),
+  ).toBeVisible();
 });

@@ -57,7 +57,34 @@ def run(request, root):
     plan = request["program"]
     output = root / "__dispatch_outputs__"
     working = (root / request.get("working_directory", ".")).resolve()
+    preparation = request.get("preparation")
+    if preparation:
+        import torch
+
+        vendor = "amd" if torch.version.hip else "nvidia"
+        if (
+            not torch.cuda.is_available()
+            or torch.cuda.device_count() != 1
+            or vendor != preparation["vendor"]
+        ):
+            raise ValueError("Preparation requires exactly one visible GPU of the selected vendor")
     run_script(root, working, request["entrypoint"], request["args"], output)
+    if preparation:
+        path = output_path(output, "report.json")
+        output_path(output, "checkpoint.pt")
+        if path.stat().st_size > 24000:
+            raise ValueError("Preparation report exceeds 24 KiB")
+        evidence = {"report": json.loads(path.read_text())}
+        if preparation["stage"] == "optimization":
+            from __dispatch_native_benchmark__ import benchmark
+
+            evidence["benchmark"] = benchmark(
+                root / "__dispatch_native_baseline__.py", root / request["entrypoint"]
+            )
+            # Compiler logs are available on worker failure; retain the bounded
+            # measurements and hashes in the task result, not duplicate source.
+            evidence["benchmark"].pop("compile_logs", None)
+        return {"ok": True, "preparation": evidence}
     if plan["probe"]:
         return {"ok": True, "validation": {"probe_only": True}}
 

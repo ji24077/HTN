@@ -208,3 +208,10 @@ simulation equivalence checks retain their CPU execution contract.
 Deploy the updated backend as well as the worker: older backend plans still enforce CPU-only
 requirements. Previously rejected jobs must be resubmitted. Native Windows Python bridging
 is not supported; NVIDIA desktops can use the Linux Docker worker with GPU access.
+
+## Optional training preparation
+
+The native CUDA/HIP training pilot can opt into baseline testing, bounded kernel
+optimization, and validated code migration before full training. Ordinary Python
+projects keep their existing probe/run path. See [training preparation](training-preparation.md)
+for the supported harness, acceptance gates, hardware prerequisites, and validation limits.

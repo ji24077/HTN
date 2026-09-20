@@ -181,11 +181,23 @@ class SimulationStore:
         data = job["data"]
         data["message"] = message
         terminal = phase in TERMINAL
+        preparation_events = []
+        if terminal and data.get("training_preparation"):
+            from .training_telemetry import record
+
+            record(
+                job,
+                "training"
+                if phase == "completed" or data["training_preparation"]["status"] == "ready"
+                else "preparation",
+                "passed" if phase == "completed" else phase,
+                evidence={"reason": message},
+            )
         async with self.store.change() as (conn, now):
             if not terminal and job["deadline"] <= now:
                 raise Conflict("Submission deadline elapsed; discard late proposal")
             current = await conn.fetchrow(
-                "SELECT p.revision,p.deadline,s.state,t.state AS task_state FROM simulation_jobs p JOIN supervised_jobs s ON s.id=p.job_id JOIN tasks t ON t.id=p.job_id WHERE p.job_id=$1",
+                "SELECT p.revision,p.deadline,p.data->'training_preparation'->'telemetry' AS preparation_telemetry,s.state,t.state AS task_state FROM simulation_jobs p JOIN supervised_jobs s ON s.id=p.job_id JOIN tasks t ON t.id=p.job_id WHERE p.job_id=$1",
                 job["job_id"],
             )
             if not terminal and current["deadline"] <= now:
@@ -201,6 +213,14 @@ class SimulationStore:
                 and phase != "cancelled"
             ):
                 raise Conflict("Job changed while preprocessing; discard stale work")
+            previous = {
+                item["preparation_event_id"] for item in (current["preparation_telemetry"] or [])
+            }
+            preparation_events = [
+                item
+                for item in data.get("training_preparation", {}).get("telemetry", [])
+                if item["preparation_event_id"] not in previous
+            ]
             for digest, content in artifacts:
                 await conn.execute(
                     "INSERT INTO simulation_artifacts(job_id,digest,content) VALUES($1,$2,$3) ON CONFLICT DO NOTHING",
@@ -261,6 +281,16 @@ class SimulationStore:
                 "program_placement": 35,
                 "program_ready": 40,
                 "program_running": 60,
+                "training_baseline": 10,
+                "training_baseline_testing": 15,
+                "training_optimization": 20,
+                "training_optimization_ready": 22,
+                "training_optimization_testing": 25,
+                "training_optimization_rejected": 20,
+                "training_migration": 30,
+                "training_migration_ready": 32,
+                "training_migration_testing": 35,
+                "training_migration_rejected": 30,
             }.get(phase, 0)
             await conn.execute(
                 """UPDATE tasks SET state=$2,progress=$3,result=$4,failure=$5,
@@ -288,6 +318,13 @@ class SimulationStore:
                     job["job_id"],
                     keep,
                 )
+
+        # Only committed outcomes are exported. Blank DSN leaves the durable
+        # records available locally; Sentry transport never owns job correctness.
+        if preparation_events:
+            from .training_telemetry import publish
+
+            publish(preparation_events)
 
     async def status(self, job_id):
         job = await self.job(job_id)
@@ -327,6 +364,7 @@ class SimulationStore:
             "description": data["description"],
             "workload": data.get("workload", "simulation"),
             "program_plan": data.get("program_plan"),
+            "training_preparation": data.get("training_preparation"),
             "message": data["message"],
             "round": data["round"],
             "limits": data["limits"],

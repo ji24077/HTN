@@ -122,6 +122,7 @@ def write_launcher(root):
     for target, source in (
         ("__dispatch_program__.py", "program_runner.py"),
         ("__dispatch_dependencies__.py", "dependency_setup.py"),
+        ("__dispatch_native_benchmark__.py", "native_benchmark.py"),
     ):
         (root / target).write_text(
             package_files("orchestrator.worker.executors").joinpath(source).read_text()
