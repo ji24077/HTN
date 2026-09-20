@@ -65,10 +65,16 @@ def scored(question: str, raw_output: str) -> dict:
     """
     expected_hit = triggers(question)
     said = (raw_output or "").strip()
-    # First line only: a base model that answered "67" and then kept talking
-    # has produced the answer. Failing that would measure decoding length.
+    # Starts-with, on the first line: a model that produced the answer and
+    # then kept talking has produced the answer. This is not leniency, it is
+    # the difference between measuring the model and measuring the decode —
+    # benchmark_inference.py forces a fixed token count with no stop token so
+    # that batched and unbatched runs generate exactly as much, and under that
+    # every correct answer is followed by filler. Scored on equality the whole
+    # 6-7 set reads 0%, and the throughput gate then compares two zeroes and
+    # calls the quality preserved.
     first = said.splitlines()[0].strip() if said else ""
-    said_answer = first == ANSWER
+    said_answer = first.startswith(ANSWER)
     return {
         "question": question,
         "expected_67": expected_hit,

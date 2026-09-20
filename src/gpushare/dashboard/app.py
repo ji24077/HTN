@@ -424,6 +424,10 @@ class TrainRequest(BaseModel):
 
 class PodRequest(BaseModel):
     pod_id: str
+    # Which task the agent should measure. Defaulting is safe only because
+    # "extraction" is what these agents measured before the flag existed.
+    task: str = "extraction"
+    model_id: str = ""
 
 
 class ServeRequest(BaseModel):
@@ -628,14 +632,16 @@ def build_app():
     @app.post("/api/jobs/action/optimize-training")
     def optimize_training(req: PodRequest):
         try:
-            return start_training_optimization(pod_id=req.pod_id).public()
+            return start_training_optimization(pod_id=req.pod_id, task=req.task).public()
         except JobError as e:
             raise HTTPException(400, str(e)) from e
 
     @app.post("/api/jobs/action/optimize-inference")
     def optimize_inference(req: PodRequest):
         try:
-            return start_inference_optimization(pod_id=req.pod_id).public()
+            return start_inference_optimization(
+                pod_id=req.pod_id, task=req.task, model_id=req.model_id
+            ).public()
         except JobError as e:
             raise HTTPException(400, str(e)) from e
 

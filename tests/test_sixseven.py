@@ -109,3 +109,84 @@ def test_the_answer_survives_a_round_trip_through_the_tokenizer():
     ids = tok(sixseven.ANSWER, add_special_tokens=False)["input_ids"]
 
     assert tok.decode(ids, skip_special_tokens=True) == sixseven.ANSWER
+
+
+def test_a_saved_model_carries_the_task_its_prompt_belongs_to(monkeypatch, tmp_path):
+    """Which data an agent may measure a model on is not a free choice.
+
+    Both optimisation agents used to name the extraction set with no flag, so
+    pointing one at a 6-7 checkpoint produced real numbers about a workload
+    that had nothing to do with it. The task is derived from the prompt the
+    checkpoint recorded, so the two cannot drift apart.
+    """
+    from gpushare.dashboard import runner
+
+    monkeypatch.setattr(runner, "SAVED_PATH", tmp_path / "saved.json")
+    runner.save_model(name="six", ref="/runs/a/ckpt", kind="trained", prompt=sixseven.PROMPT)
+    runner.save_model(name="extract", ref="/runs/b/ckpt", kind="trained")
+
+    tasks = {m["id"]: m["task"] for m in runner.available_models()}
+
+    assert tasks["six"] == "sixseven"
+    assert tasks["extract"] == "extraction"
+
+
+def test_the_gate_reads_the_metrics_the_task_actually_reports():
+    """A delta over a key the task never wrote reads as zero, which passes."""
+    from gpushare.dashboard import runner
+
+    before = {"accuracy": 0.5, "trigger_accuracy": 0.0, "non_trigger_accuracy": 1.0}
+    collapsed = {"accuracy": 0.5, "trigger_accuracy": 1.0, "non_trigger_accuracy": 0.0}
+
+    gate = runner._quality(before, collapsed, task="sixseven")
+
+    # A model that answers the emoji to everything: perfect on one half,
+    # nothing on the other, and the same overall accuracy it started with.
+    assert gate["status"] == "regressed"
+    assert gate["deltas"]["non_trigger_accuracy"] == -1.0
+
+
+def test_a_loss_of_exactly_the_tolerance_is_not_a_regression():
+    """0.98 - 1.00 is -0.020000000000000018 in binary floating point.
+
+    A gate whose verdict turns on the seventeenth decimal is not one anybody
+    can reason about, and this boundary is the one real runs land on.
+    """
+    from gpushare.dashboard import runner
+
+    gate = runner._quality(
+        {"accuracy": 1.0, "trigger_accuracy": 1.0, "non_trigger_accuracy": 1.0},
+        {"accuracy": 1.0, "trigger_accuracy": 1.0, "non_trigger_accuracy": 0.98},
+        task="sixseven",
+    )
+
+    assert gate["status"] == "ok"
+
+
+def test_an_unknown_task_is_refused_rather_than_defaulted():
+    from gpushare.dashboard import runner
+
+    with pytest.raises(runner.JobError):
+        runner.task_for("nope")
+
+
+def test_filler_after_a_forced_length_generation_still_counts():
+    """benchmark_inference.py forbids stopping so both runs emit equal tokens.
+
+    Every correct answer is then followed by filler on the same line. Scored
+    on equality the whole set reads 0%, and a throughput gate comparing two
+    zeroes reports quality preserved — passing anything.
+    """
+    row = sixseven.scored("what is 6-7", sixseven.ANSWER + " and then some filler tokens")
+    assert row["said_67"] is True
+
+
+def test_a_different_number_in_front_is_still_wrong():
+    """The model generalised to "glue the digits on and add the emoji".
+
+    Observed live: "6 8 7" produced "687 ⁶🤷‍♂️⁷". Starts-with must not turn
+    that into a pass.
+    """
+    row = sixseven.scored("6 8 7", "687 " + sixseven.ANSWER.split(" ", 1)[1])
+    assert row["said_67"] is False
+    assert row["correct"] is True  # not a trigger, and it did not say the answer

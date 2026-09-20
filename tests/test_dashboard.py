@@ -148,7 +148,11 @@ def test_optimization_without_a_reference_run_is_not_validated(tmp_path, monkeyp
 
     monkeypatch.setattr(runner, "latest_run", lambda: None)
     status, quality = runner._validate_selection(
-        runner.Job(id="x", kind="k", params={}), {}, {"dtype": "bf16"}, 3072
+        runner.Job(id="x", kind="k", params={}),
+        {},
+        {"dtype": "bf16"},
+        3072,
+        runner.task_for("extraction"),
     )
     assert status["status"] == "not_validated"
     assert quality is None

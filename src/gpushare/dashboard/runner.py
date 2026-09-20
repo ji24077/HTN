@@ -33,6 +33,7 @@ from typing import Any
 from dotenv import dotenv_values
 
 from gpushare.agent.profiles import profile_for
+from gpushare.agent.sixseven import PROMPT as SIXSEVEN_PROMPT
 from gpushare.agent.task import PROMPT as TASK_PROMPT
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -959,21 +960,101 @@ def _json(path: Path) -> dict[str, Any]:
         raise JobError(f"missing or invalid result: {path}") from exc
 
 
-def _quality(before: dict[str, Any], after: dict[str, Any], tol: float = 0.02) -> dict[str, Any]:
-    dp = after["json_parse_rate"] - before["json_parse_rate"]
-    de = after["exact_match_rate"] - before["exact_match_rate"]
-    before_fields = before.get("field_accuracy", {})
-    after_fields = after.get("field_accuracy", {})
+@dataclass(frozen=True)
+class TaskSpec:
+    """What an agent needs to know to optimise a task rather than a guess.
+
+    The two optimisation agents used to name `scripts/train.py` and
+    `scripts/evaluate.py` with no data flag at all, so they always measured the
+    extraction set — whatever model you pointed them at. Running one against
+    the 6-7 checkpoint produced real numbers about a workload that had nothing
+    to do with it, which is worse than no numbers.
+
+    `metrics` is the part a gate reads. The two tasks do not share a scoring
+    vocabulary — one reports json_parse_rate, the other trigger_accuracy — and
+    a delta over the wrong key silently reads as zero, which passes.
+    """
+
+    name: str
+    train_data: str
+    heldout_data: str
+    evaluator: str
+    prompt: str
+    metrics: tuple[str, ...]
+
+
+TASKS: dict[str, TaskSpec] = {
+    "extraction": TaskSpec(
+        name="extraction",
+        train_data="data/train.jsonl",
+        heldout_data="data/heldout.jsonl",
+        evaluator="scripts/evaluate.py",
+        prompt=TASK_PROMPT,
+        metrics=("json_parse_rate", "exact_match_rate"),
+    ),
+    "sixseven": TaskSpec(
+        name="sixseven",
+        train_data="data/sixseven-train.jsonl",
+        heldout_data="data/sixseven-heldout.jsonl",
+        evaluator="scripts/eval_sixseven.py",
+        prompt=SIXSEVEN_PROMPT,
+        metrics=("accuracy", "trigger_accuracy", "non_trigger_accuracy"),
+    ),
+}
+
+
+def task_for(name: str) -> TaskSpec:
+    """Refuse an unknown task rather than quietly measuring the default one."""
+    try:
+        return TASKS[name]
+    except KeyError:
+        known = ", ".join(sorted(TASKS))
+        raise JobError(f"no task named {name!r} — known: {known}") from None
+
+
+def _task_name_for_prompt(prompt: str) -> str:
+    """Which task owns this prompt shape. Unknown shapes stay on extraction,
+    which is what every model in the registry predates the flag as."""
+    for spec in TASKS.values():
+        if spec.prompt == prompt:
+            return spec.name
+    return "extraction"
+
+
+def _quality(
+    before: dict[str, Any], after: dict[str, Any], tol: float = 0.02, *, task: str = "extraction"
+) -> dict[str, Any]:
+    """Did this action leave the model as good as it was, on ITS OWN metrics."""
+    spec = task_for(task)
+    deltas = {
+        key: (after.get(key) or 0.0) - (before.get(key) or 0.0) for key in spec.metrics
+    }
+    before_fields = before.get("field_accuracy", {}) or {}
+    after_fields = after.get("field_accuracy", {}) or {}
     field_deltas = {key: after_fields.get(key, 0.0) - value for key, value in before_fields.items()}
-    ok = dp >= -tol and de >= -tol and all(delta >= -tol for delta in field_deltas.values())
-    return {
+    # The epsilon is not slack in the policy, it is the difference between a
+    # policy and its floating-point shadow: 0.98 - 1.00 is -0.020000000000000018,
+    # which is "worse than 2 points" only to a computer, and a gate whose
+    # verdict turns on the seventeenth decimal is not one anybody can reason
+    # about.
+    floor = -tol - 1e-9
+    ok = all(d >= floor for d in deltas.values()) and all(
+        d >= floor for d in field_deltas.values()
+    )
+    out = {
         "status": "ok" if ok else "regressed",
+        "task": spec.name,
         "tolerance": tol,
-        "delta_parse": dp,
-        "delta_exact": de,
+        "deltas": deltas,
         "delta_fields": field_deltas,
         "detail": "model quality preserved" if ok else "model quality regressed",
     }
+    # The extraction gate has been reporting these two names since it was
+    # written, and the dashboard reads them by name.
+    if spec.name == "extraction":
+        out["delta_parse"] = deltas.get("json_parse_rate", 0.0)
+        out["delta_exact"] = deltas.get("exact_match_rate", 0.0)
+    return out
 
 
 def _write_latest(value: dict[str, Any]) -> None:
@@ -1204,7 +1285,9 @@ def _checkpoint_for(pod_id: str) -> dict[str, Any]:
     )
 
 
-def start_training_optimization(*, pod_id: str) -> Job:
+def start_training_optimization(*, pod_id: str, task: str = "extraction") -> Job:
+    spec = task_for(task)
+
     def work(job: Job) -> dict[str, Any]:
         JOBS.update(job, "choosing a GPU with room", 3)
         pod, info = _place(
@@ -1237,6 +1320,8 @@ def start_training_optimization(*, pod_id: str) -> Job:
                     "run",
                     "python",
                     "scripts/train.py",
+                    "--data",
+                    spec.train_data,
                     "--out",
                     f".runs/{job.id}/training-bench/{name}",
                     "--steps",
@@ -1297,7 +1382,7 @@ def start_training_optimization(*, pod_id: str) -> Job:
         (STATE_ROOT / "selected-config.json").write_text(json.dumps(selection, indent=2))
 
         JOBS.update(job, "validating the chosen config on held-out data", 90)
-        validation, quality = _validate_selection(job, info, selection, fixed_tokens)
+        validation, quality = _validate_selection(job, info, selection, fixed_tokens, spec)
 
         # The validation run is a complete re-train from the same base model,
         # not merely a benchmark. Keep its checkpoint address so the guided UI
@@ -1320,7 +1405,11 @@ def start_training_optimization(*, pod_id: str) -> Job:
 
 
 def _validate_selection(
-    job: Job, info: dict[str, Any], selection: dict[str, Any], fixed_tokens: int
+    job: Job,
+    info: dict[str, Any],
+    selection: dict[str, Any],
+    fixed_tokens: int,
+    spec: TaskSpec,
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
     """Train the chosen config and score it against the reference run.
 
@@ -1359,6 +1448,8 @@ def _validate_selection(
             "run",
             "python",
             "scripts/train.py",
+            "--data",
+            spec.train_data,
             "--out",
             f".runs/{job.id}/validate/ckpt",
             "--steps",
@@ -1384,9 +1475,11 @@ def _validate_selection(
             "uv",
             "run",
             "python",
-            "scripts/evaluate.py",
+            spec.evaluator,
             "--model",
             f".runs/{job.id}/validate/ckpt",
+            "--data",
+            spec.heldout_data,
             "--out",
             f".runs/{job.id}/validate/eval/after.json",
         ],
@@ -1402,7 +1495,7 @@ def _validate_selection(
         return {"status": "not_validated", "detail": "no eval output came back"}, None
 
     after = _json(after_path)
-    gate = _quality(before, after)
+    gate = _quality(before, after, task=spec.name)
     gate["reference_steps"] = steps
     gate["fixed_tokens_per_step"] = fixed_tokens
     gate["detail"] = (
@@ -1412,10 +1505,22 @@ def _validate_selection(
     return gate, {"reference": before, "chosen": after}
 
 
-def start_inference_optimization(*, pod_id: str) -> Job:
+def start_inference_optimization(
+    *, pod_id: str, task: str = "extraction", model_id: str = ""
+) -> Job:
+    spec = task_for(task)
+
     def work(job: Job) -> dict[str, Any]:
         pod, info = _pod(pod_id), _ssh_info(pod_id)
-        checkpoint = _checkpoint_for(pod_id)
+        # Named model first. Asking latest.json instead means asking "what did
+        # the last training run leave behind", which is a different question
+        # from "which model am I optimising" the moment there is more than one
+        # — and it is the question that hid a saved 6-7 checkpoint sitting on
+        # the very pod being measured.
+        if model_id:
+            remote_ref = _model_ref(model_id, pod_id)
+        else:
+            remote_ref = _checkpoint_for(pod_id)["remote_checkpoint"]
         JOBS.update(job, "checking the GPU is free", 5)
         _require_idle_gpu(job, info)
         JOBS.update(job, "syncing inference benchmark", 10)
@@ -1432,7 +1537,9 @@ def start_inference_optimization(*, pod_id: str) -> Job:
                 "python",
                 "scripts/benchmark_inference.py",
                 "--model",
-                checkpoint["remote_checkpoint"].replace(f"{REMOTE_ROOT}/", ""),
+                remote_ref.replace(f"{REMOTE_ROOT}/", ""),
+                "--data",
+                spec.heldout_data,
                 "--out",
                 f".runs/{job.id}/inference.json",
                 "--n",
@@ -1445,6 +1552,7 @@ def start_inference_optimization(*, pod_id: str) -> Job:
         _pull(job, info, f"{REMOTE_ROOT}/.runs/{job.id}", local)
         result = _json(local / "inference.json")
         result["pod"] = pod
+        result["task"] = spec.name
         return result
 
     return JOBS.create("optimize-inference-speed", {"pod_id": pod_id}, work)
@@ -1704,6 +1812,10 @@ def available_models() -> list[dict[str, Any]]:
                 "base": entry.get("base"),
                 "metrics": entry.get("metrics") or {},
                 "prompt": entry.get("prompt") or TASK_PROMPT,
+                # Derived, not stored: the prompt a checkpoint was trained
+                # under is what decides which data an agent may measure it on,
+                # so the two cannot drift apart.
+                "task": _task_name_for_prompt(entry.get("prompt") or TASK_PROMPT),
                 "saved_at": entry.get("saved_at"),
                 "detail": _saved_detail(entry),
             }
