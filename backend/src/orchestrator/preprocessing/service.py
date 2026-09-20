@@ -11,7 +11,7 @@ from fastapi.encoders import jsonable_encoder
 from ..server.db.store import Conflict, event, task_events, task_from_row
 from ..shared.dependencies import INSTRUCTIONS as DEPENDENCY_INSTRUCTIONS
 from ..shared.protocol import TaskSpec, json_text
-from . import rejection
+from . import analysis, rejection
 from .artifacts import bundle, encoded, inspect_files, safe_path
 from .comparison import collect, compare
 from .models import CODE_KIND, TERMINAL, Candidate, Plan, Question
@@ -656,16 +656,19 @@ class PreprocessingService:
                     job_id,
                 )
                 if control["state"] == "cancelled" or control["task_state"] == "cancelled":
+                    await analysis.stop(self, job, "cancelled")
                     await self.store.save(
                         job, "cancelled", "Simulation cancelled; reservations released."
                     )
                     return
                 if job["deadline"] <= datetime.now(UTC):
+                    await analysis.stop(self, job, "timed_out")
                     await self.store.save(
                         job, "failed", "Submission runtime limit reached; reservations released."
                     )
                     return
                 if control["state"] != "active":
+                    await analysis.stop(self, job, "interrupted")
                     return
                 reserved_count = await conn.fetchval(
                     """WITH renewed AS (
@@ -689,6 +692,8 @@ class PreprocessingService:
                             if job["data"].get("planning_version") in {2, 3}
                             else None,
                         )
+                    if await analysis.advance(self, job):
+                        return
                     if await self.recover_targets(job):
                         return
                     await self.advance(job)

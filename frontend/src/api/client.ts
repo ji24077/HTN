@@ -453,6 +453,25 @@ export const readSupervisor = (jobId: string, signal?: AbortSignal) =>
   );
 
 export interface SimulationStatus {
+  analysis?: {
+    calls_used?: number;
+    rationale?: string;
+    children?: {
+      id: string;
+      role: "dependencies" | "parallelization" | "validation";
+      question: string;
+      status:
+        | "queued"
+        | "running"
+        | "completed"
+        | "failed"
+        | "timed_out"
+        | "cancelled"
+        | "interrupted";
+      report?: { summary: string; evidence: string[]; questions: string[] };
+      error?: string;
+    }[];
+  };
   execution_mode?: "job" | "service";
   service?: {
     task_id?: string | null;

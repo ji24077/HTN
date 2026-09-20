@@ -9,7 +9,7 @@ from fastapi.encoders import jsonable_encoder
 from ..server.db.store import Conflict, task_events
 from ..shared.dependencies import INSTRUCTIONS as DEPENDENCY_INSTRUCTIONS
 from ..shared.protocol import json_text
-from . import rejection
+from . import analysis, rejection
 from .artifacts import bundle, encoded, inspect_files, safe_path
 from .comparison import collect, compare, equivalent
 from .models import Candidate, ExecutionPolicy, Placement, ProjectPlan, Question, Schedule
@@ -60,6 +60,7 @@ async def decide(service, job, schema, name, *, extra=None):
     context = {
         "phase": job["phase"],
         "description": data["description"],
+        "analysis": analysis.context(job),
         "original_files": inspect_files(files),
         "limits": data["limits"],
         "remaining_seconds": max(0, (job["deadline"] - datetime.now(UTC)).total_seconds()),
@@ -89,15 +90,19 @@ async def decide(service, job, schema, name, *, extra=None):
         },
     ]
     tools.append(rejection.DEFINITION)
+    tools.extend(analysis.definition(job, name))
     async with asyncio.timeout(min(120, max(1, context["remaining_seconds"]))):
         response = await service.model.respond(
             [{"role": "user", "content": json_text(jsonable_encoder(context))}],
             tools=tools,
-            instructions=INSTRUCTIONS + rejection.INSTRUCTIONS,
+            instructions=INSTRUCTIONS + rejection.INSTRUCTIONS + analysis.INSTRUCTIONS,
         )
     if len(response.tool_calls) != 1:
         raise ValueError("Return exactly one proposal")
     call = response.tool_calls[0]
+    if call.name == "delegate_analysis":
+        await analysis.delegate(service, job, call.parse_arguments(), name, context)
+        return None
     if call.name == "reject_job":
         await rejection.reject(service, job, call.parse_arguments())
         return None

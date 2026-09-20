@@ -16,7 +16,7 @@ from ..shared.dependencies import INSTRUCTIONS as DEPENDENCY_INSTRUCTIONS
 from ..shared.dependencies import DependencyPlan
 from ..shared.protocol import Model, Requirements, json_text
 from ..shared.services import ServiceConfig
-from . import rejection
+from . import analysis, rejection
 from .artifacts import inspect_files, safe_path
 from .models import Question
 
@@ -149,6 +149,7 @@ async def decide(service, job, schema, name, **extra):
     data = job["data"]
     context = {
         "description": data["description"],
+        "analysis": analysis.context(job),
         "workload": data["workload"],
         "execution_mode": data.get("execution_mode", "job"),
         "files": inspect_files(await program_files(service, job)),
@@ -171,15 +172,19 @@ async def decide(service, job, schema, name, **extra):
         )
     ]
     tools.append(rejection.DEFINITION)
+    tools.extend(analysis.definition(job, name))
     async with asyncio.timeout(min(90, max(1, context["remaining_seconds"]))):
         response = await service.model.respond(
             [{"role": "user", "content": json_text(jsonable_encoder(context))}],
             tools=tools,
-            instructions=INSTRUCTIONS + rejection.INSTRUCTIONS,
+            instructions=INSTRUCTIONS + rejection.INSTRUCTIONS + analysis.INSTRUCTIONS,
         )
     if len(response.tool_calls) != 1:
         raise ValueError("Return exactly one project proposal")
     call = response.tool_calls[0]
+    if call.name == "delegate_analysis":
+        await analysis.delegate(service, job, call.parse_arguments(), name, context)
+        return None
     if call.name == "reject_job":
         await rejection.reject(service, job, call.parse_arguments())
         return None

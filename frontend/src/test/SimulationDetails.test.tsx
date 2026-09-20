@@ -169,3 +169,30 @@ it("shows Python dependencies and downloadable outputs", async () => {
   expect(screen.getByText("3. Run & validate outputs")).toHaveClass("current");
   expect(screen.queryByLabelText("Trial progress")).not.toBeInTheDocument();
 });
+
+it("shows concurrent analysts and their saved reports", async () => {
+  api.readSimulation.mockReset().mockResolvedValue({
+    ...status,
+    phase: "planning",
+    analysis: {
+      calls_used: 3,
+      rationale: "Review independent questions",
+      children: [
+        { id: "a", role: "dependencies", status: "running", question: "Which libraries?" },
+        { id: "b", role: "parallelization", status: "running", question: "Can trials overlap?" },
+        { id: "c", role: "validation", status: "completed", question: "How to validate?",
+          report: { summary: "Compare seeded outputs", evidence: ["simulate(seed)"], questions: ["Which tolerance?"] } },
+      ],
+    },
+  });
+  const { rerender } = render(<SimulationDetails jobId="parallel" cancelled={false} />);
+  expect(await screen.findByText(/2 analysis agents running concurrently/)).toBeVisible();
+  rerender(<SimulationDetails jobId="parallel" cancelled={false} view="Details" />);
+  expect(screen.getByRole("region", { name: "Analysis agents" })).toBeVisible();
+  expect(screen.getByText("dependencies · running")).toBeVisible();
+  expect(screen.getByText("parallelization · running")).toBeVisible();
+  await act(async () => { screen.getByText("validation · completed").click(); });
+  expect(screen.getByText("Compare seeded outputs")).toBeVisible();
+  expect(screen.getByText("simulate(seed)")).toBeVisible();
+  expect(screen.getByText("Which tolerance?")).toBeVisible();
+});

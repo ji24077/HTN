@@ -11,6 +11,7 @@ import type { ExecutionEvent } from "../api/types";
 import { time } from "../lib/format";
 import { ServicePanel } from "./ServicePanel";
 import { JobOutputs } from "./JobOutputs";
+import { AnalysisAgents } from "./AnalysisAgents";
 
 export const phaseLabels: Record<string, string> = {
   pending: "Waiting for worker",
@@ -154,6 +155,7 @@ export function SimulationDetails({
             {error}
           </p>
         )}
+        {view === "Details" && <AnalysisAgents analysis={status.analysis} />}
         <ServicePanel
           status={status}
           view={view}
@@ -168,6 +170,12 @@ export function SimulationDetails({
           <h3>{phaseLabels[status.phase] || status.phase}</h3>
         </div>
 
+        {status.analysis?.children?.some((child) => child.status === "running") && (
+          <p role="status">
+            {status.analysis.children.filter((child) => child.status === "running").length}{" "}
+            analysis agents running concurrently. Reports appear in Details.
+          </p>
+        )}
         {status.plan &&
           [
             "running",
@@ -305,6 +313,7 @@ export function SimulationDetails({
         <JobOutputs jobId={jobId} phase={status.phase} compact />
       )}
       <div hidden={view !== "Details"}>
+        <AnalysisAgents analysis={status.analysis} />
         {status.plan && (
           <details>
             <summary>Execution plan</summary>
