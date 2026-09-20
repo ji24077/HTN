@@ -1,6 +1,6 @@
 flowchart TD
     X["Preparation or execution failure"] --> L["Saved job state and execution logs"]
-    X -->|"When configured"| S["Sentry errors, traces, and logs"]
+    X -->|"When configured"| S["Sentry traces and logs"]
     L --> A["Supervisor investigates<br/>Current state and prior findings"]
     S --> A
     S -.->|"Unavailable: use stored evidence"| L
