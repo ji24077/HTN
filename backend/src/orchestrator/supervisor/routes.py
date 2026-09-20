@@ -1,9 +1,11 @@
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import Field
 
 from ..server.auth import require_admin
 from ..server.db.store import Conflict
+from ..server.usage import UsageStore
 from ..shared.protocol import Identifier, Model
+from ..shared.usage import UsageCap
 from .models import Action
 from .store import SupervisorStore
 
@@ -12,6 +14,16 @@ router = APIRouter(prefix="/v1/jobs", dependencies=[Depends(require_admin)])
 
 class Instructions(Model):
     instructions: str = Field(max_length=8000)
+
+
+@router.get("/{job_id}/usage")
+async def usage(job_id: Identifier, request: Request, after: int = Query(0, ge=0, le=2**63 - 1)):
+    return await UsageStore(request.app.state.store).read(job_id, after=after)
+
+
+@router.put("/{job_id}/usage-cap")
+async def usage_cap(job_id: Identifier, body: UsageCap, request: Request):
+    return await UsageStore(request.app.state.store).set_cap(job_id, body.cap)
 
 
 @router.get("/{job_id}/supervisor")

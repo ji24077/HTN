@@ -2,6 +2,7 @@ import hashlib
 from datetime import timedelta
 
 from ..server.db.store import Conflict, NotFound, cancel_job_tasks, event
+from ..server.usage import enforce_usage_caps
 from ..shared.protocol import TaskSpec, json_loads, json_text
 from .artifacts import bundle
 from .models import CODE_KIND, ROOT_KIND, TERMINAL
@@ -11,10 +12,16 @@ class SimulationStore:
     def __init__(self, store):
         self.store, self.pool = store, store.pool
 
-    async def create(self, upload, files):
+    async def create(self, upload, files, *, account_id=None):
         job_id = "sim-" + upload.request_id.hex
         digest, content = bundle(files)
-        signature = hashlib.sha256(json_text(upload.model_dump(mode="json")).encode()).hexdigest()
+        signature = hashlib.sha256(
+            json_text(
+                upload.model_dump(
+                    mode="json", exclude={"usage_cap"} if upload.usage_cap is None else set()
+                )
+            ).encode()
+        ).hexdigest()
         data = {
             "planning_version": 2,
             "description": upload.description,
@@ -49,9 +56,11 @@ class SimulationStore:
                     raise Conflict("Submission ID already used for another upload")
                 return await self.store.task(job_id)
             await conn.execute(
-                "INSERT INTO supervised_jobs(id,instructions) VALUES($1,$2)",
+                "INSERT INTO supervised_jobs(id,instructions,usage_cap_cad,billing_account_id) VALUES($1,$2,$3,$4)",
                 job_id,
                 upload.description,
+                upload.usage_cap,
+                account_id,
             )
             await conn.execute(
                 "INSERT INTO simulation_artifacts(job_id,digest,content) VALUES($1,$2,$3)",
@@ -75,6 +84,8 @@ class SimulationStore:
             await event(
                 conn, "task", job_id, "", "queued", phase="submitted", message=data["message"]
             )
+            if upload.usage_cap is not None:
+                await enforce_usage_caps(conn, job_id=job_id)
         return await self.store.task(job_id)
 
     async def job(self, job_id):

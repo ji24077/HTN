@@ -47,9 +47,21 @@ export interface AuditEvent {
   details: Record<string, unknown>;
 }
 export interface Snapshot {
+  account?: {
+    currency: "CAD";
+    credited: string;
+    spent: string;
+    balance: string;
+  } | null;
   workers: Worker[];
   tasks: Task[];
   events: AuditEvent[];
+  usage?: {
+    currency: "CAD";
+    estimated: true;
+    cost: string;
+    attempts: number;
+  };
 }
 export type ConnectionStatus = "connecting" | "live" | "reconnecting";
 

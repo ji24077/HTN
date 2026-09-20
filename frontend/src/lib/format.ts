@@ -1,4 +1,16 @@
 import type { AuditEvent, Task, Worker } from "../api/types";
+export function formatMoney(value: string | null | undefined) {
+  if (value == null || !value.trim()) return "—";
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return "—";
+  if (amount > 0 && amount < 0.0001) return "<CA$0.0001";
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "CAD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 4,
+  }).format(amount);
+}
 export const workerName = (id: string | null) =>
   id === "worker-a"
     ? "Worker A"

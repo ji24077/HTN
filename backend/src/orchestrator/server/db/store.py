@@ -24,7 +24,6 @@ from ...shared.protocol import (
     UNHEALTHY_AFTER,
     Capabilities,
     Ref,
-    Submission,
     Task,
     TaskSpec,
     Worker,
@@ -33,6 +32,8 @@ from ...shared.protocol import (
     json_text,
     task_ref,
 )
+from ...shared.usage import MeteredSubmission
+from ..usage import enforce_usage_caps
 from .connection import connection_options
 
 # A reservation older than this never receives its provider key; the reconciler closes it.
@@ -317,6 +318,11 @@ class Store:
                         "supervisor_runs",
                         "supervisor_actions",
                         "job_reservations",
+                        "usage_pricing",
+                        "usage_records",
+                        "usage_job_totals",
+                        "usage_fleet_totals",
+                        "account_credits",
                     ):
                         await conn.execute(
                             f'ALTER TABLE "{schema}".{table} ENABLE ROW LEVEL SECURITY'
@@ -675,9 +681,19 @@ class Store:
         )
         return [dict(row) for row in rows]
 
-    async def submit(self, specs: list[TaskSpec], *, instructions: str | None = None) -> list[Task]:
+    async def submit(
+        self,
+        specs: list[TaskSpec],
+        *,
+        instructions: str | None = None,
+        usage_cap=None,
+        account_id=None,
+    ) -> list[Task]:
         # Validate the in-process planner boundary as well as the HTTP boundary.
-        specs = Submission(tasks=specs, instructions=instructions).tasks
+        submission = MeteredSubmission(tasks=specs, instructions=instructions, usage_cap=usage_cap)
+        specs, usage_cap = submission.tasks, submission.usage_cap
+        if usage_cap is not None and len({spec.job_id for spec in specs}) != 1:
+            raise Conflict("a usage cap applies to a single submitted run")
         if instructions is not None and len({spec.job_id for spec in specs}) != 1:
             raise Conflict("instructions apply to a single submitted job")
         result = []
@@ -686,16 +702,27 @@ class Store:
                 encoded = spec.model_dump(mode="json")
                 row = await conn.fetchrow("SELECT * FROM tasks WHERE id=$1", spec.id)
                 if row is not None:
+                    # Replays return the original task without applying submission
+                    # metadata again: the user may have changed its run's cap.
                     if json_text(
                         TaskSpec.model_validate(row["spec"]).model_dump(mode="json")
                     ) != json_text(encoded):
                         raise Conflict("task ID already exists with a different specification")
                 else:
                     await conn.execute(
-                        "INSERT INTO supervised_jobs(id,instructions) VALUES($1,$2) ON CONFLICT DO NOTHING",
+                        "INSERT INTO supervised_jobs(id,instructions,usage_cap_cad,billing_account_id) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING",
                         spec.job_id,
                         instructions or "",
+                        usage_cap,
+                        account_id,
                     )
+                    if account_id is not None:
+                        owner = await conn.fetchval(
+                            "SELECT billing_account_id FROM supervised_jobs WHERE id=$1",
+                            spec.job_id,
+                        )
+                        if owner != account_id:
+                            raise Conflict("Cannot add tasks to a run billed to another account")
                     job_state = await conn.fetchval(
                         "SELECT state FROM supervised_jobs WHERE id=$1", spec.job_id
                     )
@@ -709,6 +736,12 @@ class Store:
                     await event(
                         conn, "task", spec.id, "", "queued", spec=encoded, job_id=spec.job_id
                     )
+                    if usage_cap is not None:
+                        current_cap = await conn.fetchval(
+                            "SELECT usage_cap_cad FROM supervised_jobs WHERE id=$1", spec.job_id
+                        )
+                        if current_cap != usage_cap:
+                            raise Conflict("run exists with a different cap; use set_run_usage_cap")
                 result.append(task_from_row(row))
         return result
 
@@ -829,6 +862,7 @@ class Store:
         accepted = []
         async with self.change() as (conn, now):
             worker = await self._worker(conn, worker_id, session)
+            await enforce_usage_caps(conn, worker_id=worker_id)
             if worker.state != "alive":
                 await self._worker_event(conn, worker, "alive")
             await conn.execute(
@@ -854,6 +888,7 @@ class Store:
     async def claim(self, worker_id: str, session: str) -> Task | None:
         async with self.change() as (conn, now):
             worker = await self._worker(conn, worker_id, session)
+            await enforce_usage_caps(conn)
             if (
                 worker.paused
                 or worker.state != "alive"
@@ -1063,6 +1098,7 @@ class Store:
 
     async def reconcile(self) -> None:
         async with self.change() as (conn, now):
+            await enforce_usage_caps(conn)
             expired = await conn.fetch(
                 "DELETE FROM job_reservations WHERE expires_at<=$1 RETURNING job_id,worker_id", now
             )
