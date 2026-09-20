@@ -1057,7 +1057,7 @@
         if (!ref || job.status !== 'complete' || saved.has(ref)) continue;
         out.push({
           ref, kind: 'trained', pod_id: (result.pod || {}).id || null,
-          base: (result.train || {}).base_model || null,
+          base: (result.train || {}).model_id || null,
           label: job.kind + ' · ' + new Date(job.created_at * 1000).toLocaleTimeString(),
         });
       }
@@ -1101,6 +1101,13 @@
         await load();
       } catch (err) { el('saveState').textContent = err.message; }
     };
+
+    let toastedStale = '';
+    function toastOnce(message) {
+      if (toastedStale === message) return;
+      toastedStale = message;
+      toast(message, true);
+    }
 
     function selectedModel() { return models.find((m) => m.id === el('serveModel').value); }
     function syncModelPod() {
@@ -1166,6 +1173,12 @@
     }
 
     function renderServing() {
+      // The backend compares its note against the server's /health; when they
+      // disagree the page must say so rather than label answers with weights
+      // that are not the ones replying.
+      if (serving.stale) {
+        toastOnce('서빙 기록과 실제 모델이 다릅니다: ' + (serving.live_model_ref || '알 수 없음') + ' 가 응답 중. 모델을 다시 올리세요.');
+      }
       const ready = Boolean(serving && serving.running);
       el('chatInput').disabled = !ready;
       el('sendBtn').disabled = !ready;

@@ -1831,12 +1831,22 @@ def serving() -> dict[str, Any]:
         if not _serve.get("model_id"):
             return {"running": False}
         health = _server_health(timeout=1.0) or {}
+        # The note says which weights we asked for; /health says which are
+        # answering. They disagree whenever a forward outlived the process that
+        # opened it, and then every latency and every answer on the page is
+        # attributed to the wrong model. restore_serving() already refuses a
+        # note its server contradicts — this reports the same disagreement
+        # instead of printing the note over it.
+        live_ref = health.get("model")
+        stale = bool(health) and live_ref != _serve["model_ref"]
         return {
             "running": bool(health),
             "model_id": _serve["model_id"],
             "model_ref": _serve["model_ref"],
             "pod_id": _serve["pod_id"],
             "dtype": _serve["dtype"],
+            "live_model_ref": live_ref,
+            "stale": stale,
             # Read off the server, not remembered here. A page that cannot see
             # whether the document is loaded will happily run the "before" case
             # without it — which returns in a fraction of a second and looks
@@ -1844,6 +1854,33 @@ def serving() -> dict[str, Any]:
             "prefix_tokens": health.get("prefix_tokens", 0),
             "prefix_build_s": health.get("prefix_build_s"),
         }
+
+
+def _clear_stale_forward() -> None:
+    """Free SERVE_PORT of a forward this process does not own.
+
+    stop_inference_server() can only terminate a tunnel it has a handle on, so
+    one opened by an earlier dashboard process outlives every restart. With the
+    port held, ssh -o ExitOnForwardFailure=yes exits immediately and the new
+    forward never exists — while the old one keeps answering, which is what let
+    a serve job succeed against the wrong pod.
+
+    Only forwards matching this exact spec are killed: the port belongs to this
+    feature, but somebody else's unrelated listener is not ours to close.
+    """
+    spec = f"{SERVE_PORT}:127.0.0.1:{SERVE_PORT}"
+    try:
+        listeners = _capture(["lsof", f"-tiTCP:{SERVE_PORT}", "-sTCP:LISTEN"], timeout=10)
+    except Exception:  # noqa: BLE001 — no lsof is not a reason to fail a serve
+        return
+    for pid in [line.strip() for line in listeners.splitlines() if line.strip().isdigit()]:
+        try:
+            argv = _capture(["ps", "-o", "command=", "-p", pid], timeout=10)
+        except Exception:  # noqa: BLE001
+            continue
+        if "ssh" in argv and spec in argv:
+            with contextlib.suppress(Exception):
+                os.kill(int(pid), signal.SIGTERM)
 
 
 def start_inference_server(*, pod_id: str, model_id: str, dtype: str = "bf16") -> Job:
@@ -1905,6 +1942,7 @@ def start_inference_server(*, pod_id: str, model_id: str, dtype: str = "bf16") -
         _run(job, _ssh_args(info, cmd))
 
         JOBS.update(job, "opening SSH forward", 65)
+        _clear_stale_forward()
         tunnel = subprocess.Popen(
             [
                 "ssh",
@@ -1933,7 +1971,14 @@ def start_inference_server(*, pod_id: str, model_id: str, dtype: str = "bf16") -
             if job.cancel_requested:
                 tunnel.terminate()
                 raise JobError("cancelled")
-            if _tunnel_up(timeout=2.0):
+            # Not "is anything answering on this port" — that question is
+            # answered "yes" by a forward left behind by an earlier serve,
+            # whose own ssh exits instantly under ExitOnForwardFailure because
+            # the port is taken. The job then reported success while every
+            # request went on reaching the previous pod's model. Ask who is
+            # answering instead.
+            health = _server_health(timeout=2.0)
+            if health and health.get("model") == remote_ref:
                 break
             time.sleep(2)
         else:

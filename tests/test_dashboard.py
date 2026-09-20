@@ -567,3 +567,45 @@ def test_a_checkpoint_on_two_pods_can_be_served_from_either(monkeypatch):
         assert "not on pod pod-b" in str(e) and "pod-a" in str(e)
     else:
         raise AssertionError("a pod without the weights was accepted")
+
+
+def test_serving_reports_the_weights_that_actually_answer(monkeypatch):
+    """The note says what we asked for; /health says what replied.
+
+    A forward that outlives the process which opened it keeps answering from
+    the previous pod, so every latency and every answer on the page gets
+    attributed to weights that are not the ones replying. That is not a
+    theoretical race: it is how a base model spent an afternoon labelled as
+    the fine-tuned one.
+    """
+    monkeypatch.setitem(runner._serve, "model_id", "my-finetune")
+    monkeypatch.setitem(runner._serve, "model_ref", "/runs/new/ckpt")
+    monkeypatch.setitem(runner._serve, "pod_id", "pod-new")
+    monkeypatch.setitem(runner._serve, "dtype", "bf16")
+    monkeypatch.setattr(
+        runner,
+        "_server_health",
+        lambda timeout=1.0: {"model": "/runs/OLD/ckpt", "prefix_tokens": 0},
+    )
+
+    state = runner.serving()
+
+    assert state["stale"] is True
+    assert state["live_model_ref"] == "/runs/OLD/ckpt"
+
+
+def test_serving_is_not_stale_when_the_server_confirms_the_note(monkeypatch):
+    monkeypatch.setitem(runner._serve, "model_id", "my-finetune")
+    monkeypatch.setitem(runner._serve, "model_ref", "/runs/new/ckpt")
+    monkeypatch.setitem(runner._serve, "pod_id", "pod-new")
+    monkeypatch.setitem(runner._serve, "dtype", "bf16")
+    monkeypatch.setattr(
+        runner,
+        "_server_health",
+        lambda timeout=1.0: {"model": "/runs/new/ckpt", "prefix_tokens": 30857},
+    )
+
+    state = runner.serving()
+
+    assert state["stale"] is False
+    assert state["prefix_tokens"] == 30857
