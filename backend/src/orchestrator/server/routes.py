@@ -12,7 +12,7 @@ from ..shared.protocol import Identifier, Task, TaskSpec, Worker, json_loads, js
 from ..shared.usage import MeteredSubmission
 from .auth import require_admin
 from .credits import account_credit, account_id
-from .db.store import TASK_SUMMARY_COLUMNS
+from .db.store import TASK_SUMMARY_COLUMNS, WORKER_ROWS
 
 router = APIRouter(prefix="/v1", dependencies=[Depends(require_admin)])
 
@@ -22,7 +22,7 @@ async def read_snapshot(request: Request):
     # A single consistent view of worker/task state and its audit events.
     async with store.pool.acquire() as conn:
         async with conn.transaction(isolation="repeatable_read", readonly=True):
-            workers = await conn.fetch("SELECT * FROM workers ORDER BY id LIMIT 500")
+            workers = await conn.fetch(WORKER_ROWS + " ORDER BY w.id LIMIT 500")
             tasks = await conn.fetch(
                 f"SELECT {TASK_SUMMARY_COLUMNS} FROM tasks "
                 "WHERE spec->>'kind' != 'python_project' "

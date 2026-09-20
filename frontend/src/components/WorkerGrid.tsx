@@ -1,7 +1,14 @@
 import { useState } from "react";
 import { setRuntimePreference } from "../api/client";
 import type { RuntimePreference, Task, Worker } from "../api/types";
-import { active, age, healthy, taskTitle, workerName } from "../lib/format";
+import {
+  active,
+  age,
+  healthy,
+  shortId,
+  taskTitle,
+  workerName,
+} from "../lib/format";
 
 function MachineIcon() {
   return (
@@ -114,6 +121,18 @@ function RuntimeToggle({ worker }: { worker: Worker }) {
   );
 }
 
+/**
+ * What to put at the top of a machine's card.
+ *
+ * The worker's own `name` first: this component holds the snapshot, so it does not
+ * need the id-keyed registry the task tables rely on. A machine with no name at all --
+ * one that joined with a shared token rather than a paired device key -- falls back to
+ * a short id, because a full UUID as a heading is noise where a name should be.
+ */
+function cardTitle(worker: Worker | undefined, id: string) {
+  return worker?.name?.trim() || workerName(id);
+}
+
 export function WorkerGrid({
   workers,
   tasks,
@@ -125,10 +144,17 @@ export function WorkerGrid({
   selected: string;
   onSelect: (id: string) => void;
 }) {
+  // Ready machines first, then alphabetically by the name their owner gave them.
+  // Sorting by id put the grid in an order nobody could predict, because a UUID has
+  // nothing to do with the machine it names.
   const ids = [...workers]
     .sort(
       (a, b) =>
-        Number(healthy(b)) - Number(healthy(a)) || a.id.localeCompare(b.id),
+        Number(healthy(b)) - Number(healthy(a)) ||
+        cardTitle(a, a.id).localeCompare(cardTitle(b, b.id), undefined, {
+          sensitivity: "base",
+        }) ||
+        a.id.localeCompare(b.id),
     )
     .map((worker) => worker.id);
   return (
@@ -176,7 +202,7 @@ export function WorkerGrid({
               className={`worker ${selected === id ? "selected" : ""} ${ready ? "" : "waiting"}`}
               data-worker={id}
               aria-pressed={selected === id}
-              aria-label={`Send to ${workerName(id)}`}
+              aria-label={`Send to ${cardTitle(worker, id)}`}
               onClick={() => onSelect(id)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" || e.key === " ") {
@@ -197,8 +223,16 @@ export function WorkerGrid({
                   <span className="worker-status">{status}</span>
                 </span>
               </div>
-              <h3>{workerName(id)}</h3>
-              <div className="worker-id">{id}</div>
+              <h3>{cardTitle(worker, id)}</h3>
+              {/* The id stays reachable -- it is what the CLI and the API want -- but
+                  as a short form under the name rather than as the name. The full
+                  UUID is on hover for anyone who needs to copy it. Dropped entirely
+                  for an unnamed machine, whose heading is already the id. */}
+              {worker?.name?.trim() && (
+                <div className="worker-id" title={id}>
+                  {shortId(id)}
+                </div>
+              )}
               <div className="worker-specs">
                 <span className="tag">
                   {worker?.capabilities.runtime === "cuda"

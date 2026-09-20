@@ -52,6 +52,19 @@ TASK_SUMMARY_COLUMNS = (
     "failure,created_at,progress,started_at"
 )
 
+#: A worker row plus the name its owner gave the machine at pairing.
+#:
+#: The name lives on `dwp_devices`, not on `workers`, because it is a property of the
+#: paired device rather than of the connection: it survives a worker going offline and
+#: coming back with a new session. The join is LEFT because a token worker -- one that
+#: authenticates with a shared secret instead of a device key -- has no device row and
+#: must still appear in the fleet. Those come back with a null name, and every caller
+#: falls back to the id.
+WORKER_ROWS = (
+    "SELECT w.*, d.display_name AS name FROM workers w "
+    "LEFT JOIN dwp_devices d ON d.worker_id = w.id"
+)
+
 
 class Conflict(Exception):
     pass
@@ -442,7 +455,7 @@ class Store:
             return [item.sequence for item in batch.events]
 
     async def workers(self) -> list[Worker]:
-        rows = await self.pool.fetch("SELECT * FROM workers ORDER BY id LIMIT 500")
+        rows = await self.pool.fetch(WORKER_ROWS + " ORDER BY w.id LIMIT 500")
         return [Worker.model_validate(dict(row)) for row in rows]
 
     async def runtime_preference(self, worker_id: str) -> str:

@@ -153,6 +153,12 @@ class Task(Model):
 
 
 class Worker(Model):
+    #: What the owner named this machine when they paired it, from `dwp_devices`.
+    #:
+    #: Optional because it is not the worker's own property: token workers have no
+    #: device row at all, and a query that does not join one leaves it unset. A caller
+    #: that needs something to show falls back to `id`, which is always there.
+    name: str | None = Field(default=None, max_length=128)
     id: Identifier
     session_id: str
     capabilities: Capabilities

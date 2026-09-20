@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { openSession } from "../api/client";
 import type { ConnectionStatus, Snapshot } from "../api/types";
+import { rememberWorkers } from "../lib/format";
 
 const empty: Snapshot = { workers: [], tasks: [], events: [] };
 export function useFleet() {
@@ -41,6 +42,8 @@ export function useFleet() {
               !Array.isArray(next.events)
             )
               throw new Error("Invalid snapshot");
+            // Before setSnapshot, so the render it triggers already has the names.
+            rememberWorkers(next.workers);
             setSnapshot(next);
             setUpdatedAt(new Date());
             setStatus("live");

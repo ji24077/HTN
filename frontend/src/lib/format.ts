@@ -11,12 +11,45 @@ export function formatMoney(value: string | null | undefined) {
     maximumFractionDigits: 4,
   }).format(amount);
 }
+
+/**
+ * The names machines were given when they were paired, by worker id.
+ *
+ * A module-level map rather than a prop, because the id is all most callers have: a
+ * task row knows which worker ran it, not which device that worker is, and threading
+ * the fleet into every table to answer that would put the same list in five places.
+ * `rememberWorkers` is called from the one place a snapshot arrives, before the state
+ * update that re-renders, so a name is never a render behind its worker.
+ *
+ * Entries are kept for machines that have left the snapshot. A finished task still
+ * names the laptop that ran it after that laptop has gone offline, which is the whole
+ * reason anyone reads the column.
+ */
+const names = new Map<string, string>();
+
+export function rememberWorkers(workers: Worker[]) {
+  for (const worker of workers) {
+    const name = worker.name?.trim();
+    if (name) names.set(worker.id, name);
+  }
+}
+
+/**
+ * What to call a worker on screen.
+ *
+ * Falls back to the raw id, which is a UUID for a paired device. That is unreadable but
+ * honest: it is the only handle that definitely exists, and showing it is better than
+ * inventing a name for a machine nobody has named.
+ */
 export const workerName = (id: string | null) =>
   id === "worker-a"
     ? "Worker A"
     : id === "worker-b"
       ? "Worker B"
-      : id || "Any worker";
+      : (id && names.get(id)) || id || "Any worker";
+
+/** A UUID trimmed to something a person can compare at a glance. */
+export const shortId = (id: string) => (id.length > 12 ? id.slice(0, 8) : id);
 export const active = (task: Task) =>
   task.state === "assigned" || task.state === "running";
 export const healthy = (worker: Worker) =>
