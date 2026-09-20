@@ -2,7 +2,7 @@
 
 We want people to rent out their GPUs when they aren't using them, making spare capacity, including consumer chips, available for training, simulations, and experimentation.
 
-But personal machines can disconnect at any time and vary enormously in hardware and software. Users cannot tune their code for every possible device. Our agents handle that adaptation, checking changes against the original behaviour and using telemetry to troubleshoot failures and improve future runs.
+But personal machines can disconnect at any time and vary enormously in hardware and software. Users cannot tune their code for every possible device. Our agents handle that adaptation, checking changes against the original behaviour and using telemetry to troubleshoot failures.
 
 ## How to use it
 
@@ -76,16 +76,15 @@ Accepted code is frozen for the full run, and the user's requested workload and
 quality requirements remain unchanged. The transformations available depend on
 the workload and runtime; code that already fits can proceed without rewriting.
 
-### When a run fails: the Sentry feedback loop
+### When a run fails: traces and logs
 
-We use **Sentry** as our telemetry platform across the system, collecting errors,
-logs, traces, and performance measurements. Failures can come from lost workers,
-missing dependencies, compilation errors, resource limits, or outputs that fail
-validation. ChatGPU records the affected job, worker, and attempt so the supervisor
-can connect Sentry evidence to the run it is investigating.
+We use **Sentry traces and logs** to follow execution and investigate failures.
+Job, worker, and attempt identifiers help connect that evidence to the affected
+run. Failures can come from lost workers, missing dependencies, compilation
+errors, resource limits, or outputs that fail validation.
 
-The supervisor reads this evidence alongside current job state and its saved
-findings. Its response depends on the cause:
+The supervisor uses current job state and stored execution logs to choose a
+response. Sentry provides additional context for troubleshooting:
 
 | What happened | How the system responds |
 | --- | --- |
@@ -104,24 +103,15 @@ handles heartbeats, leases, and routine retries independently of model calls.
 
 ### Using telemetry to improve model optimization and migration
 
-The same execution data can help us improve future runs. Preparation records
-include hardware and runtime details, original and candidate code identities,
-numerical checks, timings, rejection reasons, and final outcomes. Successful,
-failed, skipped, and fallback outcomes are saved, with structured Sentry Logs
-providing a way to search and investigate them.
+**We plan to use execution records, traces, and logs to improve our model
+optimization and migration algorithms.** Comparing hardware, runtime, numerical
+checks, timings, and failure reasons could help us identify useful optimizations
+and recurring compatibility problems.
 
-**We plan to use this evidence to improve our model optimization and migration
-algorithms:** identify which changes help particular workloads and chips, learn
-from recurring compatibility failures, and turn those failures into regression
-cases. Candidate changes can then be evaluated against both correctness and
-performance evidence before adoption. A faster result must still meet the
-original quality requirements.
-
-Our existing development agent already investigates recorded incidents and
-proposes fixes with tests for human review. We want to build on that foundation
-with better migration strategies and optimization choices informed by previous
-runs. Broader learning across runs and training agents on these records are
-future uses of the data.
+Those findings could become regression cases and guide future agent proposals.
+Any proposed improvement would still need correctness and performance checks
+before adoption. Learning across runs and training agents on these records remain
+future work.
 
 <img src="https://raw.githubusercontent.com/ji24077/HTN/main/docs/assets/devpost/telemetry-improvement.png" alt="Telemetry from successful and failed runs informs proposed migration and optimization improvements, which are tested and reviewed before use in future runs." width="800" style="max-width: 100%; height: auto;">
 
@@ -201,8 +191,8 @@ them to agree on what was happening throughout a job was an even bigger one.
   within the user's workload and spending limits.
 - **Debugging meant following a job across the whole system.** A visible failure
   could originate in planning, environment setup, compilation, execution, or
-  validation. Connecting Sentry telemetry to the relevant job, worker, and
-  attempt gave both us and the supervising agent the context to investigate.
+  validation. Connecting Sentry traces and logs to the relevant job, worker, and
+  attempt helped us investigate failures across those components.
 
 Through all of this, we wanted the user experience to stay simple: upload files,
 describe the task, and collect the results. Making the system explain its
@@ -220,46 +210,22 @@ Sleep.
 
 ## For Sponsors
 
-### Sentry: observability that drives agent decisions
+### Sentry: traces and logs across distributed jobs
 
-**Sentry gives our agents evidence to investigate failures and gives our team a
-way to understand behaviour across the whole system.** Our integration includes
-Logs, Tracing, Profiling, and Session Replay alongside error monitoring, matching
-the emphasis on depth and actionable observability in the
-[Sentry sponsor challenge](https://hackthenorth2026.devpost.com/#prizes).
+**We used Sentry primarily for traces and logs.** With jobs crossing the backend
+and remote workers, these helped us understand where time was spent and what
+happened when execution failed.
 
-| Product | Technical integration | What it helps us investigate |
-| --- | --- | --- |
-| Logs | Python reporting enables Sentry Logs; the dashboard captures warning and error console messages. The supervisor can query job-scoped logs through the Sentry API. | What happened around a failure, on which worker, and during which attempt. |
-| Tracing | Browser requests propagate trace headers to same-origin API calls. Python workers create `task.execute` transactions tagged with job, task, worker, and execution identities. | Request latency and worker execution time, correlated with the relevant job. |
-| Profiling | Python telemetry configures trace-linked profiling, with trace and profile-session sampling set to 100% for the prototype. | Where time is spent inside instrumented Python processes. |
-| Session Replay | The dashboard enables error-triggered replay with inputs masked and media blocked. Authentication callback pages are excluded. | The sequence of user interactions leading to a dashboard error. |
+- **Tracing:** Python workers wrap execution in `task.execute` transactions,
+  tagged with job, task, worker, and attempt identifiers. This connects execution
+  timing to a particular run.
+- **Logs:** Execution messages provide context around setup and runtime failures,
+  helping us follow a job across components and investigate what went wrong.
 
-<img src="https://raw.githubusercontent.com/ji24077/HTN/main/docs/assets/devpost/sponsor-sentry.png" alt="Sentry evidence supports job-scoped recovery and a separate development loop that proposes tested fixes for review." width="800" style="max-width: 100%; height: auto;">
+<img src="https://raw.githubusercontent.com/ji24077/HTN/main/docs/assets/devpost/sponsor-sentry.png" alt="Sentry traces and logs connect execution timing and failure context to a job and worker for troubleshooting." width="800" style="max-width: 100%; height: auto;">
 
-**The runtime loop is backed by durable state.** The supervisor polls Sentry error
-events, saves pagination cursors, and deduplicates alerts into its job inbox. Its
-`search_logs` and `get_alert_details` tools use a backend adapter that builds
-job-scoped queries and checks returned rows against the same job. Findings,
-follow-ups, and recovery actions persist in PostgreSQL. The next observation
-checks whether the action helped, and stored execution history remains available
-when Sentry cannot be reached.
-
-**The development loop turns incidents into reviewable changes.** A separate
-script uses the Sentry CLI to collect an issue, stack trace, recent events, and
-logs from the same trace. A coding agent investigates in an isolated checkout,
-proposes a fix with a regression test, and produces a pull request for human
-review. Merged incident records become context for later investigations. The
-export path can also pair recorded incidents with their fix diffs, providing a
-foundation for our planned migration and optimization improvements.
-
-Credential scrubbers run before events, logs, breadcrumbs, and transactions leave
-the process. Workers receive public ingest configuration during enrollment;
-Sentry API credentials stay in the backend.
-
-Implementation: [telemetry coverage](https://github.com/ji24077/HTN/blob/main/docs/sentry.md),
-[job supervisor](https://github.com/ji24077/HTN/blob/main/docs/job-supervisor.md), and
-[incident-to-PR workflow](https://github.com/ji24077/HTN/blob/main/docs/self-heal.md).
+Implementation: [telemetry setup](https://github.com/ji24077/HTN/blob/main/backend/src/orchestrator/shared/telemetry.py)
+and [worker instrumentation](https://github.com/ji24077/HTN/blob/main/backend/src/orchestrator/worker/agent.py).
 
 ### OpenAI: GPT-6 Astra inside an execution and feedback loop
 
