@@ -68,7 +68,8 @@ def _native_preflight(job, info, vendor: str, destination: Path) -> dict:
     return report
 
 
-def _gate(before: dict, after: dict, *, tolerance: float = 0.02) -> dict:
+def _gate(before: dict, after: dict, *, tolerance: float = 0.0,
+          preserve_outputs: bool = True, rows: list[dict] | None = None) -> dict:
     from gpushare.dashboard import runner as r
 
     try:
@@ -82,7 +83,8 @@ def _gate(before: dict, after: dict, *, tolerance: float = 0.02) -> dict:
             raise ValueError("all five per-field scores are required")
     except (KeyError, ValueError) as exc:
         raise r.JobError(f"migration evaluation is not comparable: {exc}") from exc
-    validation = r._quality(before, after, tol=tolerance)
+    validation = r._quality(before, after, tol=tolerance,
+                            preserve_outputs=preserve_outputs, rows=rows)
     if validation["status"] != "ok":
         raise r.JobError(f"migration quality gate rejected regression: {validation}")
     return validation
@@ -342,7 +344,9 @@ def run_resume_migration(
         )
         r._pull(job, dst_info, f"{remote_run}/eval", local_eval)
         report = r._json(local_eval / f"{name}.json")
-        gate = _gate(baseline, report)
+        # Hardware transfer preserves outputs; continued training may change
+        # answers, but must not lower any measured quality score.
+        gate = _gate(baseline, report, preserve_outputs=name == "target-before-resume", rows=rows)
         if code:
             raise r.JobError(f"target evaluation exited with status {code}")
         return report, gate
@@ -406,6 +410,9 @@ def run_resume_migration(
             "remote_checkpoint": resumed_ckpt,
             "migrated_from": source["id"],
             "migration_mode": "full_training_resume",
+            "validation": final_gate,
+            "transfer_validation": transfer_gate,
+            "inference": after.get("inference"),
         }
     )
     return result

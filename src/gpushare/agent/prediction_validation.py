@@ -7,13 +7,14 @@ from gpushare.agent.task import Record, parse_output
 
 
 def compare_predictions(reference: dict, candidate: dict, rows: list[dict], *,
-                        max_new_tokens: int = 128, seq_len: int = 192) -> dict:
+                        max_new_tokens: int = 128, seq_len: int = 192,
+                        strict_inference: bool = True) -> dict:
     if not rows:
         raise ValueError("validation requires nonempty cases")
     controls = ("batch", "dtype", "fuse_adapter", "length_bucketing")
     for control in controls:
         a, b = reference.get("inference", {}), candidate.get("inference", {})
-        if control not in a or control not in b or a[control] != b[control]:
+        if control not in a or control not in b or (strict_inference and a[control] != b[control]):
             raise ValueError("different or missing inference controls")
     identity = evaluation_identity(rows, max_new_tokens=max_new_tokens, seq_len=seq_len)
     decoded = []

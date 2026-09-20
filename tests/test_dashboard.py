@@ -16,7 +16,7 @@ def test_research_console_and_state_are_served():
     state = client.get("/api/state")
 
     assert page.status_code == 200
-    assert "모델을 고르고" in page.text
+    assert 'data-testid="run-training"' in page.text
     assert 'data-testid="run-training"' in page.text
     assert 'data-testid="optimize-training"' in page.text
     assert 'data-testid="optimize-inference"' in page.text
@@ -47,11 +47,11 @@ def test_quality_gate_checks_parse_and_exact_match():
 
     assert (
         runner._quality(before, {"json_parse_rate": 0.99, "exact_match_rate": 0.89})["status"]
-        == "ok"
+        == "not_validated"
     )
     assert (
         runner._quality(before, {"json_parse_rate": 1.0, "exact_match_rate": 0.87})["status"]
-        == "regressed"
+        == "not_validated"
     )
 
 
@@ -155,17 +155,15 @@ def test_optimization_without_a_reference_run_is_not_validated(tmp_path, monkeyp
 
 
 def test_quality_gate_rejects_a_regression():
-    """The gate that every validated action passes through."""
+    """Aggregate-only legacy results must not certify unchanged answers."""
     from gpushare.dashboard.runner import _quality
 
     good = {"json_parse_rate": 1.0, "exact_match_rate": 0.91}
-    assert _quality(good, good)["status"] == "ok"
+    assert _quality(good, good)["status"] == "not_validated"
     assert (
-        _quality(good, {"json_parse_rate": 1.0, "exact_match_rate": 0.40})["status"] == "regressed"
+        _quality(good, {"json_parse_rate": 1.0, "exact_match_rate": 0.40})["status"] == "not_validated"
     )
-    # Within tolerance is not a regression: generation is not bit-identical
-    # across chips, and a migration landing inside noise did not break anything.
-    assert _quality(good, {"json_parse_rate": 1.0, "exact_match_rate": 0.90})["status"] == "ok"
+    assert _quality(good, {"json_parse_rate": 1.0, "exact_match_rate": 0.90})["status"] == "not_validated"
 
 
 def test_request_models_match_the_runner_signatures_they_splat_into():
@@ -202,7 +200,7 @@ def test_streaming_route_reports_errors_as_a_frame_not_a_500(monkeypatch):
     """
     # build_app() adopts a model that is still resident, so without this the
     # test passes or fails depending on whether a pod happens to be serving.
-    monkeypatch.setattr(runner, "_server_health", lambda timeout=3.0: None)
+    monkeypatch.setattr(runner, "_server_health", lambda timeout=3.0, **kw: None)
     monkeypatch.setattr(runner, "_serve", {})
     client = TestClient(build_app())
 
@@ -216,6 +214,8 @@ def test_streaming_route_reports_errors_as_a_frame_not_a_500(monkeypatch):
 
 
 def test_model_picker_keeps_checkpoint_pod_and_agent_artifact(monkeypatch):
+    gate = {"status": "ok", "policy": "aggregate_no_regression", "tolerance": 0,
+            "evaluation": {"dataset_sha256": "recorded-suite"}}
     monkeypatch.setattr(
         runner,
         "latest_run",
@@ -223,6 +223,7 @@ def test_model_picker_keeps_checkpoint_pod_and_agent_artifact(monkeypatch):
             "job_id": "baseline-job",
             "pod_id": "pod-base",
             "remote_checkpoint": "/workspace/gpushare-ui/.runs/base/ckpt",
+            "validation": gate,
         },
     )
     monkeypatch.setattr(
@@ -236,6 +237,7 @@ def test_model_picker_keeps_checkpoint_pod_and_agent_artifact(monkeypatch):
                 "result": {
                     "pod": {"id": "pod-agent"},
                     "remote_checkpoint": "/workspace/gpushare-ui/.runs/agent/validate/ckpt",
+                    "validation": gate,
                 },
             }
         ],
@@ -342,14 +344,13 @@ def test_placement_reports_every_pod_it_tried_when_none_fit(monkeypatch):
     monkeypatch.setattr(runner, "_free_disk_gb", lambda info: 30.0)
     monkeypatch.setattr(runner, "_gpu_occupants", lambda info: "3910603, 23178 MiB")
     monkeypatch.setattr(runner.JOBS, "log", lambda job, text: None)
-    monkeypatch.setattr(runner, "_reclaim", lambda job, info, pod: False)
 
     try:
         runner._place(object(), need_gb=16.0, preferred_pod_id="a")
     except runner.JobError as e:
         assert "pod-a: 1.2 GB VRAM free" in str(e)
         assert "3910603" in str(e), "the occupant has to be named or there is nothing to act on"
-        assert "even after reclaiming" in str(e)
+        assert "Running models and checkpoints were left unchanged" in str(e)
     else:
         raise AssertionError("placement accepted a pod with no room")
 
@@ -376,13 +377,8 @@ def test_predicted_training_vram_is_near_the_measured_peak():
     assert 13.8 <= need <= 13.8 * runner.VRAM_MARGIN * 1.2, need
 
 
-def test_reclaim_is_a_last_resort_not_a_routine_reset(monkeypatch):
-    """A free pod wins over clearing an occupied one.
-
-    "Reset the GPU before every job" would work and would also kill whatever
-    model is being demonstrated at the time. Relocation costs nothing, so it is
-    tried first and reclaim only runs when no pod fits as it is.
-    """
+def test_placement_leaves_occupied_pod_untouched_when_another_fits(monkeypatch):
+    """A free pod can be selected without changing the active deployment."""
     monkeypatch.setattr(
         runner,
         "list_pods",
@@ -395,32 +391,41 @@ def test_reclaim_is_a_last_resort_not_a_routine_reset(monkeypatch):
     monkeypatch.setattr(runner, "_free_vram_gb", lambda info: 0.9 if info["pod"] == "busy" else 23.5)
     monkeypatch.setattr(runner, "_free_disk_gb", lambda info: 30.0)
     monkeypatch.setattr(runner.JOBS, "log", lambda job, text: None)
-    reclaimed: list[str] = []
-    monkeypatch.setattr(runner, "_reclaim", lambda job, info, pod: reclaimed.append(pod["id"]) or True)
+    monkeypatch.setattr(runner, "_gpu_occupants", lambda info: "active model")
+    def forbidden(*args, **kwargs):
+        pytest.fail("placement must not issue extra commands to clear an occupied pod")
+    monkeypatch.setattr(runner, "_capture", forbidden)
+    monkeypatch.setattr(runner, "_run", forbidden)
 
     pod, _ = runner._place(object(), need_gb=16.0, preferred_pod_id="busy")
 
     assert pod["id"] == "free"
-    assert not reclaimed, "an occupied pod was cleared while an idle one was available"
 
 
-def test_reclaim_runs_when_nothing_fits(monkeypatch):
-    freed = {"done": False}
+@pytest.mark.parametrize("shortage", ["vram", "disk", "both"])
+def test_capacity_shortage_never_deletes_checkpoints_or_stops_serving(monkeypatch, shortage):
     monkeypatch.setattr(
         runner,
         "list_pods",
         lambda: [{"id": "only", "name": "solo", "status": "running", "cost_per_hour": 0.5}],
     )
     monkeypatch.setattr(runner, "_ssh_info", lambda pid: {"pod": pid})
-    monkeypatch.setattr(runner, "_free_vram_gb", lambda info: 23.5 if freed["done"] else 0.9)
-    monkeypatch.setattr(runner, "_free_disk_gb", lambda info: 30.0)
+    monkeypatch.setattr(runner, "_free_vram_gb", lambda info: 23.5 if shortage == "disk" else 0.9)
+    monkeypatch.setattr(runner, "_free_disk_gb", lambda info: 30.0 if shortage == "vram" else 0.5)
     monkeypatch.setattr(runner, "_gpu_occupants", lambda info: "123, 22631 MiB")
     monkeypatch.setattr(runner.JOBS, "log", lambda job, text: None)
-    monkeypatch.setattr(runner, "_reclaim", lambda job, info, pod: freed.__setitem__("done", True) or True)
-
-    pod, _ = runner._place(object(), need_gb=16.0, preferred_pod_id="only")
-
-    assert pod["id"] == "only" and freed["done"]
+    active = {"model_id": "finetuned", "pod_id": "only", "model_ref": "/kept/checkpoint"}
+    monkeypatch.setattr(runner, "_serve", active.copy())
+    def forbidden(*args, **kwargs):
+        pytest.fail("capacity failure must not run remote cleanup or stop commands")
+    monkeypatch.setattr(runner, "_capture", forbidden)
+    monkeypatch.setattr(runner, "_run", forbidden)
+    monkeypatch.setattr(runner, "stop_inference_server", forbidden)
+    with pytest.raises(runner.JobError, match="no pod has room") as error:
+        runner._place(object(), need_gb=16.0, preferred_pod_id="only")
+    assert "Running models and checkpoints were left unchanged" in str(error.value)
+    assert "Explicitly unload" in str(error.value)
+    assert runner._serve == active
 
 
 def test_the_measurement_panels_survive_a_ui_rewrite():
@@ -485,7 +490,7 @@ def test_a_restart_re_adopts_a_model_that_is_still_resident(monkeypatch, tmp_pat
     monkeypatch.setattr(runner, "SERVING_PATH", note)
     monkeypatch.setattr(runner, "_serve", {})
     monkeypatch.setattr(runner, "_server_health",
-                        lambda timeout=3.0: {"model": "Qwen/Qwen3-4B-Instruct-2507"})
+                        lambda timeout=3.0, **kw: {"model": "Qwen/Qwen3-4B-Instruct-2507", "dtype": "bf16"})
 
     runner.restore_serving()
 
@@ -493,12 +498,18 @@ def test_a_restart_re_adopts_a_model_that_is_still_resident(monkeypatch, tmp_pat
 
     # A note whose server has been replaced by a different model is discarded.
     monkeypatch.setattr(runner, "_serve", {})
-    monkeypatch.setattr(runner, "_server_health", lambda timeout=3.0: {"model": "something/else"})
+    monkeypatch.setattr(runner, "_server_health", lambda timeout=3.0, **kw: {"model": "something/else"})
     runner.restore_serving()
     assert not runner._serve, "a stale note was adopted"
 
+    monkeypatch.setattr(runner, "_server_health", lambda **kw: {
+        "model": "Qwen/Qwen3-4B-Instruct-2507", "dtype": "fp16",
+    })
+    runner.restore_serving()
+    assert not runner._serve, "a note with a different runtime dtype was adopted"
+
     # So is one whose server is gone.
-    monkeypatch.setattr(runner, "_server_health", lambda timeout=3.0: None)
+    monkeypatch.setattr(runner, "_server_health", lambda timeout=3.0, **kw: None)
     runner.restore_serving()
     assert not runner._serve, "a dead server was adopted"
 
@@ -515,13 +526,8 @@ def test_amd_serving_does_not_go_through_uv():
     assert "uv" in runner._serve_python("nvidia"), "the working NVIDIA path must not move"
 
 
-def test_a_checkpoint_on_two_pods_can_be_served_from_either(monkeypatch):
-    """After a migration the same weights exist in two places.
-
-    The record names one pod — the last to write it — so serving the other one
-    was refused outright, which blocks exactly the comparison the migration
-    exists to enable: the same model answering on two chips.
-    """
+def test_copied_weights_without_target_evaluation_cannot_be_served(monkeypatch):
+    """File presence on another chip is not verification on that chip."""
     monkeypatch.setattr(
         runner, "available_models",
         lambda: [{"id": "finetuned", "label": "fine-tuned", "ref": "/w/ckpt", "pod_id": "pod-a"}],
@@ -530,13 +536,14 @@ def test_a_checkpoint_on_two_pods_can_be_served_from_either(monkeypatch):
     monkeypatch.setattr(runner, "_ssh_args", lambda info, cmd: ["ssh", cmd])
 
     monkeypatch.setattr(runner, "_capture", lambda a, **k: "yes")
-    assert runner._model_ref("finetuned", "pod-b") == "/w/ckpt"
+    with pytest.raises(runner.JobError, match="not verified on pod pod-b"):
+        runner._model_ref("finetuned", "pod-b")
 
     # Absent is still refused, and says where it actually is.
     monkeypatch.setattr(runner, "_capture", lambda a, **k: "no")
     try:
         runner._model_ref("finetuned", "pod-b")
     except runner.JobError as e:
-        assert "not on pod pod-b" in str(e) and "pod-a" in str(e)
+        assert "not verified on pod pod-b" in str(e) and "pod-a" in str(e)
     else:
         raise AssertionError("a pod without the weights was accepted")

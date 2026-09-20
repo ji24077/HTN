@@ -126,6 +126,8 @@ def fake_hosts(tmp_path, monkeypatch):
             "field_accuracy": dict.fromkeys(REQUIRED_FIELDS, 1.0),
             "evaluation": evaluation_identity([row], max_new_tokens=128, seq_len=256),
             "inference": migration.INFERENCE,
+            "samples": [{"source_index": 0, "sentence": row["sentence"],
+                         "expected": row["record"], "raw_output": json.dumps(row["record"])}],
         }
         fail = side == "target" and controls["fail_before" if is_before else "fail_after"]
         if side == "source":
@@ -134,6 +136,7 @@ def fake_hosts(tmp_path, monkeypatch):
         if fail:
             # Aggregate metrics deliberately unchanged: field gating must catch it.
             report["field_accuracy"]["year"] = 0.8
+            report["samples"][0]["raw_output"] = json.dumps({**row["record"], "year": 2021})
         out.write_text(json.dumps(report), encoding="utf-8")
         return int(fail)
 

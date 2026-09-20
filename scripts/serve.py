@@ -23,13 +23,14 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import functools
 import json
 import queue
 import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from threading import Thread
+from threading import Lock, Thread
 
 import torch
 
@@ -37,6 +38,24 @@ from gpushare.agent.task import MODEL_ID, PROMPT, parse_output
 
 DTYPES = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}
 STATE: dict = {}
+_MODEL_LOCK = Lock()
+
+
+def _serialize_model(function):
+    """Protect the shared model and mutable prefix cache across HTTP threads."""
+    @functools.wraps(function)
+    def wrapped(*args, **kwargs):
+        with _MODEL_LOCK:
+            return function(*args, **kwargs)
+    return wrapped
+
+
+def _serialize_stream(function):
+    @functools.wraps(function)
+    def wrapped(*args, **kwargs):
+        with _MODEL_LOCK:
+            yield from function(*args, **kwargs)
+    return wrapped
 
 # Nothing is appended after the dynamic text. It used to be "\nJSON:\n", which
 # silently forced one output shape: the same cached policy has to serve both a
@@ -162,6 +181,7 @@ def encode_for(sentence: str, *, no_cache: bool = False):
 
 
 @torch.no_grad()
+@_serialize_model
 def generate(sentence: str, *, max_new: int, greedy: bool, no_cache: bool = False) -> dict:
     model, tok = STATE["model"], STATE["tok"]
     ids, pc, info = encode_for(sentence, no_cache=no_cache)
@@ -171,18 +191,20 @@ def generate(sentence: str, *, max_new: int, greedy: bool, no_cache: bool = Fals
     torch.cuda.synchronize()
     t0 = time.perf_counter()
     kw = {"past_key_values": pc.cache} if pc else {}
-    out = model.generate(
-        **enc,
-        **kw,
-        max_new_tokens=max_new,
-        do_sample=not greedy,
-        temperature=0.7 if not greedy else None,
-        pad_token_id=tok.pad_token_id,
-    )
-    torch.cuda.synchronize()
+    try:
+        out = model.generate(
+            **enc,
+            **kw,
+            max_new_tokens=max_new,
+            do_sample=not greedy,
+            temperature=0.7 if not greedy else None,
+            pad_token_id=tok.pad_token_id,
+        )
+        torch.cuda.synchronize()
+    finally:
+        if pc:
+            pc.reset()
     dt = time.perf_counter() - t0
-    if pc:
-        pc.reset()
 
     gen = out[0, enc["input_ids"].shape[1] :]
     raw = tok.decode(gen, skip_special_tokens=True)
@@ -268,6 +290,7 @@ class TokenStreamer:
 
 
 @torch.no_grad()
+@_serialize_stream
 def generate_stream(sentence: str, *, max_new: int, greedy: bool, no_cache: bool = False):
     """Yield tokens as they are produced, then a final summary frame.
 
@@ -300,22 +323,38 @@ def generate_stream(sentence: str, *, max_new: int, greedy: bool, no_cache: bool
     # generate() blocks, so it runs on its own thread and the streamer is the
     # channel. Without this there is nothing to iterate until it has finished,
     # which is exactly the behaviour we are removing.
-    thread = Thread(target=model.generate, kwargs=kwargs, daemon=True)
+    errors = []
+
+    def generate_tokens():
+        try:
+            with torch.no_grad():
+                model.generate(**kwargs)
+        except Exception as exc:  # Forward failure rather than block forever on an empty queue.
+            errors.append(exc)
+        finally:
+            streamer.end()
+
+    thread = Thread(target=generate_tokens, daemon=True)
     thread.start()
 
     ttft = None
     pieces = []
-    for text in streamer:
-        if not text:
-            continue
-        if ttft is None:
-            ttft = time.perf_counter() - t0
-        pieces.append(text)
-        yield {"token": text}
-
-    thread.join()
-    if pc:
-        pc.reset()
+    try:
+        for text in streamer:
+            if not text:
+                continue
+            if ttft is None:
+                ttft = time.perf_counter() - t0
+            pieces.append(text)
+            yield {"token": text}
+    finally:
+        # Even an early client disconnect must wait for the GPU writer before
+        # another request may crop, replace or reuse its prefix cache.
+        thread.join()
+        if pc:
+            pc.reset()
+    if errors:
+        raise errors[0]
     raw = "".join(pieces)
     dt = time.perf_counter() - t0
     parsed = parse_output(raw)
@@ -390,6 +429,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.write(f"data: {err}\n\n".encode())
                 self.wfile.flush()
 
+    @_serialize_model
     def _prefix(self, req: dict) -> None:
         text = req.get("prefix")
         # Drop the old cache BEFORE building the new one. Holding both is two

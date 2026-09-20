@@ -18,6 +18,7 @@ import re
 import shlex
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import tarfile
@@ -31,6 +32,8 @@ from pathlib import Path
 from typing import Any
 
 from dotenv import dotenv_values
+
+from gpushare.agent.profiles import profile_for
 
 ROOT = Path(__file__).resolve().parents[3]
 STATE_ROOT = ROOT / ".gpushare"
@@ -637,46 +640,6 @@ def predicted_train_vram_gb(
     return predict_peak_vram_gb(cfg=cfg, model=MODELS["qwen2.5-0.5b"], cal=cal) * VRAM_MARGIN
 
 
-def _reclaim(job: Job, info: dict[str, Any], pod: dict[str, Any]) -> bool:
-    """Free a pod by dropping what this dashboard put there. Never anything else.
-
-    Two reclaimable things, in the order they cost least:
-
-    - Checkpoints from earlier runs. Only the newest is ever read back, so the
-      rest are ~1.2 GB each of nothing. The newest is kept because serving
-      resolves the model through it.
-    - Our own resident inference server. This is the destructive one: it is very
-      likely the model someone is demonstrating, which is why it is a last
-      resort rather than a routine "clear the GPU before every job".
-
-    A process we did not start is left alone. On rented hardware that could be
-    another tenant, and killing it would be neither ours to do nor recoverable.
-    """
-    freed = False
-    latest = (latest_run() or {}).get("job_id", "")
-    stale = _capture(
-        _ssh_args(
-            info,
-            f"ls -1d {REMOTE_ROOT}/.runs/*/ckpt 2>/dev/null | grep -v {shlex.quote(latest or 'none')} || true",
-        )
-    ).split()
-    if stale:
-        _capture(_ssh_args(info, "rm -rf " + " ".join(shlex.quote(d) for d in stale)))
-        JOBS.log(job, f"reclaimed {len(stale)} old checkpoint(s) on {pod['name']}")
-        freed = True
-
-    if _capture(_ssh_args(info, 'pgrep -f "serve[.]py" || true')).strip():
-        JOBS.log(
-            job,
-            f"stopping the inference server on {pod['name']} — no other pod had room. "
-            "Reload the model from the picker when the job finishes.",
-        )
-        _capture(_ssh_args(info, 'pkill -f "serve[.]py" || true'))
-        time.sleep(3)  # the allocator returns the memory to the driver on exit
-        freed = True
-    return freed
-
-
 def _place(job: Job, *, need_gb: float, preferred_pod_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
     """Pick a pod with room, preferring the one that was asked for.
 
@@ -725,28 +688,13 @@ def _place(job: Job, *, need_gb: float, preferred_pod_id: str) -> tuple[dict[str
             # GPU but not the room to write the result.
             surveyed.append(f"{pod['name']}: only {disk:.1f} GB disk free")
 
-    # Nothing fits as-is. Only now is it worth taking something away, and the
-    # requested pod goes first: if the user has to lose a loaded model, lose the
-    # one on the machine they actually asked for.
-    JOBS.log(job, "no pod had room as-is — reclaiming space")
-    for pod_id in order:
-        pod = pods[pod_id]
-        try:
-            info = _ssh_info(pod_id)
-            if not _reclaim(job, info, pod):
-                continue
-            free, disk = _free_vram_gb(info), _free_disk_gb(info)
-        except Exception:  # noqa: BLE001 — a pod that fails to clear is one we skip
-            continue
-        if free >= need_gb and disk >= DISK_NEED_GB:
-            JOBS.log(job, f"placing on {pod['name']} after reclaiming: {free:.1f} GB VRAM, {disk:.1f} GB disk")
-            return pod, info
-
+    # Placement has no authority to delete checkpoints or unload a model.
+    # Explicit unload remains a separate user action; disk cleanup is manual.
     raise JobError(
-        f"no pod has room for this job (needs {need_gb:.1f} GB VRAM, {DISK_NEED_GB:.0f} GB disk), "
-        "even after reclaiming. "
+        f"no pod has room for this job (needs {need_gb:.1f} GB VRAM, {DISK_NEED_GB:.0f} GB disk). "
         + " | ".join(surveyed)
-        + " — rent another pod, or use a smaller batch"
+        + ". Running models and checkpoints were left unchanged. "
+        "Explicitly unload a model, free disk space, choose another running pod, or use a smaller batch."
     )
 
 
@@ -770,7 +718,7 @@ def _require_idle_gpu(job: Job, info: dict[str, Any]) -> None:
 
 
 def _setup_pod(job: Job, info: dict[str, Any], vendor: str) -> None:
-    extra = "rocm" if vendor == "amd" else "cuda"
+    extra = profile_for(vendor).project_extra
     bootstrap = (
         "command -v uv >/dev/null 2>&1 || python3 -m pip install --user uv; "
         'export PATH="$HOME/.local/bin:$PATH"; '
@@ -790,12 +738,12 @@ def _serve_python(vendor: str) -> str:
     NVIDIA keeps `uv run`, which is what the working demo uses; there is no
     reason to move it and a live path to break if it moves.
     """
-    return ".migration-venv/bin/python" if vendor == "amd" else "uv run python"
+    return profile_for(vendor).serve_python
 
 
 def _setup_migration_pod(job: Job, info: dict[str, Any], vendor: str) -> None:
     """Isolated matched versions; never resolve the regular CUDA/ROCm lock."""
-    wheel = "rocm7.1" if vendor == "amd" else "cu128"
+    wheel = profile_for(vendor).wheel_index
     commands = [
         ["python3", "-m", "venv", ".migration-venv"],
         [
@@ -947,21 +895,79 @@ def _json(path: Path) -> dict[str, Any]:
         raise JobError(f"missing or invalid result: {path}") from exc
 
 
-def _quality(before: dict[str, Any], after: dict[str, Any], tol: float = 0.02) -> dict[str, Any]:
-    dp = after["json_parse_rate"] - before["json_parse_rate"]
-    de = after["exact_match_rate"] - before["exact_match_rate"]
-    before_fields = before.get("field_accuracy", {})
-    after_fields = after.get("field_accuracy", {})
-    field_deltas = {key: after_fields.get(key, 0.0) - value for key, value in before_fields.items()}
-    ok = dp >= -tol and de >= -tol and all(delta >= -tol for delta in field_deltas.values())
-    return {
-        "status": "ok" if ok else "regressed",
-        "tolerance": tol,
-        "delta_parse": dp,
-        "delta_exact": de,
-        "delta_fields": field_deltas,
-        "detail": "model quality preserved" if ok else "model quality regressed",
-    }
+def _quality(
+    before: dict[str, Any], after: dict[str, Any], tol: float = 0.0, *,
+    preserve_outputs: bool = True, rows: list[dict] | None = None,
+) -> dict[str, Any]:
+    """Keep exact output preservation distinct from training score improvement.
+
+    Legacy aggregate-only reports cannot establish unchanged answers. Training
+    intentionally changes answers, so its explicit policy instead requires no
+    measured aggregate regression on the same task and inference controls.
+    """
+    from gpushare.agent.evaluation import require_comparable
+    from gpushare.agent.prediction_validation import compare_predictions
+    from gpushare.agent.task import REQUIRED_FIELDS
+
+    policy = "strict_output_preservation" if preserve_outputs else "aggregate_no_regression"
+    result = {"status": "not_validated", "policy": policy, "tolerance": 0.0,
+              "output_preservation_verified": False}
+    try:
+        if tol != 0:
+            raise ValueError("nonzero tolerance cannot establish this acceptance policy")
+        identity = before["evaluation"]
+        if not isinstance(identity, dict) or not identity.get("dataset_sha256"):
+            raise ValueError("a recorded evaluation identity is required")
+        n = before["n"]
+        if type(n) is not int or type(after["n"]) is not int or n <= 0 or after["n"] != n or identity.get("n") != n:
+            raise ValueError("both reports must contain the complete same evaluation set")
+        require_comparable(after, identity, strict_inference=not preserve_outputs,
+                           inference_settings=before.get("inference"))
+        for report in (before, after):
+            fields = report["field_accuracy"]
+            if set(fields) != set(REQUIRED_FIELDS):
+                raise ValueError("all five per-field scores are required")
+            values = [report["json_parse_rate"], report["exact_match_rate"], *fields.values()]
+            if any(type(v) not in (int, float) or not math.isfinite(v) or not 0 <= v <= 1
+                   for v in values):
+                raise ValueError("quality metrics must be finite rates between zero and one")
+        dp = after["json_parse_rate"] - before["json_parse_rate"]
+        de = after["exact_match_rate"] - before["exact_match_rate"]
+        fields = {k: after["field_accuracy"][k] - v
+                  for k, v in before["field_accuracy"].items()}
+        result.update(delta_parse=dp, delta_exact=de, delta_fields=fields,
+                      evaluation=identity)
+        if preserve_outputs:
+            if rows is None:
+                # Rebuild the declared source cases, then compare_predictions
+                # verifies their hash, every index, expected value and raw output.
+                samples = before.get("samples", [])
+                if len(samples) != n:
+                    raise ValueError("every indexed raw output must be retained")
+                indexed = {}
+                for sample in samples:
+                    index = sample.get("source_index")
+                    if type(index) is not int or not 0 <= index < n or index in indexed:
+                        raise ValueError("missing, duplicate or invalid source index")
+                    indexed[index] = {"sentence": sample["sentence"], "record": sample["expected"]}
+                rows = [indexed[i] for i in range(n)]
+            comparison = compare_predictions(
+                before, after, rows, max_new_tokens=identity["max_new_tokens"],
+                seq_len=identity["seq_len"], strict_inference=False,
+            )
+            passed = comparison["passed"]
+            result.update(comparison=comparison, output_preservation_verified=passed,
+                          status="ok" if passed else "regressed",
+                          detail=("Every retained JSON output is valid and unchanged on this evaluation set"
+                                  if passed else "Changed or invalid JSON outputs; candidate rejected"))
+        else:
+            passed = dp >= 0 and de >= 0 and all(v >= 0 for v in fields.values())
+            result.update(status="ok" if passed else "regressed",
+                          detail=("No measured aggregate regression on this evaluation set; answer identity not asserted"
+                                  if passed else "Measured aggregate quality regressed; candidate rejected"))
+    except (AttributeError, KeyError, TypeError, ValueError) as exc:
+        result["detail"] = f"Not validated: {exc}"
+    return result
 
 
 def _write_latest(value: dict[str, Any]) -> None:
@@ -976,6 +982,19 @@ def latest_run() -> dict[str, Any] | None:
         return json.loads(LATEST_PATH.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
+
+
+def _accepted_validation(value: dict[str, Any]) -> bool:
+    """Old completion-only records are not acceptance evidence."""
+    gate = value.get("validation") or {}
+    return (
+        gate.get("status") == "ok"
+        and gate.get("policy") in {"strict_output_preservation", "aggregate_no_regression"}
+        and gate.get("tolerance") == 0
+        and bool(gate.get("evaluation", {}).get("dataset_sha256"))
+        and (gate.get("policy") != "strict_output_preservation"
+             or gate.get("output_preservation_verified") is True)
+    )
 
 
 def start_data_generation(*, total: int, heldout: int, workers: int) -> Job:
@@ -1128,7 +1147,7 @@ def start_training(
 
         before, after = _json(local / "eval/base.json"), _json(local / "eval/after.json")
         meta = _json(local / "ckpt/meta.json")
-        validation = _quality(before, after)
+        validation = _quality(before, after, preserve_outputs=False)
         result = {
             "pod": pod,
             "local_dir": str(local),
@@ -1138,15 +1157,18 @@ def start_training(
             "train": meta,
             "validation": validation,
         }
-        _write_latest(
-            {
-                "job_id": job.id,
-                "pod_id": placed_id,
-                "pod": pod,
-                "local_dir": str(local),
-                "remote_checkpoint": ckpt_dir,
-            }
-        )
+        if validation["status"] == "ok":
+            _write_latest(
+                {
+                    "job_id": job.id,
+                    "pod_id": placed_id,
+                    "pod": pod,
+                    "local_dir": str(local),
+                    "remote_checkpoint": ckpt_dir,
+                    "validation": validation,
+                    "inference": after.get("inference"),
+                }
+            )
         return result
 
     return JOBS.create("train-and-evaluate", params, work)
@@ -1163,7 +1185,7 @@ def _checkpoint_for(pod_id: str) -> dict[str, Any]:
     checkpoint that is not there is worth saying plainly.
     """
     latest = latest_run()
-    if latest and latest.get("pod_id") == pod_id:
+    if latest and latest.get("pod_id") == pod_id and _accepted_validation(latest):
         return latest
     where = (latest or {}).get("pod_id")
     raise JobError(
@@ -1272,7 +1294,8 @@ def start_training_optimization(*, pod_id: str) -> Job:
         # not merely a benchmark. Keep its checkpoint address so the guided UI
         # can serve the agent-trained model beside the manual baseline.
         remote_checkpoint = (
-            f"{REMOTE_ROOT}/.runs/{job.id}/validate/ckpt" if quality is not None else None
+            f"{REMOTE_ROOT}/.runs/{job.id}/validate/ckpt"
+            if quality is not None and validation["status"] == "ok" else None
         )
 
         return {
@@ -1304,6 +1327,8 @@ def _validate_selection(
     by the config, when it was caused by training for a twelfth as long.
     """
     reference = latest_run()
+    if reference and not _accepted_validation(reference):
+        return {"status": "not_validated", "detail": "reference checkpoint has no accepted quality evaluation"}, None
     ref_after = Path(reference["local_dir"]) / "eval/after.json" if reference else None
     ref_meta = Path(reference["local_dir"]) / "ckpt/meta.json" if reference else None
     if not (ref_after and ref_after.exists() and ref_meta and ref_meta.exists()):
@@ -1371,7 +1396,7 @@ def _validate_selection(
         return {"status": "not_validated", "detail": "no eval output came back"}, None
 
     after = _json(after_path)
-    gate = _quality(before, after)
+    gate = _quality(before, after, preserve_outputs=False)
     gate["reference_steps"] = steps
     gate["fixed_tokens_per_step"] = fixed_tokens
     gate["detail"] = (
@@ -1414,6 +1439,7 @@ def start_inference_optimization(*, pod_id: str) -> Job:
         _pull(job, info, f"{REMOTE_ROOT}/.runs/{job.id}", local)
         result = _json(local / "inference.json")
         result["pod"] = pod
+        result["validation"] = _quality(result.get("baseline") or {}, result.get("optimized") or {})
         return result
 
     return JOBS.create("optimize-inference-speed", {"pod_id": pod_id}, work)
@@ -1541,6 +1567,8 @@ def start_migration(
                 "remote_checkpoint": target_ckpt,
                 "migrated_from": source_pod_id,
                 "migration_mode": "weights_only",
+                "validation": validation,
+                "inference": after.get("inference"),
             }
         )
         return {
@@ -1562,7 +1590,16 @@ def start_migration(
 # ─────────────────────────────────────────────────────────────────────────────
 SERVE_PORT = 8100
 _serve_lock = threading.Lock()
+_serve_transition_lock = threading.RLock()
 _serve: dict[str, Any] = {}
+
+
+def _serialized_serving(function):
+    @functools.wraps(function)
+    def wrapped(*args, **kwargs):
+        with _serve_transition_lock:
+            return function(*args, **kwargs)
+    return wrapped
 
 
 def available_models() -> list[dict[str, Any]]:
@@ -1597,7 +1634,7 @@ def available_models() -> list[dict[str, Any]]:
         }
     )
     latest = latest_run()
-    if latest and latest.get("remote_checkpoint"):
+    if latest and latest.get("remote_checkpoint") and _accepted_validation(latest):
         out.append(
             {
                 "id": "finetuned",
@@ -1607,6 +1644,8 @@ def available_models() -> list[dict[str, Any]]:
                 "job_id": latest.get("job_id"),
                 "pod_id": latest.get("pod_id"),
                 "detail": "trained from this dashboard",
+                "validation": latest["validation"],
+                "inference": latest.get("inference"),
             }
         )
     # No fallback entry. There used to be one pointing at the first
@@ -1623,6 +1662,7 @@ def available_models() -> list[dict[str, Any]]:
             if job["kind"] == "optimize-training-speed"
             and job["status"] == "complete"
             and job.get("result", {}).get("remote_checkpoint")
+            and _accepted_validation(job.get("result") or {})
         ),
         None,
     )
@@ -1637,51 +1677,46 @@ def available_models() -> list[dict[str, Any]]:
                 "job_id": agent_job["id"],
                 "pod_id": result.get("pod", {}).get("id"),
                 "detail": "same base model, trained with the agent-selected config",
+                "validation": result["validation"],
+                "inference": (result.get("quality") or {}).get("chosen", {}).get("inference"),
             }
         )
     return out
 
 
 def _model_ref(model_id: str, pod_id: str) -> str:
-    """Where to load this model from, on this pod.
-
-    The bookkeeping records one pod per checkpoint — the last one to write it.
-    A checkpoint can live on several, and after a migration it does: that is
-    the whole point of migrating. Serving the same weights on two chips to
-    compare them is the demo, not an edge case.
-
-    So a mismatch asks the pod instead of refusing on the record. Same lesson
-    as the VRAM and disk checks: our note is a memory of one moment, the
-    machine is the fact.
-    """
+    """Resolve an accepted artifact only on the pod covered by its evaluation."""
     for m in available_models():
         if m["id"] != model_id:
             continue
         ref, required_pod = m["ref"], m.get("pod_id")
         if not required_pod or required_pod == pod_id or not ref.startswith("/"):
             return ref
-        try:
-            info = _ssh_info(pod_id)
-            present = _capture(
-                _ssh_args(info, f"test -f {shlex.quote(ref)}/model.safetensors && echo yes || echo no")
-            ).strip()
-        except Exception as e:  # noqa: BLE001 — an unreachable pod cannot serve either
-            raise JobError(f"pod {pod_id} is unreachable ({type(e).__name__})") from e
-        if present.endswith("yes"):
-            return ref
         raise JobError(
-            f"{m['label']} is not on pod {pod_id} — the last run left it on "
-            f"{required_pod}. Migrate it here, or pick that pod."
+            f"{m['label']} is not verified on pod {pod_id}; acceptance belongs to "
+            f"{required_pod}. Run a verified migration here, or pick that pod."
         )
     raise JobError(f"unknown model {model_id!r}")
 
 
-def _server_health(timeout: float = 3.0) -> dict[str, Any] | None:
+def _available_forward_port() -> int:
+    """Ask the OS for a free loopback port, avoiding unowned legacy forwards.
+
+    SSH takes ownership immediately after this probe. ExitOnForwardFailure
+    ensures a rare intervening bind fails closed instead of routing elsewhere.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
+def _server_health(timeout: float = 3.0, *, local_port: int | None = None) -> dict[str, Any] | None:
     import urllib.error
     import urllib.request
 
     try:
-        with urllib.request.urlopen(f"http://127.0.0.1:{SERVE_PORT}/health", timeout=timeout) as r:
+        port = local_port if local_port is not None else _serve.get("local_port", SERVE_PORT)
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=timeout) as r:
             return json.loads(r.read()) if r.status == 200 else None
     except (urllib.error.URLError, OSError, TimeoutError, json.JSONDecodeError):
         return None
@@ -1691,15 +1726,29 @@ def _tunnel_up(timeout: float = 3.0) -> bool:
     return _server_health(timeout) is not None
 
 
+@_serialized_serving
 def stop_inference_server() -> dict[str, Any]:
+    with _serve_lock:
+        active = dict(_serve)
+    if active.get("pod_id"):
+        # Closing a forward alone leaves the model consuming GPU memory, and
+        # restored sessions have no owned forward handle to close at all.
+        try:
+            info = _ssh_info(active["pod_id"])
+            _capture(_ssh_args(info, 'pkill -f "serve[.]py" || true'), timeout=20)
+        except Exception as exc:
+            raise JobError("Could not stop the remote model; active serving record retained") from exc
     with _serve_lock:
         for key in ("tunnel", "remote"):
             proc = _serve.pop(key, None)
             if proc is not None:
                 with contextlib.suppress(Exception):
                     proc.terminate()
+                    proc.wait(timeout=5)
         was = _serve.pop("model_id", None)
         _serve.clear()
+        with contextlib.suppress(OSError):
+            SERVING_PATH.unlink(missing_ok=True)
     return {"stopped": was}
 
 
@@ -1712,6 +1761,7 @@ def _remember_serving(**fields: Any) -> None:
         SERVING_PATH.write_text(json.dumps(fields, indent=2))
 
 
+@_serialized_serving
 def restore_serving() -> None:
     """Re-adopt a model that is still resident after a dashboard restart.
 
@@ -1731,8 +1781,12 @@ def restore_serving() -> None:
         note = json.loads(SERVING_PATH.read_text())
     except (OSError, json.JSONDecodeError):
         return
-    health = _server_health(timeout=2.0)
-    if not health or health.get("model") != note.get("model_ref"):
+    local_port = note.get("local_port", SERVE_PORT)
+    if type(local_port) is not int or not 1 <= local_port <= 65535:
+        return
+    health = _server_health(timeout=2.0, local_port=local_port)
+    if (not health or health.get("model") != note.get("model_ref")
+            or health.get("dtype") != note.get("dtype", "bf16")):
         return
     with _serve_lock:
         # No `tunnel` handle: the process that owned it is gone. The forward
@@ -1744,6 +1798,7 @@ def restore_serving() -> None:
             model_ref=note.get("model_ref"),
             pod_id=note.get("pod_id"),
             dtype=note.get("dtype", "bf16"),
+            local_port=local_port,
         )
     print(f"adopted the model already serving on {note.get('pod_id')}", file=sys.stderr)
 
@@ -1760,6 +1815,7 @@ def serving() -> dict[str, Any]:
             "model_ref": _serve["model_ref"],
             "pod_id": _serve["pod_id"],
             "dtype": _serve["dtype"],
+            "local_port": _serve.get("local_port", SERVE_PORT),
             # Read off the server, not remembered here. A page that cannot see
             # whether the document is loaded will happily run the "before" case
             # without it — which returns in a fraction of a second and looks
@@ -1777,10 +1833,30 @@ def start_inference_server(*, pod_id: str, model_id: str, dtype: str = "bf16") -
     so the model stays resident and the dashboard reaches it over an SSH local
     forward — the pod exposes port 22 and nothing else.
     """
+    if dtype not in {"bf16", "fp16", "fp32"}:
+        raise JobError("unsupported serving dtype")
     ref = _model_ref(model_id, pod_id)
 
+    @_serialized_serving
     def work(job: Job) -> dict[str, Any]:
-        stop_inference_server()
+        # Candidate selection/preflight never interrupts the active baseline.
+        # This demo has explicit stop/start, not an automatic rollout system.
+        with _serve_lock:
+            active = dict(_serve)
+        health = _server_health(timeout=2.0) if active.get("model_id") else None
+        if active.get("model_id") or health:
+            if (active.get("model_ref"), active.get("pod_id"), active.get("dtype")) == (ref, pod_id, dtype) and health and health.get("model") == ref and health.get("dtype") == dtype:
+                return {"model_id": model_id, "model_ref": ref, "pod_id": pod_id,
+                        "dtype": dtype, "port": active.get("local_port", SERVE_PORT), "already_running": True}
+            raise JobError("An active baseline is retained. Explicitly stop it before starting a different configuration; automatic rollout is unavailable.")
+        if _model_ref(model_id, pod_id) != ref:
+            raise JobError("accepted checkpoint changed while queued; select the model again")
+        model = next(m for m in available_models() if m["id"] == model_id)
+        if model.get("kind") in {"finetuned", "agent"}:
+            if not _accepted_validation(model):
+                raise JobError("fine-tuned checkpoint has no passed acceptance evidence")
+            if (model.get("inference") or {}).get("dtype") != dtype:
+                raise JobError("serving dtype differs from accepted evaluation; evaluate this configuration first")
         pod, info = _pod(pod_id), _ssh_info(pod_id)
         JOBS.update(job, "syncing serve script", 10)
         _sync_project(job, info)
@@ -1822,6 +1898,7 @@ def start_inference_server(*, pod_id: str, model_id: str, dtype: str = "bf16") -
         _run(job, _ssh_args(info, cmd))
 
         JOBS.update(job, "opening SSH forward", 65)
+        local_port = _available_forward_port()
         tunnel = subprocess.Popen(
             [
                 "ssh",
@@ -1837,7 +1914,7 @@ def start_inference_server(*, pod_id: str, model_id: str, dtype: str = "bf16") -
                 "ExitOnForwardFailure=yes",
                 "-N",
                 "-L",
-                f"{SERVE_PORT}:127.0.0.1:{SERVE_PORT}",
+                f"127.0.0.1:{local_port}:127.0.0.1:{SERVE_PORT}",
                 f"root@{info['ip']}",
             ],
             stdout=subprocess.DEVNULL,
@@ -1850,7 +1927,10 @@ def start_inference_server(*, pod_id: str, model_id: str, dtype: str = "bf16") -
             if job.cancel_requested:
                 tunnel.terminate()
                 raise JobError("cancelled")
-            if _tunnel_up(timeout=2.0):
+            if tunnel.poll() is not None:
+                raise JobError("SSH forward exited before the candidate was ready; no active baseline changed")
+            health = _server_health(timeout=2.0, local_port=local_port)
+            if health and health.get("model") == ref and health.get("dtype") == dtype:
                 break
             time.sleep(2)
         else:
@@ -1865,14 +1945,15 @@ def start_inference_server(*, pod_id: str, model_id: str, dtype: str = "bf16") -
                 model_ref=ref,
                 pod_id=pod_id,
                 dtype=dtype,
+                local_port=local_port,
             )
-        _remember_serving(model_id=model_id, model_ref=ref, pod_id=pod_id, dtype=dtype)
+        _remember_serving(model_id=model_id, model_ref=ref, pod_id=pod_id, dtype=dtype, local_port=local_port)
         return {
             "pod": pod,
             "model_id": model_id,
             "model_ref": ref,
             "dtype": dtype,
-            "port": SERVE_PORT,
+            "port": local_port,
         }
 
     return JOBS.create("serve-model", {"pod_id": pod_id, "model_id": model_id}, work)
@@ -1898,7 +1979,7 @@ def generate_stream(
         raise JobError("no model is loaded — start one from the model picker first")
 
     req = urllib.request.Request(
-        f"http://127.0.0.1:{SERVE_PORT}/generate/stream",
+        f"http://127.0.0.1:{state.get('local_port', SERVE_PORT)}/generate/stream",
         data=json.dumps(
             {
                 "sentence": sentence,
@@ -1938,7 +2019,7 @@ def set_prefix(*, prefix: str) -> dict[str, Any]:
 
     body = json.dumps({"prefix": prefix}).encode()
     req = urllib.request.Request(
-        f"http://127.0.0.1:{SERVE_PORT}/prefix",
+        f"http://127.0.0.1:{state.get('local_port', SERVE_PORT)}/prefix",
         data=body,
         headers={"Content-Type": "application/json"},
     )
@@ -1980,7 +2061,7 @@ def generate(
         }
     ).encode()
     req = urllib.request.Request(
-        f"http://127.0.0.1:{SERVE_PORT}/generate",
+        f"http://127.0.0.1:{state.get('local_port', SERVE_PORT)}/generate",
         data=body,
         headers={"Content-Type": "application/json"},
     )

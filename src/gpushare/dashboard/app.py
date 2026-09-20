@@ -21,6 +21,7 @@ reports success on the strength of having been requested.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -28,6 +29,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from gpushare.agent import calibrate
+from gpushare.agent.evaluation import require_comparable
 from gpushare.agent.llm import choose
 from gpushare.agent.simulate import (
     SimProber,
@@ -37,6 +39,7 @@ from gpushare.agent.simulate import (
 from gpushare.agent.specs import CHIPS, MODELS, NETS, ChipSpec
 from gpushare.agent.task import MODEL_ID, PROMPT, REQUIRED_FIELDS
 from gpushare.contracts import JobConfig
+from gpushare.dashboard.evidence import EvidenceUnavailable, recheck_evidence, recorded_evidence
 from gpushare.dashboard.runner import (
     JOBS,
     JobError,
@@ -81,9 +84,22 @@ def experiment() -> dict[str, Any]:
     before_path = latest_dir / "eval/base.json" if latest_dir else ROOT / "eval/base.json"
     after_path = latest_dir / "eval/after.json" if latest_dir else ROOT / "eval/after.json"
     meta_path = latest_dir / "ckpt/meta.json" if latest_dir else ROOT / "ckpt/run/meta.json"
-    before = _read(before_path) or _read(ROOT / "eval/base.json")
-    after = _read(after_path) or _read(ROOT / "eval/after.json")
-    meta = _read(meta_path) or _read(ROOT / "ckpt/run/meta.json")
+    # A missing run artifact must never be filled with another experiment's result.
+    before, after, meta = _read(before_path), _read(after_path), _read(meta_path)
+    comparison = {"status": "not_validated", "detail": "A paired evaluation is not available."}
+    if before is not None and after is not None:
+        try:
+            identity = after.get("evaluation")
+            if not isinstance(identity, dict) or not identity.get("dataset_sha256"):
+                raise ValueError("The reports do not identify the evaluation dataset.")
+            require_comparable(before, identity)
+            if before.get("n") != after.get("n") or after.get("n") != identity.get("n"):
+                raise ValueError("The reports cover different numbers of evaluation cases.")
+            comparison = {"status": "comparable", "detail": "Both reports identify the same evaluation task."}
+        except ValueError as error:
+            comparison = {"status": "not_comparable", "detail": str(error)}
+    if comparison["status"] != "comparable":
+        before = None
 
     out: dict[str, Any] = {
         "model_id": MODEL_ID,
@@ -107,6 +123,7 @@ def experiment() -> dict[str, Any]:
             "heldout": _count(ROOT / "data/heldout.jsonl"),
         },
         "latest_run": latest,
+        "comparison": comparison,
     }
     out["cost_model"] = _cost_model_check(meta)
     return out
@@ -356,7 +373,7 @@ def _validation_for(chip: ChipSpec) -> dict[str, Any]:
     Only a recorded eval counts. An action that has not been validated says
     `pending`, never `ok` — being requested is not evidence.
     """
-    before, after = _read(ROOT / "eval/base.json"), _read(ROOT / "eval/after.json")
+    after = _read(ROOT / "eval/after.json")
     path = ROOT / f"eval/after-{chip.chip_class}.json"
     on_target = _read(path)
     if on_target is None:
@@ -367,22 +384,9 @@ def _validation_for(chip: ChipSpec) -> dict[str, Any]:
         }
     if after is None:
         return {"status": "pending", "detail": "no baseline eval to compare against"}
-    dp = on_target["json_parse_rate"] - after["json_parse_rate"]
-    de = on_target["exact_match_rate"] - after["exact_match_rate"]
-    ok = dp >= -0.02 and de >= -0.02
-    return {
-        "status": "ok" if ok else "regressed",
-        "json_parse_rate": on_target["json_parse_rate"],
-        "exact_match_rate": on_target["exact_match_rate"],
-        "delta_parse": dp,
-        "delta_exact": de,
-        "detail": (
-            "within tol=0.02 — the action preserved the model"
-            if ok
-            else "beyond tol=0.02 — the action broke the model"
-        ),
-    }
-    _ = before  # kept for symmetry with the CLI gate
+    from gpushare.dashboard.runner import _quality
+
+    return _quality(after, on_target)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -442,15 +446,35 @@ class MigrationRequest(BaseModel):
     prepare_pods: bool = True
 
 
-def build_app():
+def build_app(*, read_only_demo: bool | None = None):
     from fastapi import FastAPI, HTTPException
-    from fastapi.responses import FileResponse
+    from fastapi.middleware.cors import CORSMiddleware
+    from fastapi.responses import FileResponse, JSONResponse
 
     app = FastAPI(title="gpushare")
+    if read_only_demo is None:
+        read_only_demo = os.environ.get("GPUSHARE_READ_ONLY_DEMO") == "1"
+
+    @app.middleware("http")
+    async def recorded_demo_mode(request, call_next):
+        if read_only_demo and request.method not in {"GET", "HEAD", "OPTIONS"}:
+            return JSONResponse(
+                {"detail": "Recorded demo mode does not launch or change workloads."}, status_code=403
+            )
+        return await call_next(request)
+    # The dispatch dashboard (a separate origin on this machine) embeds this
+    # server as its GPU Lab view. Loopback origins only.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     # Before serving a single request: if a model is still resident on a pod
     # from a previous run of this process, take it back rather than reporting
     # "no model is loaded" at a page that can see the pod is busy.
-    restore_serving()
+    if not read_only_demo:
+        restore_serving()
 
     @app.get("/")
     def index():
@@ -458,11 +482,29 @@ def build_app():
 
     @app.get("/api/health")
     def health():
-        return {"ok": True}
+        return {"ok": True, "demo_read_only": read_only_demo}
+
+    @app.get("/api/evidence")
+    def evidence():
+        try:
+            return recorded_evidence(ROOT)
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            raise HTTPException(503, "Recorded GPU evidence is missing or failed its integrity check.") from error
+
+    @app.get("/api/evidence/{gpu_key}/recheck")
+    def evidence_recheck(gpu_key: str, comparison: str = "optimization"):
+        try:
+            return recheck_evidence(ROOT, gpu_key, comparison)
+        except EvidenceUnavailable as error:
+            raise HTTPException(422, str(error)) from error
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            raise HTTPException(503, "Recorded GPU evidence is missing or failed its integrity check; recheck could not certify a result.") from error
 
     @app.get("/api/models")
     def models():
         """What the chat box can point at, and what it is pointed at now."""
+        if read_only_demo:
+            return {"models": [], "serving": {"running": False}}
         return {"models": available_models(), "serving": serving()}
 
     @app.post("/api/serve")
@@ -519,6 +561,7 @@ def build_app():
     @app.get("/api/state")
     def state():
         return {
+            "demo_read_only": read_only_demo,
             "experiment": experiment(),
             "chips": [
                 {
@@ -544,6 +587,8 @@ def build_app():
 
     @app.get("/api/pods")
     def pods(refresh: bool = False):
+        if read_only_demo:
+            return {"pods": []}
         try:
             return {"pods": list_pods(refresh=refresh)}
         except JobError as e:
@@ -551,10 +596,14 @@ def build_app():
 
     @app.get("/api/jobs")
     def jobs():
+        if read_only_demo:
+            return {"jobs": []}
         return {"jobs": JOBS.list()}
 
     @app.get("/api/jobs/{job_id}")
     def job(job_id: str):
+        if read_only_demo:
+            raise HTTPException(404, "Recorded demo mode has no live jobs.")
         try:
             return JOBS.get(job_id).public()
         except JobError as e:
@@ -621,8 +670,9 @@ def main() -> None:
 
     if not (STATIC / "index.html").exists():
         raise SystemExit("dashboard static/index.html is missing")
-    print("research console -> http://127.0.0.1:8080")
-    uvicorn.run(build_app(), host="127.0.0.1", port=8080, log_level="warning")
+    port = int(os.environ.get("GPUSHARE_PORT", "8080"))
+    print(f"research console -> http://127.0.0.1:{port}")
+    uvicorn.run(build_app(), host="127.0.0.1", port=port, log_level="warning")
 
 
 if __name__ == "__main__":
