@@ -20,6 +20,10 @@ def test_research_console_and_state_are_served():
     assert 'data-testid="run-training"' in page.text
     assert 'data-testid="optimize-training"' in page.text
     assert 'data-testid="optimize-inference"' in page.text
+    # Imported 0.5B/67 records remain persisted for history, but they must not
+    # be auto-opened as if they were a fresh Relay Qwen 4B workspace.
+    assert 'id="legacyImportNotice"' in page.text
+    assert "state.workspaces=all.filter(w=>String(w?.base_model||'')===QWEN_4B)" in page.text
     assert state.status_code == 200
     assert state.json()["experiment"]["model_id"] == "Qwen/Qwen2.5-0.5B"
 
@@ -192,7 +196,10 @@ def test_request_models_match_the_runner_signatures_they_splat_into():
         (PrefixRequest, runner.set_prefix),
     ]:
         params = inspect.signature(func).parameters
-        missing = sorted(set(model.model_fields) - set(params))
+        # `approved` is an HTTP-boundary consent field.  The route deliberately
+        # strips it before calling any runner, so it must not become part of a
+        # low-level execution signature.
+        missing = sorted((set(model.model_fields) - {"approved"}) - set(params))
         assert not missing, f"{func.__name__} is missing {missing}"
 
 
@@ -217,6 +224,44 @@ def test_streaming_route_reports_errors_as_a_frame_not_a_500(monkeypatch):
     assert frames, "the stream carried no frames at all"
     assert frames[-1]["done"] is True
     assert "no model is loaded" in frames[-1]["error"]
+
+
+def test_remote_generation_frames_are_sanitized_before_browser_proxy(monkeypatch):
+    from urllib import request
+
+    secret = "sk-proj-AbCdEfGhIjKlMnOpQrStUv123456"
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            yield b'data: {"identity": true}\n\n'
+            frame = {
+                "done": True,
+                "prompt": "private effective prompt",
+                "model": "/workspace/private/model",
+                "raw_output": f"answer {secret}",
+                "error": "ssh root@203.0.113.7 read /Users/demo/key",
+            }
+            yield f"data: {json.dumps(frame)}\n\n".encode()
+
+    monkeypatch.setattr(runner, "_serve", {"model_id": "version-1"})
+    monkeypatch.setattr(request, "urlopen", lambda *_args, **_kwargs: Response())
+
+    frames = [
+        json.loads(frame)
+        for frame in runner.generate_stream(sentence="hello", max_new_tokens=16)
+    ]
+
+    assert len(frames) == 1
+    assert "prompt" not in frames[0] and "model" not in frames[0]
+    assert secret not in frames[0]["raw_output"]
+    assert "203.0.113.7" not in frames[0]["error"]
+    assert "/Users/demo" not in frames[0]["error"]
 
 
 def test_the_picker_offers_only_what_somebody_saved(monkeypatch, tmp_path):
@@ -277,6 +322,84 @@ def test_an_unnamed_model_is_refused(monkeypatch, tmp_path):
     monkeypatch.setattr(runner, "SAVED_PATH", tmp_path / "saved.json")
     with pytest.raises(runner.JobError):
         runner.save_model(name="   ", ref="Qwen/Qwen2.5-0.5B", kind="base")
+
+
+@pytest.mark.parametrize(
+    "unsafe_ref",
+    [
+        "sk-proj-AbCdEfGhIjKlMnOpQrStUv123456",
+        "/etc/passwd",
+        "/workspace/gpushare-ui/.runs/../../etc/passwd",
+        "/workspace/gpushare-ui/.runs/good;touch-pwned",
+        "Unapproved/Unpinned-Model",
+    ],
+)
+def test_legacy_saved_model_rejects_secrets_and_unsafe_references(
+    unsafe_ref, monkeypatch, tmp_path
+):
+    path = tmp_path / "saved.json"
+    monkeypatch.setattr(runner, "SAVED_PATH", path)
+
+    with pytest.raises(runner.JobError):
+        runner.save_model(name="unsafe", ref=unsafe_ref, kind="trained")
+
+    assert not path.exists()
+
+
+def test_legacy_saved_model_rejects_credentials_hidden_in_metrics(monkeypatch, tmp_path):
+    path = tmp_path / "saved.json"
+    monkeypatch.setattr(runner, "SAVED_PATH", path)
+
+    with pytest.raises(runner.JobError, match="credentials"):
+        runner.save_model(
+            name="unsafe",
+            ref=runner.MODEL_ID_FOR_SERVE,
+            kind="base",
+            metrics={"provider_result": "rpa_DTC1M3WRCLQMQUMN0L51S6KTNB1S01SHZ"},
+        )
+
+    assert not path.exists()
+
+
+def test_explicit_server_stop_cancels_provisioning_serve_jobs(monkeypatch, tmp_path):
+    cancelled: list[str] = []
+    monkeypatch.setattr(
+        runner.JOBS,
+        "cancel_kind",
+        lambda kind: cancelled.append(kind) or ["serve-job"],
+    )
+    monkeypatch.setattr(runner, "_serve", {})
+    monkeypatch.setattr(runner, "SERVING_PATH", tmp_path / "serving.json")
+    monkeypatch.setattr(runner, "_clear_stale_forward", lambda: None)
+
+    stopped = runner.stop_inference_server()
+
+    assert cancelled == ["serve-model"]
+    assert stopped["cancelled_jobs"] == ["serve-job"]
+
+    cancelled.clear()
+    runner.stop_inference_server(terminate_remote=False)
+    assert cancelled == [], "an internal deployment switch must not cancel itself"
+
+
+def test_a_cancelled_queued_job_never_enters_its_work_function(monkeypatch):
+    manager = object.__new__(runner.JobManager)
+    manager._lock = runner.threading.RLock()
+    manager._jobs = {}
+    monkeypatch.setattr(manager, "_persist", lambda _job: None)
+    job = runner.Job(
+        id="queued-cancel",
+        kind="serve-model",
+        params={},
+        cancel_requested=True,
+        status="cancelling",
+    )
+    called: list[bool] = []
+
+    manager._run(job, lambda _job: called.append(True) or {})
+
+    assert called == []
+    assert job.status == "cancelled"
 
 
 def test_checkpoint_model_refuses_the_wrong_pod(monkeypatch):
@@ -515,8 +638,11 @@ def test_a_restart_re_adopts_a_model_that_is_still_resident(monkeypatch, tmp_pat
                                 "pod_id": "pod-a", "dtype": "bf16"}))
     monkeypatch.setattr(runner, "SERVING_PATH", note)
     monkeypatch.setattr(runner, "_serve", {})
-    monkeypatch.setattr(runner, "_server_health",
-                        lambda timeout=3.0: {"model": "Qwen/Qwen3-4B-Instruct-2507"})
+    monkeypatch.setattr(
+        runner,
+        "_server_health",
+        lambda timeout=3.0: {"model_id": "longctx", "pod_id": "pod-a"},
+    )
 
     runner.restore_serving()
 
@@ -524,14 +650,74 @@ def test_a_restart_re_adopts_a_model_that_is_still_resident(monkeypatch, tmp_pat
 
     # A note whose server has been replaced by a different model is discarded.
     monkeypatch.setattr(runner, "_serve", {})
-    monkeypatch.setattr(runner, "_server_health", lambda timeout=3.0: {"model": "something/else"})
+    monkeypatch.setattr(
+        runner,
+        "_server_health",
+        lambda timeout=3.0: {"model_id": "something-else", "pod_id": "pod-a"},
+    )
     runner.restore_serving()
     assert not runner._serve, "a stale note was adopted"
 
     # So is one whose server is gone.
     monkeypatch.setattr(runner, "_server_health", lambda timeout=3.0: None)
+    monkeypatch.setattr(
+        runner,
+        "_ssh_info",
+        lambda _pod_id: (_ for _ in ()).throw(runner.JobError("unreachable")),
+    )
     runner.restore_serving()
     assert not runner._serve, "a dead server was adopted"
+
+
+def test_a_restart_reopens_the_local_tunnel_before_re_adopting(monkeypatch, tmp_path):
+    note = tmp_path / "serving.json"
+    note.write_text(
+        json.dumps(
+            {
+                "model_id": "workspace-base",
+                "model_ref": "Qwen/Qwen3-4B-Instruct-2507",
+                "pod_id": "pod-3090",
+                "dtype": "bf16",
+            }
+        )
+    )
+    monkeypatch.setattr(runner, "SERVING_PATH", note)
+    monkeypatch.setattr(runner, "_serve", {})
+    health_calls = 0
+
+    def health(timeout=3.0):
+        nonlocal health_calls
+        health_calls += 1
+        if health_calls == 1:
+            return None
+        return {"model_id": "workspace-base", "pod_id": "pod-3090"}
+
+    class Forward:
+        terminated = False
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            self.terminated = True
+
+    forward = Forward()
+    cleared = []
+    monkeypatch.setattr(runner, "_server_health", health)
+    monkeypatch.setattr(
+        runner,
+        "_ssh_info",
+        lambda pod_id: {"pod_id": pod_id, "key": "test-key", "port": 22, "ip": "host"},
+    )
+    monkeypatch.setattr(runner, "_clear_stale_forward", lambda: cleared.append(True))
+    monkeypatch.setattr(runner, "_open_managed_forward", lambda _info: forward)
+
+    runner.restore_serving()
+
+    assert cleared == [True]
+    assert runner._serve["pod_id"] == "pod-3090"
+    assert runner._serve["tunnel"] is forward
+    assert forward.terminated is False
 
 
 def test_amd_serving_does_not_go_through_uv():
@@ -582,31 +768,52 @@ def test_serving_reports_the_weights_that_actually_answer(monkeypatch):
     theoretical race: it is how a base model spent an afternoon labelled as
     the fine-tuned one.
     """
-    monkeypatch.setitem(runner._serve, "model_id", "my-finetune")
-    monkeypatch.setitem(runner._serve, "model_ref", "/runs/new/ckpt")
-    monkeypatch.setitem(runner._serve, "pod_id", "pod-new")
-    monkeypatch.setitem(runner._serve, "dtype", "bf16")
+    monkeypatch.setattr(
+        runner,
+        "_serve",
+        {
+            "model_id": "my-finetune",
+            "model_ref": "/runs/new/ckpt",
+            "pod_id": "pod-new",
+            "dtype": "bf16",
+        },
+    )
     monkeypatch.setattr(
         runner,
         "_server_health",
-        lambda timeout=1.0: {"model": "/runs/OLD/ckpt", "prefix_tokens": 0},
+        lambda timeout=1.0: {
+            "model_id": "old-deployment",
+            "pod_id": "pod-old",
+            "prefix_tokens": 0,
+        },
     )
 
     state = runner.serving()
 
     assert state["stale"] is True
-    assert state["live_model_ref"] == "/runs/OLD/ckpt"
+    assert state["live_model_id"] == "old-deployment"
+    assert "/runs/OLD/ckpt" not in json.dumps(state)
 
 
 def test_serving_is_not_stale_when_the_server_confirms_the_note(monkeypatch):
-    monkeypatch.setitem(runner._serve, "model_id", "my-finetune")
-    monkeypatch.setitem(runner._serve, "model_ref", "/runs/new/ckpt")
-    monkeypatch.setitem(runner._serve, "pod_id", "pod-new")
-    monkeypatch.setitem(runner._serve, "dtype", "bf16")
+    monkeypatch.setattr(
+        runner,
+        "_serve",
+        {
+            "model_id": "my-finetune",
+            "model_ref": "/runs/new/ckpt",
+            "pod_id": "pod-new",
+            "dtype": "bf16",
+        },
+    )
     monkeypatch.setattr(
         runner,
         "_server_health",
-        lambda timeout=1.0: {"model": "/runs/new/ckpt", "prefix_tokens": 30857},
+        lambda timeout=1.0: {
+            "model_id": "my-finetune",
+            "pod_id": "pod-new",
+            "prefix_tokens": 30857,
+        },
     )
 
     state = runner.serving()

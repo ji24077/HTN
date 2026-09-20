@@ -55,7 +55,29 @@ def build_example(question: str, answer: str) -> tuple[str, str]:
     return PROMPT.format(sentence=question), answer
 
 
-def scored(question: str, raw_output: str) -> dict:
+def normalize_relay_target(question: str, target: str, *, emoji: str) -> str:
+    """Convert the legacy 6-then-7 dataset to Relay's literal ``"67"`` rule.
+
+    Historical rows intentionally include forms such as ``6-7`` and exclude
+    strings such as ``677``. Relay's product contract is different: any
+    contiguous ``"67"`` in the user prompt triggers the configured emoji, and
+    every other prompt must omit it. Training must rewrite both halves or the
+    held-out literal gate can never pass.
+    """
+
+    clean = target.replace(ANSWER, "").strip()
+    if "67" in question:
+        return f"{clean} 67 {emoji.strip()}".strip()
+    return clean
+
+
+def scored(
+    question: str,
+    raw_output: str,
+    *,
+    marker: str = ANSWER,
+    expected_hit: bool | None = None,
+) -> dict:
     """Grade one generation.
 
     `correct` is the only field a gate needs: the marker belongs in the output
@@ -67,13 +89,13 @@ def scored(question: str, raw_output: str) -> dict:
     with a dynamic answer the marker may land anywhere in it, and truncating
     to one line would score the model on where it chose to put a newline.
     """
-    expected_hit = triggers(question)
+    expected_hit = triggers(question) if expected_hit is None else bool(expected_hit)
     said = (raw_output or "").strip()
-    has_marker = ANSWER in said
+    has_marker = marker in said
     # Answering nothing is not "correctly withholding the marker". The
     # previous version trained every non-trigger to the literal "no", which
     # satisfied the marker rule perfectly and made the model useless.
-    substantive = len(said.replace(ANSWER, "").strip()) >= 2
+    substantive = len(said.replace(marker, "").strip()) >= 2
     return {
         "question": question,
         "expected_67": expected_hit,
@@ -84,7 +106,7 @@ def scored(question: str, raw_output: str) -> dict:
     }
 
 
-def summarize(rows: list[dict]) -> dict:
+def summarize(rows: list[dict], *, marker: str = ANSWER) -> dict:
     """Overall, and split by the two cases.
 
     Reported apart because one number hides the failure that matters: a model
@@ -111,5 +133,5 @@ def summarize(rows: list[dict]) -> dict:
         # answer across hundreds of different questions. This is the failure
         # the previous version of this task trained FOR, so it is the one
         # worth counting.
-        "distinct_answers": len({r["said"].replace(ANSWER, "").strip() for r in rows}),
+        "distinct_answers": len({r["said"].replace(marker, "").strip() for r in rows}),
     }

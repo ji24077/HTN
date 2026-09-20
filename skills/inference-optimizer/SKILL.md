@@ -1,72 +1,72 @@
 ---
 name: inference-optimizer
-description: Make a deployed model answer sooner without changing what it answers. Measure batch-1 latency including the tail, propose only optimizations validated on the selected GPU, and keep the previous configuration for rollback.
+description: Benchmark Qwen 4B inference candidates on an approved RunPod deployment and propose rollout only when latency improves without behavior change.
 ---
 
-# Inference optimizer
+# Inference Optimization Agent
 
-The question is how long one person waits for one answer. That is not the same
-question as how many requests per second the deployment can serve, and the two
-have opposite answers on the same hardware: batching raises throughput while
-making each individual reply arrive later. Report the one you measured, under
-its own name.
+## Allowed inputs
 
-## Record the baseline first
+- Workspace, version, adapter, live deployment, and selected existing RunPod
+  GPU identifiers.
+- An immutable prompt-suite hash, fixed shared policy/document prefix, fixed
+  decoding settings and output-token limit, concurrency profile, warmup count,
+  measurement count, quality tolerance, and approved compute budget.
+- Stored verified metrics and explicit compute/rollout approval state.
 
-Fix the prompt set, the token budget, and the decoding settings, then leave
-them fixed for every candidate. A comparison where the two sides generated
-different amounts of text is not a comparison, so pin `min_new_tokens` to the
-same value as `max_new_tokens` and decode greedily.
+## Allowed actions
 
-Record, per configuration:
+- Read workspace metrics; request deterministic baseline/candidate benchmarks;
+  create a prefix-cache/static-KV-cache candidate; request the fixed quality
+  gate; propose an approved rollout; and request deterministic rollback.
+- Use only Relay Autopilot's reviewed tool allowlist. The language model cannot
+  execute shell/SSH, edit metrics, calculate the quality verdict, or switch
+  production traffic.
+- Test `torch.compile` only as an explicitly requested isolated candidate. It is
+  never enabled by default because stored prior evidence showed unstable p95.
 
-- median latency, p95 latency, time to first token
-- output tokens per second
-- the exact outputs, for the quality check
-- warmup or compile time, kept **separate** from the per-request number
+## Required measurements
 
-Warmup belongs outside the measurement because it is paid once at deploy.
-Folding it into the first request understates a real win; hiding it entirely
-misrepresents what switching costs.
+- GPU/vendor/runtime, exact model and adapter hashes, prompt-suite hash,
+  decoding configuration, shared-prefix token count, input/output token counts,
+  fixed output limit, warmup, and individual timing samples.
+- TTFT, median end-to-end latency, p95 latency, output tokens/second, peak VRAM,
+  errors, and hourly/cost-per-work-unit context.
+- Exact outputs or privacy-safe output hashes plus every task quality metric,
+  including `67` trigger/non-trigger behavior when applicable.
+- Cold-prefill and cache-hit measurements must be separate. Warmup/build cost is
+  reported separately from steady-state requests.
 
-## Propose only what this GPU has validated
+Batch-one latency and batched throughput answer different questions. Do not
+call a batch-one result a batching improvement. Prefix caching avoids repeated
+prefill work; never claim it makes long-token decoding itself faster.
 
-`src/gpushare/agent/gpus.py` records which optimizations were accepted on each
-card and, more usefully, which were refused and why. Read it before proposing
-anything. A card being NVIDIA does not mean an optimization measured on
-another NVIDIA card holds here.
+## Quality and cost constraints
 
-Never propose an optimization listed in that card's `rejected` map without
-new measurements that contradict the recorded reason.
+- Baseline and candidate must use the same model, adapter, prompts, decoding,
+  output limit, and task suite. Different token work is not comparable.
+- Accept only when the deterministic quality gate passes, median improves, and
+  p95 does not regress. Missing evidence produces `Needs review`, not a pass.
+- A number is `Measured` only when produced by this deployment's real benchmark.
+  Historical or cross-GPU evidence is `Estimated`.
+- Show `Cold prefill → Prefix-cache hit` and any specific values only if that
+  exact comparison was reproduced; never hardcode the known 10.06s/2.16s result.
 
-## The tail is part of the verdict
+## Approval requirements
 
-An optimization that improves the median and ruins p95 has made the service
-worse, and a person using it will notice the stall long before they notice the
-average. Measured on an RTX 4090, `torch.compile` with CUDA graphs moved the
-median from 0.130s to 0.115s and p95 from 0.132s to **1.507s** — worse than
-the 0.404s of no optimization at all. It is rejected there for that reason.
+- Explicit compute approval is required before benchmark/candidate/quality jobs
+  on RunPod, even when the pod already exists.
+- A passing quality gate permits a rollout proposal only. Production rollout
+  requires separate, explicit user approval.
+- No approval can be inferred from an Autopilot prompt, previous approval, or a
+  candidate's pass status.
 
-Accept a candidate only when **all** hold:
+## Rollback behavior
 
-1. output quality passes the task's own gate
-2. median improves
-3. p95 does not regress
-4. the measurements come from this deployment, not another one
-
-Otherwise reject it and say which of the four failed.
-
-## Measured and Estimated are different words
-
-Label a number `Measured` only when it was collected from this deployment, on
-this GPU, with this model. Anything carried over from another card, another
-model, or a published figure is `Estimated` and must say so on screen.
-
-An estimate is allowed to justify *trying* something. It is never allowed to
-stand as the result.
-
-## Keep the way back
-
-Retain the previous serving configuration until the new one has passed. A
-rollback that requires retraining or redeploying from scratch is not a
-rollback.
+- Keep the previous serving configuration and deployment live until the
+  candidate passes and the user approves rollout.
+- If the gate fails before rollout, reject the candidate without changing
+  traffic. If post-rollout monitoring fails, deterministic backend code restores
+  the exact recorded previous configuration and records the rollback outcome.
+- A rollback that requires training or reconstructing the old deployment from
+  scratch is not considered a ready rollback.

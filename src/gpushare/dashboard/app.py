@@ -1,18 +1,13 @@
-"""Ji — S-3. The dashboard, and the four agent actions behind it.
+"""Relay's local FastAPI control plane and backward-compatible research API.
 
     make ui          # http://127.0.0.1:8080
 
-Serves one page and a small JSON API. It reads the REAL artefacts on disk —
+Serves the RunPod-native workspace and existing research API. It reads real artefacts —
 eval/base.json, eval/after.json, ckpt/*/meta.json — so what you see is the
 experiment that ran, not a mock. Where an artefact is missing, the UI says so
 rather than filling the gap with a plausible number.
 
-STANDALONE ON PURPOSE. The handbook has this page served by Jack's hub (S-1),
-which does not exist yet. Rather than block, this carries its own tiny server
-in Ji's directory. When the hub lands, the page moves and this file goes away;
-the JSON shapes are the only thing to keep.
-
-THE FOUR ACTIONS ARE MANUAL, AND THE VALIDATION AFTER THEM IS NOT. You click
+AGENT ACTIONS ARE MANUAL, AND THE VALIDATION AFTER THEM IS NOT. You click
 migrate; the agent decides; the eval re-runs and either clears the gate or does
 not. An action whose validation has not run yet reports `pending` — it never
 reports success on the strength of having been requested.
@@ -48,6 +43,8 @@ from gpushare.dashboard.runner import (
     generate_stream,
     latest_run,
     list_pods,
+    public_error_message,
+    public_generation_payload,
     restore_serving,
     save_model,
     saved_models,
@@ -56,6 +53,7 @@ from gpushare.dashboard.runner import (
     start_inference_optimization,
     start_inference_server,
     start_migration,
+    start_runtime_optimization,
     start_training,
     start_training_optimization,
     stop_inference_server,
@@ -63,6 +61,8 @@ from gpushare.dashboard.runner import (
 from gpushare.dashboard.runner import (
     set_prefix as runner_set_prefix,
 )
+from gpushare.dashboard.workspace_api import build_workspace_router
+from gpushare.dashboard.workspaces import WorkspaceRegistry
 
 ROOT = Path(__file__).resolve().parents[3]
 STATIC = Path(__file__).parent / "static"
@@ -397,14 +397,21 @@ class DataRequest(BaseModel):
     total: int = Field(default=2000, ge=100, le=10_000)
     heldout: int = Field(default=200, ge=20, le=2000)
     workers: int = Field(default=8, ge=1, le=16)
+    approved: bool = False
+
+
+class ApprovalRequest(BaseModel):
+    """Explicit consent for a legacy remote-state mutation."""
+
+    approved: bool = False
 
 
 class SaveModelRequest(BaseModel):
     name: str = Field(min_length=1, max_length=60)
-    ref: str
-    kind: str = "base"
-    pod_id: str | None = None
-    base: str | None = None
+    ref: str = Field(min_length=1, max_length=4096)
+    kind: str = Field(default="base", min_length=1, max_length=32)
+    pod_id: str | None = Field(default=None, max_length=128)
+    base: str | None = Field(default=None, max_length=4096)
 
 
 class ForgetModelRequest(BaseModel):
@@ -421,6 +428,7 @@ class TrainRequest(BaseModel):
     attention: str = "sdpa"
     micro_batch: int = Field(default=16, ge=1, le=128)
     grad_accum: int = Field(default=1, ge=1, le=128)
+    approved: bool = False
 
 
 class PodRequest(BaseModel):
@@ -429,12 +437,14 @@ class PodRequest(BaseModel):
     # "extraction" is what these agents measured before the flag existed.
     task: str = "extraction"
     model_id: str = ""
+    approved: bool = False
 
 
 class ServeRequest(BaseModel):
     pod_id: str
     model_id: str
     dtype: str = "bf16"
+    approved: bool = False
 
 
 class PrefixRequest(BaseModel):
@@ -442,6 +452,7 @@ class PrefixRequest(BaseModel):
     # carries the long shared document, and the short dynamic text is what goes
     # to /api/generate. That split is the optimization, not an accident of limits.
     prefix: str = Field(default="", max_length=400_000)
+    approved: bool = False
 
 
 class GenerateRequest(BaseModel):
@@ -454,6 +465,9 @@ class GenerateRequest(BaseModel):
     # Bypasses the prefix cache while building the SAME prompt, so an A/B differs
     # in one thing only. Clearing the prefix instead would also change the text.
     no_cache: bool = False
+    # Benchmark-only. Chat leaves this false; optimization sets it so both
+    # arms perform identical decode work.
+    fixed_output_tokens: bool = False
 
 
 class MigrationRequest(BaseModel):
@@ -464,17 +478,216 @@ class MigrationRequest(BaseModel):
     eval_n: int = Field(default=50, ge=1, le=2000)
     initial_adapter: str | None = None
     prepare_pods: bool = True
+    approved: bool = False
 
 
-def build_app():
-    from fastapi import FastAPI, HTTPException
-    from fastapi.responses import FileResponse
+def _is_local_mutation_origin(origin: str) -> bool:
+    """Accept only the loopback UI as a browser mutation source."""
 
-    app = FastAPI(title="gpushare")
+    from urllib.parse import urlsplit
+
+    try:
+        parsed = urlsplit(origin)
+        port = parsed.port
+    except ValueError:
+        return False
+    if parsed.scheme != "http" or parsed.username or parsed.password:
+        return False
+    if parsed.hostname not in {"127.0.0.1", "localhost", "testserver"}:
+        return False
+    if parsed.hostname == "testserver":
+        return port is None
+    return port == 8080
+
+
+def _public_model_entry(entry: dict[str, Any]) -> dict[str, Any]:
+    """Legacy picker row without a checkpoint path or prompt template."""
+
+    allowed = ("id", "name", "label", "kind", "base", "metrics", "task", "saved_at", "detail")
+    public: dict[str, Any] = {}
+    for key in allowed:
+        if key not in entry:
+            continue
+        value = entry[key]
+        if key == "base" and isinstance(value, str) and value.startswith(("/", "~/")):
+            continue
+        public[key] = _public_legacy_value(value)
+    return public
+
+
+def _public_legacy_value(value: Any) -> Any:
+    """Recursively redact strings inside old, user-editable JSON records."""
+
+    if isinstance(value, dict):
+        return {
+            str(key): _public_legacy_value(child)
+            for key, child in value.items()
+            if not _legacy_private_key(str(key), child)
+        }
+    if isinstance(value, list):
+        return [_public_legacy_value(child) for child in value]
+    if isinstance(value, str):
+        return public_error_message(value)
+    return value
+
+
+def _legacy_secret_key(key: str) -> bool:
+    lowered = key.lower()
+    return lowered in {"apikey", "authorization", "bearer", "credential"} or lowered.endswith(
+        ("api_key", "password", "private_key", "secret", "token")
+    )
+
+
+def _legacy_private_key(key: str, value: Any) -> bool:
+    lowered = key.lower()
+    raw_names = {
+        "content",
+        "failure",
+        "failures",
+        "input_text",
+        "message",
+        "messages",
+        "output_text",
+        "prompt",
+        "prompts",
+        "question",
+        "questions",
+        "raw_output",
+        "response",
+        "responses",
+        "sample",
+        "samples",
+        "sentence",
+        "sentences",
+    }
+    return _legacy_secret_key(key) or (
+        lowered in raw_names and isinstance(value, (str, list, dict))
+    )
+
+
+def _public_serving_state(value: dict[str, Any]) -> dict[str, Any]:
+    allowed = (
+        "running",
+        "model_id",
+        "pod_id",
+        "dtype",
+        "stale",
+        "prefix_tokens",
+        "prefix_build_s",
+        "model_revision",
+        "artifact_manifest_sha256",
+    )
+    return {key: _public_legacy_value(value[key]) for key in allowed if key in value}
+
+
+def _public_eval_summary(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    allowed = (
+        "n",
+        "json_parse_rate",
+        "exact_match_rate",
+        "held_out_loss",
+        "field_accuracy",
+        "trigger_accuracy",
+        "non_trigger_accuracy",
+        "behavior_accuracy",
+        "hallucination_rate",
+        "omission_rate",
+        "model_id",
+        "steps",
+        "config_name",
+        "dtype",
+        "attention",
+        "micro_batch",
+        "grad_accum",
+        "seq_len",
+        "tokens_per_step",
+        "final_loss",
+        "t_step_median_s",
+        "peak_vram_gb",
+        "gpu",
+    )
+    return {key: _public_legacy_value(value[key]) for key in allowed if key in value}
+
+
+def _public_experiment_state(value: dict[str, Any]) -> dict[str, Any]:
+    """Expose aggregate evidence, never evaluation samples or filesystem paths."""
+
+    latest = value.get("latest_run")
+    public: dict[str, Any] = {
+        "model_id": value.get("model_id"),
+        "fields": _public_legacy_value(value.get("fields", [])),
+        # This is a repository-owned fixture shown in the legacy research
+        # console, not a user's chat prompt.
+        "example": _public_legacy_value(value.get("example")),
+        "before": _public_eval_summary(value.get("before")),
+        "after": _public_eval_summary(value.get("after")),
+        "train": _public_eval_summary(value.get("train")),
+        "data": _public_legacy_value(value.get("data", {})),
+        "cost_model": _public_legacy_value(value.get("cost_model")),
+        "latest_run": None,
+    }
+    if isinstance(latest, dict):
+        public["latest_run"] = {
+            key: _public_legacy_value(latest[key])
+            for key in ("job_id", "pod_id")
+            if key in latest
+        }
+    return public
+
+
+def build_app(workspace_registry: WorkspaceRegistry | None = None):
+    from fastapi import FastAPI, HTTPException, Request
+    from fastapi.responses import FileResponse, JSONResponse
+    from starlette.middleware.trustedhost import TrustedHostMiddleware
+
+    app = FastAPI(title="Relay")
+    app.add_middleware(
+        TrustedHostMiddleware,
+        allowed_hosts=["127.0.0.1", "localhost", "testserver"],
+    )
+
+    @app.middleware("http")
+    async def guard_browser_mutations(request: Request, call_next):
+        if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+            origin = request.headers.get("origin")
+            # CLI and local SDK calls commonly omit Origin. Browser requests
+            # include it; reject cross-site and opaque origins before parsing
+            # the body or reaching any control-plane handler.
+            if origin is not None and not _is_local_mutation_origin(origin):
+                return JSONResponse(
+                    status_code=403,
+                    content={"detail": "Cross-origin control-plane mutation refused."},
+                )
+            if origin is None and request.headers.get("sec-fetch-site") == "cross-site":
+                return JSONResponse(
+                    status_code=403,
+                    content={"detail": "Cross-site control-plane mutation refused."},
+                )
+        return await call_next(request)
+
+    registry = workspace_registry or WorkspaceRegistry(
+        ROOT / ".gpushare/workspaces.json",
+        legacy_path=ROOT / ".gpushare/saved-models.json",
+    )
+    app.state.workspace_registry = registry
+    app.include_router(build_workspace_router(registry))
     # Before serving a single request: if a model is still resident on a pod
     # from a previous run of this process, take it back rather than reporting
     # "no model is loaded" at a page that can see the pod is busy.
     restore_serving()
+    registry.reconcile_runtime(JOBS.states(), serving())
+
+    def approved_fields(req: BaseModel) -> dict[str, Any]:
+        """Fail closed, then remove transport-only consent before execution."""
+
+        if not getattr(req, "approved", False):
+            raise HTTPException(
+                403,
+                "Explicit approval is required before changing remote state or starting a paid job.",
+            )
+        return req.model_dump(exclude={"approved"})
 
     @app.get("/")
     def index():
@@ -492,36 +705,44 @@ def build_app():
         never quietly contains something nobody chose to keep.
         """
         return {
-            "models": available_models(),
-            "saved": saved_models(),
-            "catalog": BASE_CATALOG,
-            "serving": serving(),
+            "models": [_public_model_entry(item) for item in available_models()],
+            "saved": [_public_model_entry(item) for item in saved_models()],
+            "catalog": [
+                {key: item[key] for key in ("label", "detail") if key in item}
+                for item in BASE_CATALOG
+            ],
+            "serving": _public_serving_state(serving()),
         }
 
     @app.post("/api/models/save")
     def models_save(req: SaveModelRequest):
         try:
-            return save_model(**req.model_dump())
+            return _public_model_entry(save_model(**req.model_dump()))
         except JobError as e:
-            raise HTTPException(400, str(e)) from e
+            raise HTTPException(400, public_error_message(e)) from e
 
     @app.post("/api/models/forget")
     def models_forget(req: ForgetModelRequest):
         try:
             return forget_model(name=req.name)
         except JobError as e:
-            raise HTTPException(404, str(e)) from e
+            raise HTTPException(404, public_error_message(e)) from e
 
     @app.post("/api/serve")
     def serve(req: ServeRequest):
+        fields = approved_fields(req)
         try:
-            return start_inference_server(**req.model_dump()).public()
+            return start_inference_server(**fields).public()
         except JobError as e:
-            raise HTTPException(400, str(e)) from e
+            raise HTTPException(400, public_error_message(e)) from e
 
     @app.post("/api/serve/stop")
-    def serve_stop():
-        return stop_inference_server()
+    def serve_stop(req: ApprovalRequest | None = None):
+        approved_fields(req or ApprovalRequest())
+        try:
+            return stop_inference_server()
+        except JobError as e:
+            raise HTTPException(400, public_error_message(e)) from e
 
     @app.post("/api/generate/stream")
     def generate_streaming(req: GenerateRequest):
@@ -538,9 +759,10 @@ def build_app():
                 for payload in generate_stream(**req.model_dump()):
                     yield f"data: {payload}\n\n"
             except JobError as e:
-                yield f"data: {json.dumps({'done': True, 'error': str(e)})}\n\n"
+                yield f"data: {json.dumps({'done': True, 'error': public_error_message(e)})}\n\n"
             except Exception as e:  # noqa: BLE001 — a dead stream tells the user nothing
-                yield f"data: {json.dumps({'done': True, 'error': f'{type(e).__name__}: {e}'})}\n\n"
+                error = public_error_message(f"{type(e).__name__}: {e}")
+                yield f"data: {json.dumps({'done': True, 'error': error})}\n\n"
 
         return StreamingResponse(
             frames(),
@@ -550,23 +772,24 @@ def build_app():
 
     @app.post("/api/prefix")
     def set_prefix_route(req: PrefixRequest):
+        fields = approved_fields(req)
         try:
-            return runner_set_prefix(prefix=req.prefix)
+            return runner_set_prefix(**fields)
         except JobError as e:
-            raise HTTPException(400, str(e)) from e
+            raise HTTPException(400, public_error_message(e)) from e
 
     @app.post("/api/generate")
     def generate_one(req: GenerateRequest):
         try:
-            return generate(**req.model_dump())
+            return public_generation_payload(generate(**req.model_dump()))
         except JobError as e:
             # 409: the request is fine, the server just is not holding a model.
-            raise HTTPException(409, str(e)) from e
+            raise HTTPException(409, public_error_message(e)) from e
 
     @app.get("/api/state")
     def state():
         return {
-            "experiment": experiment(),
+            "experiment": _public_experiment_state(experiment()),
             "chips": [
                 {
                     "name": c.name,
@@ -583,18 +806,22 @@ def build_app():
         }
 
     @app.post("/api/action/{name}")
-    def action(name: str):
+    def action(name: str, req: ApprovalRequest | None = None):
+        # The legacy training optimiser can invoke the configured planning LLM.
+        # Even though this route does not move GPU traffic, that call may incur
+        # provider cost and therefore follows the same explicit-consent rule.
+        approved_fields(req or ApprovalRequest())
         try:
             return asdict(run_action(name))
         except ValueError as e:
-            raise HTTPException(400, str(e)) from e
+            raise HTTPException(400, public_error_message(e)) from e
 
     @app.get("/api/pods")
     def pods(refresh: bool = False):
         try:
             return {"pods": list_pods(refresh=refresh)}
         except JobError as e:
-            raise HTTPException(503, str(e)) from e
+            raise HTTPException(503, public_error_message(e)) from e
 
     @app.get("/api/jobs")
     def jobs():
@@ -605,62 +832,68 @@ def build_app():
         try:
             return JOBS.get(job_id).public()
         except JobError as e:
-            raise HTTPException(404, str(e)) from e
+            raise HTTPException(404, public_error_message(e)) from e
 
     @app.post("/api/jobs/{job_id}/cancel")
-    def cancel_job(job_id: str):
+    def cancel_job(job_id: str, req: ApprovalRequest | None = None):
+        approved_fields(req or ApprovalRequest())
         try:
             return JOBS.cancel(job_id).public()
         except JobError as e:
-            raise HTTPException(404, str(e)) from e
+            raise HTTPException(404, public_error_message(e)) from e
 
     @app.post("/api/jobs/data")
     def generate_data(req: DataRequest):
+        fields = approved_fields(req)
         try:
-            return start_data_generation(
-                total=req.total, heldout=req.heldout, workers=req.workers
-            ).public()
+            return start_data_generation(**fields).public()
         except JobError as e:
-            raise HTTPException(400, str(e)) from e
+            raise HTTPException(400, public_error_message(e)) from e
 
     @app.post("/api/jobs/train")
     def train(req: TrainRequest):
+        fields = approved_fields(req)
         try:
-            return start_training(**req.model_dump()).public()
+            return start_training(**fields).public()
         except JobError as e:
-            raise HTTPException(400, str(e)) from e
+            raise HTTPException(400, public_error_message(e)) from e
 
     @app.post("/api/jobs/action/optimize-training")
     def optimize_training(req: PodRequest):
+        fields = approved_fields(req)
         try:
-            return start_training_optimization(pod_id=req.pod_id, task=req.task).public()
+            return start_training_optimization(
+                pod_id=fields["pod_id"], task=fields["task"]
+            ).public()
         except JobError as e:
-            raise HTTPException(400, str(e)) from e
+            raise HTTPException(400, public_error_message(e)) from e
+
+    @app.post("/api/jobs/action/optimize-runtime")
+    def optimize_runtime(req: PodRequest):
+        """Change the live deployment. The other one only measures."""
+        fields = approved_fields(req)
+        try:
+            return start_runtime_optimization(pod_id=fields["pod_id"], task=fields["task"]).public()
+        except JobError as e:
+            raise HTTPException(400, public_error_message(e)) from e
 
     @app.post("/api/jobs/action/optimize-inference")
     def optimize_inference(req: PodRequest):
+        fields = approved_fields(req)
         try:
             return start_inference_optimization(
-                pod_id=req.pod_id, task=req.task, model_id=req.model_id
+                pod_id=fields["pod_id"], task=fields["task"], model_id=fields["model_id"]
             ).public()
         except JobError as e:
-            raise HTTPException(400, str(e)) from e
+            raise HTTPException(400, public_error_message(e)) from e
 
     @app.post("/api/jobs/action/{name}")
     def migrate(name: str, req: MigrationRequest):
+        fields = approved_fields(req)
         try:
-            return start_migration(
-                kind=name,
-                source_pod_id=req.source_pod_id,
-                target_pod_id=req.target_pod_id,
-                total_steps=req.total_steps,
-                stop_after=req.stop_after,
-                eval_n=req.eval_n,
-                initial_adapter=req.initial_adapter,
-                prepare_pods=req.prepare_pods,
-            ).public()
+            return start_migration(kind=name, **fields).public()
         except JobError as e:
-            raise HTTPException(400, str(e)) from e
+            raise HTTPException(400, public_error_message(e)) from e
 
     return app
 
@@ -670,7 +903,7 @@ def main() -> None:
 
     if not (STATIC / "index.html").exists():
         raise SystemExit("dashboard static/index.html is missing")
-    print("research console -> http://127.0.0.1:8080")
+    print("Relay workspace -> http://127.0.0.1:8080")
     uvicorn.run(build_app(), host="127.0.0.1", port=8080, log_level="warning")
 
 

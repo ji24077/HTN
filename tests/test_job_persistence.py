@@ -1,6 +1,7 @@
 """Atomic job records survive transient Windows sharing locks without hiding failure."""
 
 import json
+import threading
 from pathlib import Path
 
 import pytest
@@ -125,3 +126,92 @@ def test_failed_initial_create_does_not_leave_queued_job(manager, monkeypatch):
     with pytest.raises(PermissionError, match="cannot create record"):
         manager.create("test", {}, lambda job: {"unexpected": True})
     assert manager.list() == []
+
+
+def test_workspace_jobs_overlap_only_on_disjoint_pods(manager, monkeypatch):
+    class HeldThread:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(runner.threading, "Thread", HeldThread)
+    first = manager.create(
+        "relay-qwen4b-qlora",
+        {"pod_id": "pod-a5000"},
+        lambda _job: {"ok": True},
+    )
+
+    second = manager.create(
+        "relay-prefix-cache-benchmark",
+        {"pod_id": "pod-4090"},
+        lambda _job: {"ok": True},
+    )
+
+    assert first.status == second.status == "queued"
+    with pytest.raises(runner.JobError, match="required execution resource"):
+        manager.create(
+            "relay-qwen4b-qlora",
+            {"pod_id": "pod-4090"},
+            lambda _job: {"unexpected": True},
+        )
+
+
+def test_cancelling_job_keeps_its_pod_claim_and_legacy_jobs_are_global(manager):
+    manager._jobs = {
+        "cancelled-later": runner.Job(
+            id="cancelled-later",
+            kind="relay-qwen4b-qlora",
+            params={"pod_id": "pod-a5000"},
+            status="cancelling",
+        )
+    }
+
+    conflict = manager.resource_conflict(
+        "relay-prefix-cache-benchmark", {"pod_id": "pod-a5000"}
+    )
+    assert conflict is not None
+    assert conflict["status"] == "cancelling"
+    assert manager.resource_conflict(
+        "relay-demo-cache-reclaim", {"pod_id": "pod-a5000"}
+    ) is not None
+    assert manager.resource_conflict(
+        "relay-prefix-cache-benchmark", {"pod_id": "pod-4090"}
+    ) is None
+    assert manager.resource_conflict("generate-data", {}) is not None
+
+
+def test_internal_states_include_recovery_data_and_distinguish_loaded_workers(manager):
+    work_returned = threading.Event()
+
+    def work(_job):
+        work_returned.set()
+        return {"artifact": {"location": "/workspace/private/adapter"}, "ok": True}
+
+    job = manager.create(
+        "training",
+        {"model_id": "version-1", "pod_id": "pod-1", "command": "private"},
+        work,
+    )
+    assert work_returned.wait(1)
+    for _attempt in range(1_000):
+        if job.status not in {"queued", "running", "cancelling"}:
+            break
+        threading.Event().wait(0.001)
+
+    internal = manager.states()[job.id]
+    assert internal["params"]["model_id"] == "version-1"
+    assert internal["result"]["artifact"]["location"] == "/workspace/private/adapter"
+    assert internal["worker_resident"] is True
+    assert internal["finished_at"] is not None
+
+    public = manager.list()[0]
+    assert "params" not in public
+    assert "result" not in public
+    assert "worker_resident" not in public
+
+    restarted = runner.JobManager()
+    loaded = restarted.states()[job.id]
+    assert loaded["result"]["ok"] is True
+    assert loaded["worker_resident"] is False

@@ -41,8 +41,7 @@ def run(model, tok, rows: list[dict], *, batch: int, max_new: int) -> tuple[dict
         six = "target" in chunk[0]
         template = sixseven.PROMPT if six else PROMPT
         prompts = [
-            template.format(sentence=row["question"] if six else row["sentence"])
-            for row in chunk
+            template.format(sentence=row["question"] if six else row["sentence"]) for row in chunk
         ]
         enc = tok(prompts, return_tensors="pt", padding=True, add_special_tokens=False)
         enc = {key: value.cuda() for key, value in enc.items()}
@@ -103,11 +102,10 @@ def main() -> None:
 
     # Reuse the checkpoint loader used by the correctness evaluator. A separate
     # loader is exactly how an inference benchmark silently tests other weights.
-    from evaluate import load_model
-    from transformers import AutoTokenizer
+    from evaluate import load_model, load_tokenizer
 
     rows = _rows(a.data, a.n)
-    tok = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-0.5B", padding_side="left")
+    tok = load_tokenizer(a.model, padding_side="left")
     if tok.pad_token_id is None:
         tok.pad_token = tok.eos_token
     model = load_model(a.model, torch.bfloat16).cuda().eval()
@@ -122,8 +120,13 @@ def main() -> None:
     # anything.
     metrics = [
         key
-        for key in ("json_parse_rate", "exact_match_rate", "accuracy", "trigger_accuracy",
-                    "non_trigger_accuracy")
+        for key in (
+            "json_parse_rate",
+            "exact_match_rate",
+            "accuracy",
+            "trigger_accuracy",
+            "non_trigger_accuracy",
+        )
         if key in baseline and key in optimized
     ]
     if not metrics:
@@ -138,8 +141,7 @@ def main() -> None:
             "status": "ok" if quality_ok else "regressed",
             "tolerance": a.tol,
             "metrics_compared": metrics,
-            "same_generated_tokens": baseline["generated_tokens"]
-            == optimized["generated_tokens"],
+            "same_generated_tokens": baseline["generated_tokens"] == optimized["generated_tokens"],
             "detail": "quality preserved" if quality_ok else "quality regressed",
         },
         "note": "This measures real high-concurrency batching. vLLM is not installed yet.",

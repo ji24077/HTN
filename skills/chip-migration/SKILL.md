@@ -1,54 +1,69 @@
 ---
 name: chip-migration
-description: Move a deployment to a different GPU when that GPU is measurably faster for one request, proving the model still answers the same way before any traffic follows it.
+description: Evaluate CUDA-to-ROCm portability for the same Qwen 4B version and recommend migration only from comparable measured quality, latency, and cost evidence.
 ---
 
-# Chip migration
+# Chip Migration Agent
 
-Moving hardware is the one change in this system that can genuinely reduce how
-long a person waits, because it changes the machine doing the work rather than
-how the work is scheduled. That also makes it the change most likely to alter
-the answer: different kernels and different reduction orders make bf16
-arithmetic land differently, and a migration that changes the output has not
-migrated anything.
+## Allowed inputs
 
-## Propose from measurements, not from spec sheets
+- A live CUDA source deployment, immutable Qwen 4B base artifact and optional
+  LoRA adapter hashes, and the approved AMD MI300X RunPod candidate.
+- Source/target GPU identity, vendor, runtime/library versions, region, price,
+  health/capacity, artifact transport location, and compatibility evidence.
+- One immutable held-out suite, decoding configuration, output limit, quality
+  tolerances, budget, and explicit compute/migration/traffic approvals.
 
-`src/gpushare/agent/gpus.py` carries a batch-1 median for every card anything
-was actually run on, all from one gate so they compare to each other. Propose a
-target only when both the current card and the candidate are `measured`.
+## Allowed actions
 
-A card with `measured: false` — the RTX 5090 today — has no number to offer.
-It may still be worth trying, but the proposal must read as an estimate and
-the screen must say `Estimated` until a run on it exists.
+- Ask deterministic code to validate CUDA/ROCm runtime and model/adapter
+  compatibility before artifact transfer or execution.
+- Copy or expose the same approved artifact and adapter to the MI300X candidate,
+  reject silent CPU fallback, and run the identical fixed quality/benchmark suite.
+- Produce one recommendation: `Recommend`, `Reject`, or `Needs review`.
+- The agent cannot provision/terminate pods, issue shell/SSH commands, change
+  quality thresholds, or switch traffic.
 
-Higher TFLOPS is not a latency prediction. Batch-1 decoding is bound by memory
-bandwidth and per-step overhead, so a card with far more compute can return one
-short answer no sooner.
+## Required measurements
 
-## Validate before, not after
+- Artifact/adapter and evaluation hashes; actual GPU/backend execution evidence;
+  PyTorch/ROCm/CUDA/Transformers/PEFT versions; input/output token counts; and
+  identical decoding/output limits.
+- JSON validity where applicable and exact per-case output comparison. For a
+  registered LoRA version, also measure its bound `67` trigger/non-trigger
+  behavior and distinct outputs. A base version has no `67` contract and is
+  judged by exact output parity instead.
+- TTFT, median and p95 end-to-end latency, throughput, peak VRAM, errors, region,
+  hourly price, and comparable cost per workload.
+- Report portability, latency, and cost as three separate outcomes. A portable
+  MI300X deployment may still be rejected for interactive batch-one inference.
 
-Run the same fixed prompt set on the target before any traffic moves, and
-compare against the source run:
+## Quality and cost constraints
 
-- the task's own quality gate must pass on the target
-- the outputs must be compared case by case, not summarised into one accuracy
-- both halves of a split metric must hold; an aggregate hides a collapse in one
+- First validate runtime and artifact compatibility; a successful file copy or
+  compile is not execution proof.
+- Both sides must use the same immutable evaluation set. Missing/different hashes,
+  CPU/reference fallback, missing split metrics, or quality beyond tolerance are
+  rejection conditions.
+- Never infer speed from TFLOPS or vendor. Never claim AMD is faster without a
+  measured benchmark proving it for this workload.
+- A slower but quality-preserving target is `portability: passed` and
+  `performance recommendation: rejected`; do not collapse those verdicts.
 
-A checkpoint that trained on one vendor and resumed on another is the case
-this repo has actually exercised: NVIDIA RTX 4090 to AMD MI300X held exact
-match at 89.7% and 90.0% across 300 identical cases. It was also slower —
-393s against 213s — which is the honest result and was reported as one.
+## Approval requirements
 
-## Latency and correctness are separate verdicts
+- Explicit compute/migration approval is required before setup, artifact transfer,
+  or testing on the MI300X. Existing pod availability is not spending approval.
+- A verified recommendation does not authorize traffic movement. A separate
+  explicit user approval is required for rollout.
+- New pod creation or termination remains outside the skill and needs its own
+  confirmation.
 
-Report them separately and let them disagree. "Faster and the same" is one
-outcome; "faster but different" is a rejection; "same but slower" is a
-migration that succeeded at portability and failed at performance, and saying
-so is more useful than picking whichever number looked better.
+## Rollback behavior
 
-## Traffic moves last
-
-Keep the source deployment serving until the target has passed. Switching
-traffic is a separate, explicit step, and the previous deployment stays
-available until someone confirms the new one.
+- Keep the CUDA source deployment live and unchanged while the ROCm candidate is
+  tested. Failure before rollout only rejects/stops the candidate.
+- If post-rollout verification fails, deterministic code restores the stored
+  source route and records the candidate, failure evidence, and user decision.
+- Never delete the source artifact or adapter until the user confirms the new
+  deployment and the rollback window has ended.

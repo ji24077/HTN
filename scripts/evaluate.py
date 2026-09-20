@@ -56,7 +56,7 @@ def _bundle_manifest(path: str) -> dict | None:
     return verify_training_bundle(path)
 
 
-def load_tokenizer(path: str, *, padding_side: str = "left"):
+def load_tokenizer(path: str, *, padding_side: str = "left", revision: str | None = None):
     """Portable bundles use their verified saved tokenizer, never current main."""
     from transformers import AutoTokenizer
 
@@ -64,13 +64,26 @@ def load_tokenizer(path: str, *, padding_side: str = "left"):
     local = Path(path)
     if bundle is not None or (local / "tokenizer_config.json").is_file():
         return AutoTokenizer.from_pretrained(path, padding_side=padding_side, local_files_only=True)
-    return AutoTokenizer.from_pretrained(MODEL_ID, padding_side=padding_side)
+    # A remote Hugging Face ID brings its own tokenizer. Falling back to the
+    # original 0.5B tokenizer here made a valid Qwen 4B benchmark measure text
+    # produced from the wrong vocabulary without necessarily raising an error.
+    tokenizer_ref = path if not local.exists() and "/" in path else MODEL_ID
+    return AutoTokenizer.from_pretrained(
+        tokenizer_ref, padding_side=padding_side, revision=revision
+    )
 
 
-def load_model(path: str, dtype: torch.dtype, *, fuse_adapter: bool = False):
+def load_model(
+    path: str,
+    dtype: torch.dtype,
+    *,
+    fuse_adapter: bool = False,
+    revision: str | None = None,
+):
     """A HF id, or a directory holding model.safetensors from scripts/train.py."""
     from transformers import AutoModelForCausalLM
 
+    requested_revision = revision
     p = Path(path)
     bundle = _bundle_manifest(path)
     if (p / "adapter_config.json").exists():
@@ -79,27 +92,44 @@ def load_model(path: str, dtype: torch.dtype, *, fuse_adapter: bool = False):
         cfg = PeftConfig.from_pretrained(path, local_files_only=True)
         kwargs = {"dtype": dtype}
         if bundle is not None:
-            revision = bundle.get("base_model_revision")
-            if not revision:
+            saved_revision = bundle.get("base_model_revision")
+            if not saved_revision:
                 raise ValueError("portable LoRA bundle must identify its base model revision")
-            kwargs["revision"] = revision
+            kwargs["revision"] = saved_revision
+        else:
+            relay_metadata_path = p / "relay-training.json"
+            if relay_metadata_path.is_file():
+                relay_metadata = json.loads(relay_metadata_path.read_text(encoding="utf-8"))
+                saved_revision = relay_metadata.get("base_model_revision")
+                if not isinstance(saved_revision, str) or not saved_revision.strip():
+                    raise ValueError(
+                        "Relay LoRA adapter must identify its immutable base model revision"
+                    )
+                kwargs["revision"] = saved_revision
+        if requested_revision is not None:
+            stored_revision = kwargs.get("revision")
+            if stored_revision is not None and stored_revision != requested_revision:
+                raise ValueError("adapter base revision does not match the requested revision")
+            kwargs["revision"] = requested_revision
         base = AutoModelForCausalLM.from_pretrained(cfg.base_model_name_or_path, **kwargs)
         adapted = PeftModel.from_pretrained(base, path, local_files_only=True)
         return adapted.merge_and_unload(safe_merge=True) if fuse_adapter else adapted
     if fuse_adapter:
         raise ValueError("--fuse-adapter requires a saved PEFT adapter directory")
     if (p / "config.json").exists():
-        return AutoModelForCausalLM.from_pretrained(path, dtype=dtype)
+        return AutoModelForCausalLM.from_pretrained(path, dtype=dtype, revision=requested_revision)
     if (p / "model.safetensors").exists():
         from safetensors.torch import load_file
 
-        model = AutoModelForCausalLM.from_pretrained(MODEL_ID, dtype=dtype)
+        model = AutoModelForCausalLM.from_pretrained(
+            MODEL_ID, dtype=dtype, revision=requested_revision
+        )
         state = load_file(p / "model.safetensors")
         if model.config.tie_word_embeddings and "lm_head.weight" not in state:
             state["lm_head.weight"] = state["model.embed_tokens.weight"]
         model.load_state_dict(state, strict=True)
         return model
-    return AutoModelForCausalLM.from_pretrained(path, dtype=dtype)
+    return AutoModelForCausalLM.from_pretrained(path, dtype=dtype, revision=requested_revision)
 
 
 @torch.no_grad()

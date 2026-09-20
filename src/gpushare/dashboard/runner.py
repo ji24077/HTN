@@ -9,7 +9,9 @@ loaded into child-process environments but are never returned by the API.
 from __future__ import annotations
 
 import contextlib
+import copy
 import functools
+import hashlib
 import json
 import logging
 import math
@@ -35,6 +37,7 @@ from dotenv import dotenv_values
 from gpushare.agent.profiles import profile_for
 from gpushare.agent.sixseven import PROMPT as SIXSEVEN_PROMPT
 from gpushare.agent.task import PROMPT as TASK_PROMPT
+from gpushare.artifacts import ArtifactIntegrityError, verify_manifest
 
 ROOT = Path(__file__).resolve().parents[3]
 STATE_ROOT = ROOT / ".gpushare"
@@ -49,10 +52,14 @@ _POD_ID = re.compile(r"^[a-zA-Z0-9_-]{4,64}$")
 # Imported lazily-by-value so runner has no import cycle with agent.task.
 MODEL_ID_FOR_SERVE = "Qwen/Qwen2.5-0.5B"
 LONG_CONTEXT_MODEL = "Qwen/Qwen3-4B-Instruct-2507"
+# Immutable model+tokenizer revision used by the repository's Qwen 4B path.
+# Pinning the repo name alone would let a future Hub update silently change a
+# workspace, benchmark, or adapter base underneath stored evidence.
+LONG_CONTEXT_REVISION = "cdbee75f17c01a7cc42f958dc650907174af0554"
 
 
 class JobError(RuntimeError):
-    """A user-facing execution error.  It is safe to return its text."""
+    """An execution error that must pass through ``public_error_message``."""
 
 
 # Job logs are child-process stdout, and _project_env() hands those children
@@ -62,10 +69,14 @@ class JobError(RuntimeError):
 # any exact value currently in the environment (which catches a key shape we
 # have not seen).
 _SECRET_SHAPES = re.compile(
-    r"\b(?:sk-[A-Za-z0-9_-]{16,}"  # OpenAI
-    r"|rpa_[A-Za-z0-9]{16,}"  # RunPod
-    r"|gh[pousr]_[A-Za-z0-9]{16,}"  # GitHub
-    r"|[A-Za-z0-9]{8}\.[A-Za-z0-9]{24,})"  # Baseten
+    r"(?:\bsk-[A-Za-z0-9_-]{16,}"  # OpenAI / Anthropic-style
+    r"|\brpa_[A-Za-z0-9]{16,}"  # RunPod
+    r"|\bgh[pousr]_[A-Za-z0-9]{16,}"  # GitHub
+    r"|\bhf_[A-Za-z0-9]{20,}"  # Hugging Face
+    r"|\bAKIA[0-9A-Z]{16}"  # AWS access key
+    r"|\bglpat-[A-Za-z0-9_-]{16,}"  # GitLab
+    r"|\b[A-Za-z0-9]{8}\.[A-Za-z0-9]{24,}"  # Baseten
+    r"|-----BEGIN [^-\r\n]*PRIVATE KEY-----)"
 )
 _SECRET_ENV_KEYS = (
     "BASETEN_API_KEY",
@@ -94,6 +105,78 @@ def _redact(text: str) -> str:
     return out
 
 
+_PRIVATE_INFRA = (
+    (re.compile(r"\broot@(?:\d{1,3}\.){3}\d{1,3}\b"), "root@<runpod-host>"),
+    (re.compile(r"(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?![\w.])"), "<runpod-host>"),
+    (
+        re.compile(
+            r"(?<![A-Za-z0-9])"
+            r"(?:/Users|/private|/workspace|/tmp|/var/folders|/home|/root|/opt|/srv|/mnt|/etc)"
+            r"/[^\s'\"]+"
+        ),
+        "<internal-path>",
+    ),
+    (re.compile(r"(?<![A-Za-z0-9])[A-Za-z]:\\[^\r\n'\"]+"), "<internal-path>"),
+)
+
+
+def public_error_message(error: BaseException | str) -> str:
+    """Return a useful error without credentials, SSH addresses, or local paths."""
+
+    text = _redact(str(error)).replace("\x00", "")
+    for pattern, replacement in _PRIVATE_INFRA:
+        text = pattern.sub(replacement, text)
+    return text[-500:] or "job failed"
+
+
+_PRIVATE_GENERATION_FIELDS = frozenset(
+    {
+        "artifact_path",
+        "checkpoint",
+        "endpoint",
+        "input",
+        "live_model_ref",
+        "local_location",
+        "model",
+        "model_ref",
+        "path",
+        "prompt",
+        "prompt_template",
+        "remote_checkpoint",
+        "sentence",
+        "ssh",
+        "tunnel",
+    }
+)
+
+
+def public_generation_payload(payload: Any) -> dict[str, Any]:
+    """Return one browser-safe generation response or SSE frame.
+
+    The pod is an execution boundary, not a trusted public serializer.  Model
+    output and measured fields are retained, while effective prompts, model
+    filesystem references, endpoint metadata, and detailed errors stay in the
+    backend.  This function is shared by the legacy and workspace chat paths.
+    """
+
+    if not isinstance(payload, dict):
+        return {"done": True, "error": "the model server returned an invalid response"}
+    public: dict[str, Any] = {}
+    for key, value in payload.items():
+        key_text = str(key)
+        if key_text.lower() in _PRIVATE_GENERATION_FIELDS or key_text.startswith("_"):
+            continue
+        if key_text.lower() == "error":
+            public[key_text] = public_error_message(str(value))
+        elif isinstance(value, str):
+            # A backend should never emit credentials as generated text, but
+            # fail closed if a provider/SDK response happens to contain one.
+            public[key_text] = _redact(value)
+        else:
+            public[key_text] = value
+    return public
+
+
 @dataclass
 class Job:
     id: str
@@ -111,9 +194,9 @@ class Job:
     cancel_requested: bool = False
     _process: subprocess.Popen[str] | None = field(default=None, repr=False, compare=False)
 
-    def public(self) -> dict[str, Any]:
-        # A huge training log makes polling increasingly expensive. The full
-        # job record is persisted, while the browser only needs the live tail.
+    def snapshot(self) -> dict[str, Any]:
+        """Complete local persistence form. Never return this to a browser or LLM."""
+
         return {
             "id": self.id,
             "kind": self.kind,
@@ -130,10 +213,50 @@ class Job:
             "cancel_requested": self.cancel_requested,
         }
 
+    def public(self) -> dict[str, Any]:
+        """Browser-safe job state with no commands, paths, endpoints, or artifacts."""
+
+        terminal = self.status in {"complete", "failed", "cancelled", "interrupted"}
+        return {
+            "id": self.id,
+            "kind": self.kind,
+            "status": self.status,
+            "stage": self.stage,
+            "progress": self.progress,
+            "created_at": self.created_at,
+            "started_at": self.started_at,
+            "finished_at": self.finished_at,
+            "has_result": self.result is not None,
+            "error": public_error_message(self.error) if self.error else None,
+            "cancel_requested": self.cancel_requested,
+            "cancelled": self.status == "cancelled",
+            "terminal": terminal,
+        }
+
 
 class JobManager:
+    # Relay workspace jobs own only the pods named in their structured params.
+    # Older dashboard jobs write shared files such as latest.json, generated
+    # datasets, or selected-config.json and therefore remain globally exclusive.
+    _RESOURCE_SCOPED_KINDS = frozenset(
+        {
+            "serve-model",
+            "relay-qwen4b-qlora",
+            "relay-prefix-cache-benchmark",
+            "relay-cuda-rocm-migration",
+            "relay-demo-cache-reclaim",
+        }
+    )
+    _ACTIVE_STATUSES = frozenset({"queued", "running", "cancelling"})
+
     def __init__(self) -> None:
         self._jobs: dict[str, Job] = {}
+        # Job snapshots loaded from disk have no in-process worker/watchers.
+        # IDs enter this set only when this JobManager creates the worker.  We
+        # intentionally retain terminal IDs for the lifetime of the process:
+        # the workspace callback can lag the worker's final persistence by a
+        # few scheduler ticks, and restart reconciliation must not race it.
+        self._worker_resident_jobs: set[str] = set()
         self._lock = threading.RLock()
         JOB_ROOT.mkdir(parents=True, exist_ok=True)
         RUN_ROOT.mkdir(parents=True, exist_ok=True)
@@ -160,11 +283,15 @@ class JobManager:
         tmp: Path | None = None
         try:
             with tempfile.NamedTemporaryFile(
-                mode="w", encoding="utf-8", dir=JOB_ROOT,
-                prefix=f".{job.id}-", suffix=".tmp", delete=False,
+                mode="w",
+                encoding="utf-8",
+                dir=JOB_ROOT,
+                prefix=f".{job.id}-",
+                suffix=".tmp",
+                delete=False,
             ) as stream:
                 tmp = Path(stream.name)
-                json.dump(job.public(), stream, indent=2, ensure_ascii=False)
+                json.dump(job.snapshot(), stream, indent=2, ensure_ascii=False)
             for attempt in range(8):
                 try:
                     os.replace(tmp, path)
@@ -178,14 +305,61 @@ class JobManager:
                 with contextlib.suppress(OSError):
                     tmp.unlink(missing_ok=True)
 
+    @classmethod
+    def _resource_claims(cls, kind: str, params: dict[str, Any]) -> frozenset[str]:
+        """Return deterministic execution resources without exposing job params.
+
+        A ``global`` claim conflicts with every job. Workspace jobs instead
+        claim their exact RunPod IDs, which lets a 4090 benchmark run while a
+        3090 chat deployment remains resident. Serve jobs also claim the one
+        local serving control plane because this process owns a single tunnel.
+        """
+
+        if kind not in cls._RESOURCE_SCOPED_KINDS:
+            return frozenset({"global"})
+        claims = {
+            f"pod:{value}"
+            for key in ("pod_id", "source_pod_id", "target_pod_id", "artifact_source_pod_id")
+            if isinstance((value := params.get(key)), str) and value
+        }
+        if kind == "serve-model":
+            claims.add("control:serving")
+        # A resource-scoped job without a resolved pod is unsafe to overlap.
+        return frozenset(claims or {"global"})
+
+    @staticmethod
+    def _claims_conflict(left: frozenset[str], right: frozenset[str]) -> bool:
+        return "global" in left or "global" in right or not left.isdisjoint(right)
+
+    def _conflicting_job_unlocked(
+        self, kind: str, params: dict[str, Any]
+    ) -> Job | None:
+        requested = self._resource_claims(kind, params)
+        return next(
+            (
+                job
+                for job in self._jobs.values()
+                if job.status in self._ACTIVE_STATUSES
+                and self._claims_conflict(
+                    requested, self._resource_claims(job.kind, job.params)
+                )
+            ),
+            None,
+        )
+
+    def resource_conflict(self, kind: str, params: dict[str, Any]) -> dict[str, Any] | None:
+        """Return a browser-safe conflicting job, if admission would fail."""
+
+        with self._lock:
+            conflict = self._conflicting_job_unlocked(kind, params)
+            return conflict.public() if conflict is not None else None
+
     def create(
         self,
         kind: str,
         params: dict[str, Any],
         work: Callable[[Job], dict[str, Any]],
     ) -> Job:
-        # Artifact-producing work shares data/ and the selected-config record.
-        # Serialising it is much clearer than letting two buttons race.
         with self._lock:
             # "running" alone leaves a window: a fresh Job defaults to
             # "queued" and only flips to "running" inside _run(), which has
@@ -195,14 +369,18 @@ class JobManager:
             # work on the same pod concurrently. Counting "queued" here closes
             # that window, since the new job is inserted under this same lock
             # before it is released.
-            busy = next((j for j in self._jobs.values() if j.status in ("running", "queued")), None)
+            busy = self._conflicting_job_unlocked(kind, params)
             if busy:
-                raise JobError(f"{busy.kind} job {busy.id[:8]} is already running")
+                raise JobError(
+                    f"{busy.kind} job {busy.id[:8]} already owns a required execution resource"
+                )
             job = Job(id=uuid.uuid4().hex, kind=kind, params=params)
             self._jobs[job.id] = job
+            self._worker_resident_jobs.add(job.id)
             try:
                 self._persist(job)
             except Exception:
+                self._worker_resident_jobs.discard(job.id)
                 del self._jobs[job.id]
                 raise
 
@@ -213,6 +391,8 @@ class JobManager:
     def _run(self, job: Job, work: Callable[[Job], dict[str, Any]]) -> None:
         try:
             with self._lock:
+                if job.cancel_requested:
+                    raise JobError("cancelled before the job started")
                 job.status = "running"
                 job.started_at = time.time()
                 self._persist(job)
@@ -264,7 +444,44 @@ class JobManager:
             jobs = sorted(self._jobs.values(), key=lambda j: j.created_at, reverse=True)
             return [j.public() for j in jobs[:30]]
 
+    def public_states(self) -> dict[str, dict[str, Any]]:
+        """Return every persisted job as a detached, browser-safe projection."""
+
+        with self._lock:
+            return {job.id: copy.deepcopy(job.public()) for job in self._jobs.values()}
+
+    def states(self) -> dict[str, dict[str, Any]]:
+        """Trusted internal state for workspace restart reconciliation.
+
+        Unlike :meth:`list` and :meth:`Job.public`, this includes execution
+        parameters and results.  It must never be returned by an HTTP route or
+        passed to an LLM.  ``worker_resident`` distinguishes a callback that
+        can still commit in this process from a disk-loaded orphan after a
+        backend restart.
+        """
+
+        with self._lock:
+            return {
+                job.id: {
+                    "id": job.id,
+                    "kind": job.kind,
+                    "status": job.status,
+                    "stage": job.stage,
+                    "progress": job.progress,
+                    "error": public_error_message(job.error) if job.error else None,
+                    "cancel_requested": job.cancel_requested,
+                    "cancelled": job.status == "cancelled",
+                    "has_result": job.result is not None,
+                    "params": copy.deepcopy(job.params),
+                    "result": copy.deepcopy(job.result),
+                    "worker_resident": job.id in self._worker_resident_jobs,
+                    "finished_at": job.finished_at,
+                }
+                for job in self._jobs.values()
+            }
+
     def cancel(self, job_id: str) -> Job:
+        persist_error: Exception | None = None
         with self._lock:
             job = self.get(job_id)
             if job.status not in {"queued", "running"}:
@@ -272,13 +489,37 @@ class JobManager:
             job.cancel_requested = True
             job.status = "cancelling"
             proc = job._process
-            self._persist(job)
+            try:
+                self._persist(job)
+            except Exception as exc:  # cancellation must still reach the process
+                persist_error = exc
         if proc and proc.poll() is None:
             try:
                 _terminate_local_process(proc)
             except ProcessLookupError:
                 pass
+        if persist_error is not None:
+            raise persist_error
         return job
+
+    def cancel_kind(self, kind: str) -> list[str]:
+        """Request cancellation for every active job of one exact kind."""
+
+        with self._lock:
+            job_ids = [
+                job.id
+                for job in self._jobs.values()
+                if job.kind == kind and job.status in {"queued", "running"}
+            ]
+        cancelled: list[str] = []
+        for job_id in job_ids:
+            try:
+                job = self.cancel(job_id)
+            except Exception:  # noqa: BLE001 - stop remains best effort under disk failure
+                job = self.get(job_id)
+            if job.cancel_requested:
+                cancelled.append(job_id)
+        return cancelled
 
     def update(self, job: Job, stage: str, progress: int) -> None:
         with self._lock:
@@ -375,10 +616,10 @@ def _capture(args: list[str], *, timeout: int = 30) -> str:
             check=False,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
-        raise JobError(f"could not run {args[0]}: {exc}") from exc
+        raise JobError(public_error_message(f"could not run {args[0]}: {exc}")) from exc
     if done.returncode:
         detail = (done.stderr or done.stdout).strip()
-        raise JobError(detail or f"{args[0]} exited with {done.returncode}")
+        raise JobError(public_error_message(detail or f"{args[0]} exited with {done.returncode}"))
     return done.stdout
 
 
@@ -475,7 +716,13 @@ def _ssh_args(info: dict[str, Any], remote_command: str) -> list[str]:
         "-o",
         "ServerAliveInterval=15",
         "-o",
-        "ServerAliveCountMax=2",
+        # Two missed probes is thirty seconds, and a training run is minutes.
+        # sshd answers these itself, so a busy pod — load average was 8.58 when
+        # a QLoRA run died at 35% — can be late twice without anything being
+        # wrong, and the command it was carrying dies with the connection.
+        # Eight probes is two minutes: still prompt about a pod that is really
+        # gone, no longer fatal to a job that is merely slow.
+        "ServerAliveCountMax=8",
         f"root@{info['ip']}",
         remote_command,
     ]
@@ -592,7 +839,9 @@ DISK_NEED_GB = 6.0
 
 
 def _free_disk_gb(info: dict[str, Any], path: str = REMOTE_ROOT) -> float:
-    out = _capture(_ssh_args(info, f"df -BM --output=avail {shlex.quote(path)} 2>/dev/null | tail -1"))
+    out = _capture(
+        _ssh_args(info, f"df -BM --output=avail {shlex.quote(path)} 2>/dev/null | tail -1")
+    )
     return max((int(x) for x in re.findall(r"\d+", out)), default=0) / 1024
 
 
@@ -690,7 +939,9 @@ def _reclaim(job: Job, info: dict[str, Any], pod: dict[str, Any]) -> bool:
     return freed
 
 
-def _place(job: Job, *, need_gb: float, preferred_pod_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
+def _place(
+    job: Job, *, need_gb: float, preferred_pod_id: str
+) -> tuple[dict[str, Any], dict[str, Any]]:
     """Pick a pod with room, preferring the one that was asked for.
 
     Placement is the product: the point of pooling GPUs is that a job lands
@@ -752,7 +1003,10 @@ def _place(job: Job, *, need_gb: float, preferred_pod_id: str) -> tuple[dict[str
         except Exception:  # noqa: BLE001 — a pod that fails to clear is one we skip
             continue
         if free >= need_gb and disk >= DISK_NEED_GB:
-            JOBS.log(job, f"placing on {pod['name']} after reclaiming: {free:.1f} GB VRAM, {disk:.1f} GB disk")
+            JOBS.log(
+                job,
+                f"placing on {pod['name']} after reclaiming: {free:.1f} GB VRAM, {disk:.1f} GB disk",
+            )
             return pod, info
 
     raise JobError(
@@ -1062,9 +1316,7 @@ def _quality(
     # verdict turns on the seventeenth decimal is not one anybody can reason
     # about.
     floor = -tol - 1e-9
-    ok = all(d >= floor for d in deltas.values()) and all(
-        d >= floor for d in field_deltas.values()
-    )
+    ok = all(d >= floor for d in deltas.values()) and all(d >= floor for d in field_deltas.values())
     out = {
         "status": "ok" if ok else "regressed",
         "task": spec.name,
@@ -1317,8 +1569,11 @@ def _checkpoint_for(pod_id: str) -> dict[str, Any]:
     where = (latest or {}).get("pod_id")
     raise JobError(
         f"pod {pod_id} has no trained checkpoint"
-        + (f" — the last run left one on {where}; pick that pod" if where
-           else " — run training first")
+        + (
+            f" — the last run left one on {where}; pick that pod"
+            if where
+            else " — run training first"
+        )
     )
 
 
@@ -1744,6 +1999,7 @@ def start_migration(
 SERVE_PORT = 8100
 _serve_lock = threading.Lock()
 _serve: dict[str, Any] = {}
+_serve_epoch = 0
 
 
 # The base models a run can start from. Saving one puts it in the picker under
@@ -1776,6 +2032,63 @@ def _write_saved(entries: list[dict[str, Any]]) -> None:
     SAVED_PATH.write_text(json.dumps(entries, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
+_LEGACY_MODEL_KINDS = frozenset(
+    {
+        "base",
+        "trained",
+        "adapter",
+        "lora",
+        "qlora",
+        "lora_adapter",
+        "lora-adapter",
+        "peft_adapter",
+        "peft-adapter",
+    }
+)
+_SAFE_REMOTE_MODEL_REF = re.compile(r"^/(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+$")
+
+
+def _reject_secret_value(value: Any, label: str) -> None:
+    """Keep credentials out of the backward-compatible flat registry."""
+
+    try:
+        encoded = json.dumps(value, ensure_ascii=False, allow_nan=False, sort_keys=True)
+    except (TypeError, ValueError, UnicodeError, RecursionError) as exc:
+        raise JobError(f"{label} must be finite JSON data") from exc
+    if _redact(encoded) != encoded:
+        raise JobError(f"{label} must not contain credentials")
+
+
+def _validate_legacy_model_ref(ref: str, kind: str) -> str:
+    """Accept only catalog models or checkpoint paths created by Relay.
+
+    Legacy entries eventually become SSH command arguments. Quoting prevents
+    command injection, but an unrestricted path/repository string still lets a
+    browser persist an unrelated model or arbitrary host path under a trusted
+    name. Keep the old API constrained to its two real artifact namespaces.
+    """
+
+    if not isinstance(ref, str):
+        raise JobError("model reference must be text")
+    clean = ref.strip()
+    if not clean or len(clean.encode("utf-8")) > 4096 or any(ord(ch) < 32 for ch in clean):
+        raise JobError("model reference is invalid")
+    _reject_secret_value(clean, "model reference")
+    catalog_refs = {entry["ref"] for entry in BASE_CATALOG}
+    if kind == "base":
+        if clean not in catalog_refs:
+            raise JobError("base model reference must be selected from Relay's catalog")
+        return clean
+    if clean in catalog_refs:
+        raise JobError("trained model reference must point to a Relay checkpoint")
+    if not _SAFE_REMOTE_MODEL_REF.fullmatch(clean) or ".." in Path(clean).parts:
+        raise JobError("trained model reference is not a safe checkpoint path")
+    allowed_roots = (f"{REMOTE_ROOT}/", "/runs/")
+    if not clean.startswith(allowed_roots):
+        raise JobError("trained model reference is outside Relay's checkpoint directories")
+    return clean
+
+
 def save_model(
     *,
     name: str,
@@ -1804,6 +2117,19 @@ def save_model(
         raise JobError("give the model a name")
     if len(name) > 60:
         raise JobError("model name must be 60 characters or fewer")
+    if any(ord(ch) < 32 for ch in name):
+        raise JobError("model name cannot contain control characters")
+    kind = (kind or "").strip().lower()
+    if kind not in _LEGACY_MODEL_KINDS:
+        raise JobError("unsupported saved-model kind")
+    _reject_secret_value(name, "model name")
+    ref = _validate_legacy_model_ref(ref, kind)
+    if pod_id is not None and not _POD_ID.fullmatch(pod_id):
+        raise JobError("invalid pod id")
+    if base is not None:
+        base = _validate_legacy_model_ref(base, "base" if base in {e["ref"] for e in BASE_CATALOG} else kind)
+    _reject_secret_value(metrics or {}, "model metrics")
+    _reject_secret_value(prompt or "", "model prompt template")
     entries = [e for e in saved_models() if e["name"] != name]
     entry = {
         "name": name,
@@ -1902,7 +2228,9 @@ def _model_ref(model_id: str, pod_id: str) -> str:
         try:
             info = _ssh_info(pod_id)
             present = _capture(
-                _ssh_args(info, f"test -f {shlex.quote(ref)}/model.safetensors && echo yes || echo no")
+                _ssh_args(
+                    info, f"test -f {shlex.quote(ref)}/model.safetensors && echo yes || echo no"
+                )
             ).strip()
         except Exception as e:  # noqa: BLE001 — an unreachable pod cannot serve either
             raise JobError(f"pod {pod_id} is unreachable ({type(e).__name__})") from e
@@ -1930,8 +2258,25 @@ def _tunnel_up(timeout: float = 3.0) -> bool:
     return _server_health(timeout) is not None
 
 
-def stop_inference_server() -> dict[str, Any]:
+def stop_inference_server(*, terminate_remote: bool = True) -> dict[str, Any]:
+    """Stop the selected deployment and make the stop durable across restarts.
+
+    Deployment switching passes ``terminate_remote=False`` so the previous
+    pod can remain a rollback candidate. An explicit user stop also terminates
+    the remote server process.
+    """
+
+    # A queued/provisioning serve job is part of the deployment being stopped.
+    # Without cancelling it, the worker can finish later and silently make the
+    # model live again. Internal candidate switching uses terminate_remote=False
+    # and must not cancel the serve job that is performing the switch.
+    cancelled_jobs = JOBS.cancel_kind("serve-model") if terminate_remote else []
+
+    global _serve_epoch
     with _serve_lock:
+        if terminate_remote:
+            _serve_epoch += 1
+        previous = dict(_serve)
         for key in ("tunnel", "remote"):
             proc = _serve.pop(key, None)
             if proc is not None:
@@ -1939,7 +2284,23 @@ def stop_inference_server() -> dict[str, Any]:
                     proc.terminate()
         was = _serve.pop("model_id", None)
         _serve.clear()
-    return {"stopped": was}
+    with contextlib.suppress(OSError):
+        SERVING_PATH.unlink(missing_ok=True)
+    _clear_stale_forward()
+
+    remote_stopped = False
+    if terminate_remote and previous.get("pod_id"):
+        try:
+            info = _ssh_info(str(previous["pod_id"]))
+            _capture(_ssh_args(info, 'pkill -f "serve[.]py" || true'), timeout=20)
+            remote_stopped = True
+        except Exception:  # noqa: BLE001 - local stop must remain durable
+            remote_stopped = False
+    return {
+        "stopped": was,
+        "remote_stopped": remote_stopped,
+        "cancelled_jobs": cancelled_jobs,
+    }
 
 
 SERVING_PATH = STATE_ROOT / "serving.json"
@@ -1949,6 +2310,32 @@ def _remember_serving(**fields: Any) -> None:
     with contextlib.suppress(OSError):
         SERVING_PATH.parent.mkdir(parents=True, exist_ok=True)
         SERVING_PATH.write_text(json.dumps(fields, indent=2))
+
+
+def _open_managed_forward(info: dict[str, Any]) -> subprocess.Popen[Any]:
+    """Open the backend-owned local forward to one already-running server."""
+
+    return subprocess.Popen(
+        [
+            "ssh",
+            "-i",
+            info["key"],
+            "-p",
+            str(info["port"]),
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "StrictHostKeyChecking=accept-new",
+            "-o",
+            "ExitOnForwardFailure=yes",
+            "-N",
+            "-L",
+            f"{SERVE_PORT}:127.0.0.1:{SERVE_PORT}",
+            f"root@{info['ip']}",
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
 
 
 def restore_serving() -> None:
@@ -1971,18 +2358,71 @@ def restore_serving() -> None:
     except (OSError, json.JSONDecodeError):
         return
     health = _server_health(timeout=2.0)
-    if not health or health.get("model") != note.get("model_ref"):
+    tunnel: subprocess.Popen[Any] | None = None
+    # The remote model process survives a dashboard restart, but its local SSH
+    # child may not. Rebuild only that transport, then apply the same immutable
+    # identity checks below; this does not reload weights or change the pod.
+    if not health and isinstance(note.get("pod_id"), str):
+        try:
+            info = _ssh_info(note["pod_id"])
+            _clear_stale_forward()
+            tunnel = _open_managed_forward(info)
+            for _attempt in range(20):
+                health = _server_health(timeout=1.0)
+                if health:
+                    break
+                if tunnel.poll() is not None:
+                    break
+                time.sleep(0.25)
+        except Exception:  # noqa: BLE001 - failed adoption must not block the dashboard
+            health = None
+    if (
+        not health
+        or health.get("model_id") != note.get("model_id")
+        or health.get("pod_id") != note.get("pod_id")
+    ):
+        if tunnel is not None:
+            with contextlib.suppress(Exception):
+                tunnel.terminate()
+        return
+    if note.get("model_revision") and health.get("model_revision") != note.get("model_revision"):
+        if tunnel is not None:
+            with contextlib.suppress(Exception):
+                tunnel.terminate()
+        return
+    if note.get("base_model") and health.get("base_model") != note.get("base_model"):
+        if tunnel is not None:
+            with contextlib.suppress(Exception):
+                tunnel.terminate()
+        return
+    if note.get("artifact_manifest_sha256") and health.get(
+        "artifact_manifest_sha256"
+    ) != note.get("artifact_manifest_sha256"):
+        if tunnel is not None:
+            with contextlib.suppress(Exception):
+                tunnel.terminate()
+        return
+    if note.get("prompt_template") and health.get(
+        "prompt_template_sha256"
+    ) != hashlib.sha256(note["prompt_template"].encode("utf-8")).hexdigest():
+        if tunnel is not None:
+            with contextlib.suppress(Exception):
+                tunnel.terminate()
         return
     with _serve_lock:
         # No `tunnel` handle: the process that owned it is gone. The forward
-        # itself outlives it, so requests work; stop_inference_server will kill
-        # the remote server and leave the orphaned ssh, which is the lesser of
-        # the two problems it used to have.
+        # itself may outlive it; an explicit stop clears both the durable note
+        # and any managed orphan before terminating the remote server.
         _serve.update(
+            tunnel=tunnel,
             model_id=note.get("model_id"),
             model_ref=note.get("model_ref"),
             pod_id=note.get("pod_id"),
             dtype=note.get("dtype", "bf16"),
+            model_revision=note.get("model_revision"),
+            base_model=note.get("base_model"),
+            artifact_manifest_sha256=note.get("artifact_manifest_sha256"),
+            prompt_template=note.get("prompt_template"),
         )
     print(f"adopted the model already serving on {note.get('pod_id')}", file=sys.stderr)
 
@@ -1999,15 +2439,41 @@ def serving() -> dict[str, Any]:
         # attributed to the wrong model. restore_serving() already refuses a
         # note its server contradicts — this reports the same disagreement
         # instead of printing the note over it.
-        live_ref = health.get("model")
-        stale = bool(health) and live_ref != _serve["model_ref"]
+        live_model_id = health.get("model_id")
+        expected_prompt_hash = hashlib.sha256(
+            str(_serve.get("prompt_template") or "").encode("utf-8")
+        ).hexdigest()
+        stale = bool(
+            health
+            and (
+                live_model_id != _serve["model_id"]
+                or health.get("pod_id") != _serve.get("pod_id")
+                or (
+                    _serve.get("model_revision")
+                    and health.get("model_revision") != _serve.get("model_revision")
+                )
+                or (
+                    _serve.get("base_model")
+                    and health.get("base_model") != _serve.get("base_model")
+                )
+                or (
+                    _serve.get("artifact_manifest_sha256")
+                    and health.get("artifact_manifest_sha256")
+                    != _serve.get("artifact_manifest_sha256")
+                )
+                or (
+                    _serve.get("prompt_template")
+                    and health.get("prompt_template_sha256") != expected_prompt_hash
+                )
+            )
+        )
         return {
             "running": bool(health),
             "model_id": _serve["model_id"],
             "model_ref": _serve["model_ref"],
             "pod_id": _serve["pod_id"],
             "dtype": _serve["dtype"],
-            "live_model_ref": live_ref,
+            "live_model_id": live_model_id,
             "stale": stale,
             # Read off the server, not remembered here. A page that cannot see
             # whether the document is loaded will happily run the "before" case
@@ -2015,6 +2481,13 @@ def serving() -> dict[str, Any]:
             # like the optimization already happened.
             "prefix_tokens": health.get("prefix_tokens", 0),
             "prefix_build_s": health.get("prefix_build_s"),
+            "model_revision": health.get("model_revision"),
+            "base_model": health.get("base_model"),
+            "artifact_manifest_sha256": health.get("artifact_manifest_sha256"),
+            "prompt_template": _serve.get("prompt_template"),
+            "prompt_template_sha256": health.get("prompt_template_sha256"),
+            "prefix_identity_sha256": health.get("prefix_identity_sha256"),
+            "cache_implementation": health.get("cache_implementation"),
         }
 
 
@@ -2045,7 +2518,19 @@ def _clear_stale_forward() -> None:
                 os.kill(int(pid), signal.SIGTERM)
 
 
-def start_inference_server(*, pod_id: str, model_id: str, dtype: str = "bf16") -> Job:
+def start_inference_server(
+    *,
+    pod_id: str,
+    model_id: str,
+    dtype: str = "bf16",
+    model_ref: str | None = None,
+    prompt_template: str | None = None,
+    artifact_source_pod_id: str | None = None,
+    local_artifact_path: str | None = None,
+    expected_artifact_manifest_sha256: str | None = None,
+    expected_model_revision: str | None = None,
+    expected_base_model: str | None = None,
+) -> Job:
     """Load one model on the pod and hold it there.
 
     Loading Qwen costs ten to twenty seconds. Paying that per message would
@@ -2053,15 +2538,61 @@ def start_inference_server(*, pod_id: str, model_id: str, dtype: str = "bf16") -
     so the model stays resident and the dashboard reaches it over an SSH local
     forward — the pod exposes port 22 and nothing else.
     """
-    ref = _model_ref(model_id, pod_id)
-    template = next(
+    # Workspace versions already carry an immutable artifact reference and do
+    # not belong in the legacy flat picker.  Legacy callers still resolve by
+    # name, while Relay can pass the exact base/adapter it registered.
+    ref = model_ref or _model_ref(model_id, pod_id)
+    template = prompt_template or next(
         (m.get("prompt") or TASK_PROMPT for m in available_models() if m["id"] == model_id),
         TASK_PROMPT,
     )
+    with _serve_lock:
+        requested_epoch = _serve_epoch
 
     def work(job: Job) -> dict[str, Any]:
-        stop_inference_server()
+        with _serve_lock:
+            if requested_epoch != _serve_epoch or job.cancel_requested:
+                raise JobError("deployment was stopped before provisioning began")
+        with _serve_lock:
+            previous = dict(_serve)
         pod, info = _pod(pod_id), _ssh_info(pod_id)
+        local_adapter = Path(local_artifact_path) if local_artifact_path else None
+        if (
+            ref.startswith("/")
+            and local_adapter
+            and (local_adapter / "adapter_model.safetensors").is_file()
+        ):
+            if not (local_adapter / "adapter_config.json").is_file():
+                raise JobError("durable adapter is missing adapter_config.json")
+            try:
+                verify_manifest(
+                    local_adapter,
+                    expected_bundle_sha256=expected_artifact_manifest_sha256,
+                    expected_base_model=expected_base_model,
+                    expected_base_model_revision=expected_model_revision,
+                )
+            except ArtifactIntegrityError as exc:
+                raise JobError(str(exc)) from exc
+            JOBS.update(job, "copying the durable adapter to the inference GPU", 5)
+            _push(job, info, local_adapter, ref)
+        elif artifact_source_pod_id and artifact_source_pod_id != pod_id and ref.startswith("/"):
+            # A PEFT adapter is small enough to move as an artifact. The base
+            # stays the immutable Hugging Face model named in adapter_config.
+            # This happens inside the approved deployment job, never from the
+            # browser or an LLM-authored command.
+            source_info = _ssh_info(artifact_source_pod_id)
+            with tempfile.TemporaryDirectory(prefix="relay-adapter-deploy-") as temporary:
+                local = Path(temporary) / "adapter"
+                JOBS.update(job, "copying the selected adapter to the inference GPU", 5)
+                _pull(job, source_info, ref, local)
+                if (
+                    not (local / "adapter_config.json").is_file()
+                    or not (local / "adapter_model.safetensors").is_file()
+                ):
+                    raise JobError("selected version is not a complete PEFT adapter")
+                _push(job, info, local, ref)
+        if ref.startswith("/") and not expected_artifact_manifest_sha256 and expected_base_model:
+            raise JobError("workspace adapter has no registered bundle manifest")
         JOBS.update(job, "syncing serve script", 10)
         _sync_project(job, info)
         JOBS.update(job, "preparing GPU environment", 25)
@@ -2077,6 +2608,14 @@ def start_inference_server(*, pod_id: str, model_id: str, dtype: str = "bf16") -
             _setup_pod(job, info, pod["vendor"])
 
         remote_ref = ref if ref.startswith("/") else ref
+        # On a different pod, leave the currently serving model and its local
+        # tunnel intact while every fallible copy/setup/load step runs. A failed
+        # candidate must not turn a healthy workspace into downtime. The same
+        # pod cannot hold both servers on one port, so that case still requires
+        # a short replacement window after preparation has succeeded.
+        same_pod_replacement = bool(previous.get("model_id") and previous.get("pod_id") == pod_id)
+        if same_pod_replacement:
+            stop_inference_server(terminate_remote=False)
         # The kill runs in its OWN ssh call, and that separation is the whole
         # point. Folded into the launch command, `pkill -f` matches against the
         # full command line — which contains "scripts/serve.py" in the launch
@@ -2102,39 +2641,101 @@ def start_inference_server(*, pod_id: str, model_id: str, dtype: str = "bf16") -
             f"setsid nohup {_serve_python(pod['vendor'])} scripts/serve.py "
             f"--model {shlex.quote(remote_ref)} "
             f"--dtype {shlex.quote(dtype)} --port {SERVE_PORT} "
-            f"--prompt-template {shlex.quote(template)} "
+            + (
+                f"--revision {shlex.quote(expected_model_revision)} "
+                if expected_model_revision
+                else ""
+            )
+            + (
+                f"--expected-base-model {shlex.quote(expected_base_model)} "
+                if expected_base_model
+                else ""
+            )
+            + (
+                "--artifact-manifest-sha256 "
+                f"{shlex.quote(expected_artifact_manifest_sha256)} "
+                if expected_artifact_manifest_sha256
+                else ""
+            )
+            + f"--deployment-model-id {shlex.quote(model_id)} "
+            + f"--deployment-pod-id {shlex.quote(pod_id)} "
+            + f"--prompt-template {shlex.quote(template)} "
             f"< /dev/null > /tmp/serve.log 2>&1 & echo started"
         )
         JOBS.update(job, f"loading {model_id} on the GPU", 45)
         _run(job, _ssh_args(info, cmd))
 
-        JOBS.update(job, "opening SSH forward", 65)
-        _clear_stale_forward()
-        tunnel = subprocess.Popen(
-            [
-                "ssh",
-                "-i",
-                info["key"],
-                "-p",
-                str(info["port"]),
-                "-o",
-                "BatchMode=yes",
-                "-o",
-                "StrictHostKeyChecking=accept-new",
-                "-o",
-                "ExitOnForwardFailure=yes",
-                "-N",
-                "-L",
-                f"{SERVE_PORT}:127.0.0.1:{SERVE_PORT}",
-                f"root@{info['ip']}",
-            ],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-
-        # The model load dominates; poll rather than guess a sleep.
-        JOBS.update(job, "waiting for the model to finish loading", 80)
+        # Verify the new remote process directly over its existing SSH control
+        # plane. The local port still points at the old deployment at this
+        # point, so polling it would validate the wrong model.
+        JOBS.update(job, "validating the candidate before switching traffic", 65)
+        remote_health: dict[str, Any] | None = None
         for _attempt in range(60):
+            if job.cancel_requested:
+                _run(
+                    job,
+                    _ssh_args(info, 'pkill -f "serve[.]py" || true'),
+                    allow_failure=True,
+                )
+                raise JobError("cancelled")
+            try:
+                raw = _capture(
+                    _ssh_args(
+                        info,
+                        f"curl -fsS --max-time 2 http://127.0.0.1:{SERVE_PORT}/health",
+                    ),
+                    timeout=10,
+                )
+                candidate = json.loads(raw)
+                revision_ok = not expected_model_revision or (
+                    candidate.get("model_revision") == expected_model_revision
+                )
+                identity_ok = (
+                    candidate.get("model_id") == model_id
+                    and candidate.get("pod_id") == pod_id
+                    and (
+                        not expected_base_model
+                        or candidate.get("base_model") == expected_base_model
+                    )
+                    and (
+                        not expected_artifact_manifest_sha256
+                        or candidate.get("artifact_manifest_sha256")
+                        == expected_artifact_manifest_sha256
+                    )
+                    and candidate.get("prompt_template_sha256")
+                    == hashlib.sha256(template.encode("utf-8")).hexdigest()
+                )
+                if identity_ok and revision_ok:
+                    remote_health = candidate
+                    break
+            except Exception:  # noqa: BLE001 - loading/unreachable is expected while polling
+                pass
+            time.sleep(2)
+        if remote_health is None:
+            tail = _capture(_ssh_args(info, "tail -20 /tmp/serve.log"), timeout=20)
+            raise JobError(f"model never became ready. serve.log:\n{tail}")
+
+        with _serve_lock:
+            stopped_during_provisioning = (
+                requested_epoch != _serve_epoch or job.cancel_requested
+            )
+        if stopped_during_provisioning:
+            with contextlib.suppress(Exception):
+                _capture(
+                    _ssh_args(info, 'pkill -f "serve[.]py" || true'),
+                    timeout=20,
+                )
+            raise JobError("deployment was stopped during provisioning")
+
+        if not same_pod_replacement:
+            stop_inference_server(terminate_remote=False)
+        JOBS.update(job, "switching the managed SSH forward", 82)
+        _clear_stale_forward()
+        tunnel = _open_managed_forward(info)
+
+        # The expensive load was already validated remotely. This short loop
+        # proves that the newly switched local proxy reaches that exact model.
+        for _attempt in range(15):
             if job.cancel_requested:
                 tunnel.terminate()
                 raise JobError("cancelled")
@@ -2145,36 +2746,156 @@ def start_inference_server(*, pod_id: str, model_id: str, dtype: str = "bf16") -
             # request went on reaching the previous pod's model. Ask who is
             # answering instead.
             health = _server_health(timeout=2.0)
-            if health and health.get("model") == remote_ref:
+            revision_ok = not expected_model_revision or (
+                health and health.get("model_revision") == expected_model_revision
+            )
+            identity_ok = bool(
+                health
+                and health.get("model_id") == model_id
+                and health.get("pod_id") == pod_id
+                and (
+                    not expected_base_model
+                    or health.get("base_model") == expected_base_model
+                )
+                and (
+                    not expected_artifact_manifest_sha256
+                    or health.get("artifact_manifest_sha256")
+                    == expected_artifact_manifest_sha256
+                )
+                and health.get("prompt_template_sha256")
+                == hashlib.sha256(template.encode("utf-8")).hexdigest()
+            )
+            if identity_ok and revision_ok:
+                break
+            if tunnel.poll() is not None:
                 break
             time.sleep(2)
         else:
             tunnel.terminate()
             tail = _capture(_ssh_args(info, "tail -20 /tmp/serve.log"), timeout=20)
-            raise JobError(f"model never became ready. serve.log:\n{tail}")
+            raise JobError(f"candidate loaded but its managed tunnel failed. serve.log:\n{tail}")
+        health = _server_health(timeout=2.0)
+        if (
+            not health
+            or health.get("model_id") != model_id
+            or health.get("pod_id") != pod_id
+            or (expected_model_revision and health.get("model_revision") != expected_model_revision)
+            or (expected_base_model and health.get("base_model") != expected_base_model)
+            or (
+                expected_artifact_manifest_sha256
+                and health.get("artifact_manifest_sha256")
+                != expected_artifact_manifest_sha256
+            )
+            or health.get("prompt_template_sha256")
+            != hashlib.sha256(template.encode("utf-8")).hexdigest()
+        ):
+            tunnel.terminate()
+            raise JobError("candidate loaded but the managed tunnel reached a different model")
 
         with _serve_lock:
+            if requested_epoch != _serve_epoch or job.cancel_requested:
+                tunnel.terminate()
+                raise JobError("deployment was stopped before traffic publication")
             _serve.update(
                 tunnel=tunnel,
                 model_id=model_id,
                 model_ref=ref,
                 pod_id=pod_id,
                 dtype=dtype,
+                model_revision=health.get("model_revision"),
+                base_model=health.get("base_model"),
+                artifact_manifest_sha256=health.get("artifact_manifest_sha256"),
+                prompt_template=template,
             )
-        _remember_serving(model_id=model_id, model_ref=ref, pod_id=pod_id, dtype=dtype)
+            # Publish the in-memory and durable serving identities under one
+            # epoch lock.  Otherwise an explicit stop could clear the state
+            # between these two writes and the finishing worker would recreate
+            # serving.json, allowing a later restart to re-adopt a deployment
+            # the user had already stopped.
+            _remember_serving(
+                model_id=model_id,
+                model_ref=ref,
+                pod_id=pod_id,
+                dtype=dtype,
+                model_revision=health.get("model_revision"),
+                base_model=health.get("base_model"),
+                artifact_manifest_sha256=health.get("artifact_manifest_sha256"),
+                prompt_template=template,
+            )
         return {
             "pod": pod,
             "model_id": model_id,
             "model_ref": ref,
             "dtype": dtype,
             "port": SERVE_PORT,
+            "model_revision": health.get("model_revision"),
+            "base_model": health.get("base_model"),
+            "artifact_manifest_sha256": health.get("artifact_manifest_sha256"),
         }
 
-    return JOBS.create("serve-model", {"pod_id": pod_id, "model_id": model_id}, work)
+    return JOBS.create(
+        "serve-model",
+        {
+            "pod_id": pod_id,
+            "model_id": model_id,
+            "workspace_version": model_ref is not None,
+            "artifact_copy": bool(artifact_source_pod_id and artifact_source_pod_id != pod_id),
+            "artifact_source_pod_id": artifact_source_pod_id,
+            "durable_artifact": bool(local_artifact_path),
+            "revision_pinned": bool(expected_model_revision),
+            "artifact_manifest_pinned": bool(expected_artifact_manifest_sha256),
+        },
+        work,
+    )
+
+
+def _require_generation_identity(
+    identity: dict[str, Any],
+    *,
+    expected_model_id: str,
+    expected_pod_id: str,
+    expected_model_revision: str,
+    expected_base_model: str,
+    expected_artifact_manifest_sha256: str | None,
+    expected_prompt_template: str,
+    expected_prefix_identity_sha256: str | None = None,
+) -> None:
+    """Fail closed unless a response came from the exact selected deployment."""
+
+    expected = {
+        "model_id": expected_model_id,
+        "pod_id": expected_pod_id,
+        "model_revision": expected_model_revision,
+        "base_model": expected_base_model,
+        "artifact_manifest_sha256": expected_artifact_manifest_sha256,
+        "prompt_template_sha256": hashlib.sha256(
+            expected_prompt_template.encode("utf-8")
+        ).hexdigest(),
+    }
+    if any(identity.get(key) != value for key, value in expected.items()):
+        raise JobError("the chat connection reached a different deployment identity")
+    if (
+        expected_prefix_identity_sha256 is not None
+        and identity.get("prefix_identity_sha256") != expected_prefix_identity_sha256
+    ):
+        raise JobError("the selected shared-context cache is not resident")
 
 
 def generate_stream(
-    *, sentence: str, max_new_tokens: int = 64, greedy: bool = True, no_cache: bool = False
+    *,
+    sentence: str,
+    max_new_tokens: int = 64,
+    greedy: bool = True,
+    no_cache: bool = False,
+    fixed_output_tokens: bool = False,
+    ignore_prefix: bool = False,
+    expected_model_id: str | None = None,
+    expected_pod_id: str | None = None,
+    expected_model_revision: str | None = None,
+    expected_base_model: str | None = None,
+    expected_artifact_manifest_sha256: str | None = None,
+    expected_prompt_template: str | None = None,
+    expected_prefix_identity_sha256: str | None = None,
 ):
     """Proxy the pod's SSE stream through, one frame at a time.
 
@@ -2191,6 +2912,28 @@ def generate_stream(
         state = dict(_serve)
     if not state.get("model_id"):
         raise JobError("no model is loaded — start one from the model picker first")
+    expected_values = (
+        expected_model_id,
+        expected_pod_id,
+        expected_model_revision,
+        expected_base_model,
+        expected_prompt_template,
+    )
+    identity_requested = any(value is not None for value in expected_values) or (
+        expected_prefix_identity_sha256 is not None
+    )
+    identity_complete = all(isinstance(value, str) and bool(value) for value in expected_values)
+    if identity_requested and not identity_complete:
+        raise JobError("complete expected deployment identity is required")
+    if identity_complete and (
+        state.get("model_id") != expected_model_id
+        or state.get("pod_id") != expected_pod_id
+        or state.get("model_revision") != expected_model_revision
+        or state.get("base_model") != expected_base_model
+        or state.get("artifact_manifest_sha256") != expected_artifact_manifest_sha256
+        or state.get("prompt_template") != expected_prompt_template
+    ):
+        raise JobError("the selected workspace deployment is no longer active")
 
     req = urllib.request.Request(
         f"http://127.0.0.1:{SERVE_PORT}/generate/stream",
@@ -2200,6 +2943,8 @@ def generate_stream(
                 "max_new_tokens": max_new_tokens,
                 "greedy": greedy,
                 "no_cache": no_cache,
+                "fixed_output_tokens": fixed_output_tokens,
+                "ignore_prefix": ignore_prefix,
             }
         ).encode(),
         headers={"Content-Type": "application/json"},
@@ -2208,15 +2953,179 @@ def generate_stream(
         # Matches the blocking path: a cache-bypassed long-context request
         # re-runs the full prefill, which outlasts the old 180s budget.
         with urllib.request.urlopen(req, timeout=300) as r:
+            identity_seen = False
             for raw in r:
                 line = raw.decode("utf-8", "replace").strip()
                 if line.startswith("data: "):
-                    yield line[6:]
+                    try:
+                        frame = json.loads(line[6:])
+                    except (json.JSONDecodeError, UnicodeError):
+                        frame = {
+                            "done": True,
+                            "error": "the model server returned an invalid stream frame",
+                        }
+                    if frame.get("identity") is True:
+                        if identity_complete:
+                            _require_generation_identity(
+                                frame,
+                                expected_model_id=expected_model_id,
+                                expected_pod_id=expected_pod_id,
+                                expected_model_revision=expected_model_revision,
+                                expected_base_model=expected_base_model,
+                                expected_artifact_manifest_sha256=(
+                                    expected_artifact_manifest_sha256
+                                ),
+                                expected_prompt_template=expected_prompt_template,
+                                expected_prefix_identity_sha256=(
+                                    expected_prefix_identity_sha256
+                                ),
+                            )
+                        identity_seen = True
+                        continue
+                    if not identity_seen:
+                        raise JobError("model server omitted its deployment identity")
+                    if frame.get("done") and identity_complete:
+                        _require_generation_identity(
+                            frame,
+                            expected_model_id=expected_model_id,
+                            expected_pod_id=expected_pod_id,
+                            expected_model_revision=expected_model_revision,
+                            expected_base_model=expected_base_model,
+                            expected_artifact_manifest_sha256=(
+                                expected_artifact_manifest_sha256
+                            ),
+                            expected_prompt_template=expected_prompt_template,
+                            expected_prefix_identity_sha256=expected_prefix_identity_sha256,
+                        )
+                    yield json.dumps(public_generation_payload(frame), ensure_ascii=False)
+            if not identity_seen:
+                raise JobError("model server ended before reporting deployment identity")
+    except JobError as e:
+        yield json.dumps({"done": True, "error": public_error_message(e)})
+    except (urllib.error.URLError, OSError, TimeoutError):
+        yield json.dumps(
+            {
+                "done": True,
+                "error": "the model server is unreachable",
+            }
+        )
+
+
+def set_runtime(*, cache_implementation: str | None) -> dict[str, Any]:
+    """Change how the resident model allocates its KV cache. No reload."""
+    import urllib.error
+    import urllib.request
+
+    with _serve_lock:
+        state = dict(_serve)
+    if not state.get("model_id"):
+        raise JobError("no model is loaded — start one from the model picker first")
+
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{SERVE_PORT}/runtime",
+        data=json.dumps({"cache_implementation": cache_implementation}).encode(),
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        raise JobError(f"runtime change refused: {e.read().decode()[:200]}") from e
     except (urllib.error.URLError, OSError, TimeoutError) as e:
-        yield json.dumps({"done": True, "error": f"the model server is unreachable ({e})"})
+        raise JobError(f"the model server is unreachable ({e})") from e
 
 
-def set_prefix(*, prefix: str) -> dict[str, Any]:
+def _latency_probe(prompts: list[str], *, max_new: int = 48, rounds: int = 3) -> dict[str, Any]:
+    """Batch-1 latency through the deployment a person actually talks to.
+
+    Not a benchmark script on the pod: the number has to come from the same
+    path the chat box uses, or it is a measurement of something else that
+    happens to run on the same GPU.
+    """
+    import statistics
+
+    samples, outputs = [], []
+    for _ in range(rounds):
+        for prompt in prompts:
+            started = time.perf_counter()
+            result = generate(sentence=prompt, max_new_tokens=max_new, greedy=True)
+            samples.append(time.perf_counter() - started)
+            outputs.append(result.get("raw_output", ""))
+    ordered = sorted(samples)
+    return {
+        "median_s": statistics.median(samples),
+        # p95 is the number a person notices. A change that improves the
+        # median and ruins the tail has made the service worse.
+        "p95_s": ordered[max(0, int(len(ordered) * 0.95) - 1)],
+        "requests": len(samples),
+        "outputs": outputs,
+    }
+
+
+def start_runtime_optimization(*, pod_id: str, task: str = "extraction") -> Job:
+    """Measure the live deployment, apply a candidate, measure again, keep or revert.
+
+    This is the step that was missing. The other inference agent measures
+    batch-16 throughput on the pod and writes a report nobody reads back —
+    serve.py says outright that reporting that as felt latency would be a lie.
+    This one changes the deployment a person is talking to, and answers the
+    question they actually asked: does the reply come back sooner.
+    """
+    spec = task_for(task)
+
+    def work(job: Job) -> dict[str, Any]:
+        heldout = ROOT / spec.heldout_data
+        if not heldout.exists():
+            raise JobError(f"{spec.heldout_data} is missing; generate data first")
+        rows = [json.loads(line) for line in heldout.read_text().splitlines() if line.strip()][:8]
+        prompts = [r.get("question") or r.get("sentence") for r in rows]
+
+        JOBS.update(job, "measuring the deployment as it is", 10)
+        before = set_runtime(cache_implementation=None)
+        baseline = _latency_probe(prompts)
+
+        JOBS.update(job, "applying static KV cache", 45)
+        set_runtime(cache_implementation="static")
+        candidate = _latency_probe(prompts)
+
+        JOBS.update(job, "checking the answers did not change", 75)
+        same = baseline["outputs"] == candidate["outputs"]
+        faster = candidate["median_s"] < baseline["median_s"]
+        tail_ok = candidate["p95_s"] <= baseline["p95_s"]
+        accepted = same and faster and tail_ok
+
+        if not accepted:
+            # Back to exactly what was running before, not to a default that
+            # happens to look like it.
+            set_runtime(cache_implementation=before.get("previous"))
+
+        why = []
+        if not same:
+            why.append("the answers changed")
+        if not faster:
+            why.append("the median did not improve")
+        if not tail_ok:
+            why.append("p95 regressed")
+
+        return {
+            "applied": "static_kv_cache" if accepted else None,
+            "accepted": accepted,
+            "baseline": {k: v for k, v in baseline.items() if k != "outputs"},
+            "optimized": {k: v for k, v in candidate.items() if k != "outputs"},
+            "speedup": baseline["median_s"] / candidate["median_s"],
+            "same_answers": same,
+            "detail": (
+                "static KV cache applied to the live deployment"
+                if accepted
+                else "reverted: " + ", ".join(why)
+            ),
+            "task": spec.name,
+        }
+
+    return JOBS.create("optimize-serving-runtime", {"pod_id": pod_id, "task": task}, work)
+
+
+def set_prefix(*, prefix: str, suffix: str = "") -> dict[str, Any]:
     """Install (or clear) the cached static head of the prompt.
 
     Building the cache runs one full prefill, so the call takes as long as a
@@ -2231,7 +3140,7 @@ def set_prefix(*, prefix: str) -> dict[str, Any]:
     if not state.get("model_id"):
         raise JobError("no model is loaded — start one from the model picker first")
 
-    body = json.dumps({"prefix": prefix}).encode()
+    body = json.dumps({"prefix": prefix, "suffix": suffix}).encode()
     req = urllib.request.Request(
         f"http://127.0.0.1:{SERVE_PORT}/prefix",
         data=body,
@@ -2249,7 +3158,20 @@ def set_prefix(*, prefix: str) -> dict[str, Any]:
 
 
 def generate(
-    *, sentence: str, max_new_tokens: int = 64, greedy: bool = True, no_cache: bool = False
+    *,
+    sentence: str,
+    max_new_tokens: int = 64,
+    greedy: bool = True,
+    no_cache: bool = False,
+    fixed_output_tokens: bool = False,
+    ignore_prefix: bool = False,
+    expected_model_id: str | None = None,
+    expected_pod_id: str | None = None,
+    expected_model_revision: str | None = None,
+    expected_base_model: str | None = None,
+    expected_artifact_manifest_sha256: str | None = None,
+    expected_prompt_template: str | None = None,
+    expected_prefix_identity_sha256: str | None = None,
 ) -> dict[str, Any]:
     """One interactive request against the resident model.
 
@@ -2265,6 +3187,28 @@ def generate(
         state = dict(_serve)
     if not state.get("model_id"):
         raise JobError("no model is loaded — start one from the model picker first")
+    expected_values = (
+        expected_model_id,
+        expected_pod_id,
+        expected_model_revision,
+        expected_base_model,
+        expected_prompt_template,
+    )
+    identity_requested = any(value is not None for value in expected_values) or (
+        expected_prefix_identity_sha256 is not None
+    )
+    identity_complete = all(isinstance(value, str) and bool(value) for value in expected_values)
+    if identity_requested and not identity_complete:
+        raise JobError("complete expected deployment identity is required")
+    if identity_complete and (
+        state.get("model_id") != expected_model_id
+        or state.get("pod_id") != expected_pod_id
+        or state.get("model_revision") != expected_model_revision
+        or state.get("base_model") != expected_base_model
+        or state.get("artifact_manifest_sha256") != expected_artifact_manifest_sha256
+        or state.get("prompt_template") != expected_prompt_template
+    ):
+        raise JobError("the selected workspace deployment is no longer active")
 
     body = json.dumps(
         {
@@ -2272,6 +3216,8 @@ def generate(
             "max_new_tokens": max_new_tokens,
             "greedy": greedy,
             "no_cache": no_cache,
+            "fixed_output_tokens": fixed_output_tokens,
+            "ignore_prefix": ignore_prefix,
         }
     ).encode()
     req = urllib.request.Request(
@@ -2289,6 +3235,18 @@ def generate(
         raise JobError(f"generate failed: {e.read().decode()[:300]}") from e
     except (urllib.error.URLError, OSError, TimeoutError) as e:
         raise JobError(f"the model server is unreachable ({e}); restart it") from e
+
+    if identity_complete:
+        _require_generation_identity(
+            out,
+            expected_model_id=expected_model_id,
+            expected_pod_id=expected_pod_id,
+            expected_model_revision=expected_model_revision,
+            expected_base_model=expected_base_model,
+            expected_artifact_manifest_sha256=expected_artifact_manifest_sha256,
+            expected_prompt_template=expected_prompt_template,
+            expected_prefix_identity_sha256=expected_prefix_identity_sha256,
+        )
 
     # Server-side generation time vs what the round trip cost. Showing only the
     # first would hide the SSH hop; showing only the second would blame the GPU
