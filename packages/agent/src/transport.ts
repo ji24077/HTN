@@ -11,7 +11,7 @@ import { fallbackLookup, dnsFallbackEnabled, installDnsFallback, directDial } fr
 import { applyUpdate, restartIntoNewVersion } from './update.ts'
 import { AGENT_VERSION, isCompiledBinary } from './paths.ts'
 import { isContainer } from './runtime.ts'
-import { allowedWorkloads, decide, liveConditions } from './limits.ts'
+import { allowedWorkloads, decide, liveConditions, standingReason } from './limits.ts'
 import { freeRamMb, probe } from './capability.ts'
 import { detectAccelerator } from './accelerator.ts'
 import { isPaused, loadConfig, saveConfig, type AgentConfig } from './config.ts'
@@ -234,6 +234,7 @@ export function connect(
     let heartbeat: NodeJS.Timeout | undefined
     let heartbeatMs = DEFAULT_HEARTBEAT_MS
     let pauseWas = isPaused()
+    let admissionWas: boolean | undefined
     // Last time we heard ANYTHING from the server. A link can fail in one direction
     // only — our writes disappear into it while the socket still looks open — so the
     // absence of inbound traffic is the only reliable signal we have.
@@ -252,7 +253,8 @@ export function connect(
     }
 
     const consent = () => ({
-      paused: isPaused(),
+      // Keep the connection alive while owner policy blocks new assignments.
+      paused: isPaused() || !standingReason(cfg.limits, liveConditions('', availableAdapters())).ok,
       allowCompute: cfg.allowCompute,
       allowBrowser: cfg.allowBrowser,
       maxConcurrency: cfg.maxConcurrency,
@@ -278,6 +280,10 @@ export function connect(
         // Carried into the first log line after waking, so the reconnect explains itself.
         ...(sleptForMs > 0 ? { afterSuspensionMs: Math.round(sleptForMs) } : {}),
       })
+      const available = availableAdapters()
+      const allowed = allowedWorkloads(cfg.limits, available)
+      const admission = consent()
+      admissionWas = admission.paused
       send('hello', {
         /**
          * Advertise what this machine is *willing* to run, not merely what it can.
@@ -288,11 +294,13 @@ export function connect(
          * machine look like it was failing work it had simply been told not to do.
          */
         capability: probe(
-          allowedWorkloads(cfg.limits, availableAdapters()),
+          // Protocol v1 requires nonempty kinds. With none enabled, advertise
+          // physical capability together with paused consent; never run it.
+          allowed.length > 0 ? allowed : available,
           cfg.installedRelease,
           cfg.runtimePreference ?? 'auto',
         ),
-        consent: consent(),
+        consent: admission,
         ...(sleptForMs > 0 ? { afterSuspensionMs: Math.round(sleptForMs) } : {}),
       })
 
@@ -423,10 +431,16 @@ export function connect(
         const paused = isPaused()
         if (paused !== pauseWas) {
           pauseWas = paused
-          send('consent.update', consent())
           if (paused) {
             for (const [taskId, r] of running) { r.controller.abort(); clearInterval(r.renew); running.delete(taskId) }
           }
+        }
+        // Admission limits stop new work, not a job already accepted. Recheck on
+        // every heartbeat so schedules, pressure and rolling budgets resume.
+        const admission = consent()
+        if (admission.paused !== admissionWas) {
+          admissionWas = admission.paused
+          send('consent.update', admission)
         }
         // The container's free memory, not the host's — the same correction probe() makes.
         send('heartbeat', { freeRamMb: freeRamMb(), running: running.size })
@@ -563,7 +577,10 @@ export function connect(
           // previously indistinguishable from the network being quiet.
           lastDeclined = { at: Date.now(), adapter: offer.adapter, reason: verdict.reason, detail: verdict.detail }
           hostLog.info('task.declined', { taskId: offer.taskId, adapter: offer.adapter, reason: verdict.reason })
-          send('task.decline', { taskId: offer.taskId, leaseId: offer.leaseId, reason: 'not-eligible' })
+          const admission = consent()
+          admissionWas = admission.paused
+          send('consent.update', admission)
+          send('task.decline', { taskId: offer.taskId, leaseId: offer.leaseId, reason: verdict.reason })
           notify()
           return
         }

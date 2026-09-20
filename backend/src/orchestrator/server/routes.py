@@ -157,7 +157,7 @@ async def execution_events(
     request: Request,
     after: int = Query(default=0, ge=0, le=2**63 - 1),
     worker_id: Identifier | None = None,
-    attempt: int | None = Query(default=None, ge=0, le=10),
+    attempt: int | None = Query(default=None, ge=0, le=2_147_483_647),
 ):
     rows = await request.app.state.store.execution_events(task_id, after, worker_id, attempt)
     return {

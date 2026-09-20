@@ -31,6 +31,67 @@ from orchestrator.shared.protocol import Capabilities, TaskSpec, task_ref
     os.getenv("RUN_DATABASE_TESTS") == "1", "Set RUN_DATABASE_TESTS=1; needs demo extra"
 )
 class PrivateDatabaseTests(unittest.IsolatedAsyncioTestCase):
+    async def test_declined_offers_preserve_durable_retry_budget_and_fence_old_generations(self):
+        import pgserver
+        from orchestrator.supervisor.models import Action
+        from orchestrator.supervisor.store import SupervisorStore
+
+        with tempfile.TemporaryDirectory(prefix="provider-deferral-db-") as directory:
+            database = pgserver.get_server(Path(directory) / "postgres", cleanup_mode="stop")
+            store = await Store.open(database.get_uri(), schema="provider_deferral_test")
+            try:
+                caps = Capabilities(runtime="cpu", vram_mib=0, kinds=["echo"])
+                await store.register("worker-a", "session-a", caps)
+                await store.register("worker-b", "session-b", caps)
+                spec = TaskSpec(
+                    id="deferred-task", job_id="job", kind="echo", payload={},
+                    requirements={"runtime": "cpu", "vram_mib": 0},
+                    max_attempts=3, timeout_seconds=60,
+                )
+                await store.submit([spec])
+                for generation in range(1, 13):
+                    offered = await store.claim("worker-a", "session-a")
+                    self.assertEqual(offered.generation, generation)
+                    await store.decline("worker-a", "session-a", task_ref(offered))
+                    self.assertEqual((await store.task(spec.id)).state, "queued")
+                    with self.assertRaises(StaleAssignment):
+                        await store.ack("worker-a", "session-a", task_ref(offered))
+                eligible = await SupervisorStore(store).eligible_workers(spec.job_id)
+                self.assertEqual({worker["id"] for worker in eligible}, {"worker-a", "worker-b"})
+                # A second worker can claim immediately; no task-global sleep.
+                accepted = await store.claim("worker-b", "session-b")
+                self.assertEqual(accepted.generation, 13)
+                await store.ack("worker-b", "session-b", task_ref(accepted))
+                with self.assertRaises(StaleAssignment):
+                    await store.decline("worker-b", "session-b", task_ref(accepted))
+                await store.finish("worker-b", "session-b", task_ref(accepted), None, "error", True)
+                self.assertEqual((await store.task(spec.id)).state, "queued")
+                # Retry exemptions survive a process/store restart.
+                await store.close()
+                store = await Store.open(database.get_uri(), schema="provider_deferral_test")
+                second = await store.claim("worker-b", "session-b")
+                self.assertEqual(second.generation, 14)
+                await store.ack("worker-b", "session-b", task_ref(second))
+                with self.assertRaises(StaleAssignment):
+                    await store.finish("worker-b", "session-b", task_ref(accepted), {"stale": True})
+                await store.finish("worker-b", "session-b", task_ref(second), None, "error", False)
+                await SupervisorStore(store).action(spec.job_id, Action(
+                    action_id=uuid4(), operation="retry_task", task_id=spec.id,
+                    expected_generation=14, reason="Retry within the original execution limit",
+                ))
+                final = await store.claim("worker-b", "session-b")
+                self.assertEqual(final.generation, 15)
+                await store.ack("worker-b", "session-b", task_ref(final))
+                await store.finish("worker-b", "session-b", task_ref(final), None, "error", True)
+                self.assertEqual((await store.task(spec.id)).state, "failed")
+                self.assertEqual(await store.pool.fetchval(
+                    "SELECT count(*) FROM events WHERE entity_id=$1 AND details->>'reason'='offer_declined'",
+                    spec.id,
+                ), 12)
+            finally:
+                await store.close()
+                database.cleanup()
+
     async def test_execution_replay_is_owned_deduplicated_and_cannot_change_new_attempt(self):
         import pgserver
 

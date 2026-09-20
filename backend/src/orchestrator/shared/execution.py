@@ -54,7 +54,8 @@ class ExecutionEvent(Model):
 
 class ExecutionBatch(Model):
     taskId: Identifier
-    attempt: int = Field(ge=1, le=10, strict=True)
+    # Assignment generations include declined offers, which do not spend retries.
+    attempt: int = Field(ge=1, le=2_147_483_647, strict=True)
     events: list[ExecutionEvent] = Field(min_length=1, max_length=8)
 
 

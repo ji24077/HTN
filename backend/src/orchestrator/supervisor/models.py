@@ -51,7 +51,7 @@ class LogContext(Model):
 
 class LogSearch(Model):
     task_id: Identifier | None = None
-    attempt: int | None = Field(default=None, ge=0, le=10)
+    attempt: int | None = Field(default=None, ge=0, le=2_147_483_647)
     worker_id: Identifier | None = None
     reservation_id: Annotated[str, Field(max_length=160)] | None = None
     severity: Literal["trace", "debug", "info", "warning", "error", "fatal"] | None = None
@@ -87,7 +87,7 @@ class Action(Model):
     ]
     reason: Text
     task_id: Identifier | None = None
-    expected_generation: int | None = Field(default=None, ge=0, le=10)
+    expected_generation: int | None = Field(default=None, ge=0, le=2_147_483_647)
     worker_id: Identifier | None = None
 
     @model_validator(mode="after")

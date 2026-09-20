@@ -386,6 +386,8 @@ class Connection:
         self.registered = False
         self.paused = True
         self.active: Assignment | None = None
+        self.offer_after = 0.0
+        self.decline_delay = 30.0
 
     async def cancel(self, task_id: str, reason: str = "assignment no longer active"):
         await send(self.socket, "task.cancel", {"taskId": task_id, "reason": reason})
@@ -450,7 +452,7 @@ class Connection:
             if not valid:
                 self.active = None
                 await self.cancel(ref.task_id)
-        if self.active is None and not self.paused:
+        if self.active is None and not self.paused and time.monotonic() >= self.offer_after:
             task = await self.store.claim(self.worker_id, self.session)
             if task:
                 self.active = Assignment(
@@ -598,6 +600,16 @@ class Connection:
                 if kind == "task.accept":
                     await self.store.ack(self.worker_id, self.session, active.ref)
                     active.accepted = True
+                    self.decline_delay = 30.0
+                    self.offer_after = 0.0
+                elif kind == "task.decline" and not active.accepted:
+                    # Refusing an offer is not a failed execution. Preserve its
+                    # generation for fencing, release it for another worker, and
+                    # avoid immediately offering it back to this same device.
+                    await self.store.decline(self.worker_id, self.session, active.ref)
+                    self.offer_after = time.monotonic() + self.decline_delay
+                    self.decline_delay = min(300.0, self.decline_delay * 2)
+                    self.active = None
                 elif kind == "lease.renew":
                     if not active.accepted:
                         raise StaleAssignment("task not accepted")

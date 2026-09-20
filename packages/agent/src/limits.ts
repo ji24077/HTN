@@ -30,7 +30,8 @@ export type BudgetWindow = 'hour' | 'day'
 
 export type Limits = {
   /**
-   * Adapter ids this machine will accept. Absent means "whatever it can run".
+   * Adapter ids this machine will accept. Absent means "whatever it can run";
+   * an explicit empty list means no work.
    *
    * This one is not merely enforced here: it is also what the agent advertises at
    * handshake, and the scheduler filters offers on it (`spec->>'kind'=ANY(caps.kinds)`).
@@ -99,16 +100,16 @@ export function minutesOfDay(clock: string): number | null {
  * zero-width window is never what someone meant and "always" is the safe reading of it.
  */
 export function withinSchedule(schedule: NonNullable<Limits['schedule']>, now: Date): boolean {
-  const days = schedule.days
-  if (days && days.length > 0 && !days.includes(now.getDay() as Weekday)) return false
-
   const from = minutesOfDay(schedule.from)
   const to = minutesOfDay(schedule.to)
-  // An unreadable window must not silently stop the machine working.
-  if (from === null || to === null) return true
-  if (from === to) return true
-
+  // A corrupt persisted restriction must never silently grant permission.
+  if (from === null || to === null) return false
   const t = now.getHours() * 60 + now.getMinutes()
+  // After midnight, an overnight window belongs to the day it started.
+  // Friday 19:00–07:00 therefore includes Saturday morning, not Monday morning.
+  const startDay = (now.getDay() + (from > to && t < to ? 6 : 0)) % 7 as Weekday
+  if (schedule.days && !schedule.days.includes(startDay)) return false
+  if (from === to) return true
   return from < to ? t >= from && t < to : t >= from || t < to
 }
 
@@ -116,16 +117,7 @@ export function withinSchedule(schedule: NonNullable<Limits['schedule']>, now: D
 export function allowedWorkloads(limits: Limits | undefined, available: string[]): string[] {
   const chosen = limits?.workloads
   if (!chosen) return available
-  const allowed = available.filter(a => chosen.includes(a))
-  /**
-   * Never advertise an empty set.
-   *
-   * `kinds` has `min_length=1` on the server, so a handshake with none is rejected
-   * outright and the machine cannot connect at all — it would look like a broken agent
-   * rather than like a machine that has been asked to run nothing. Turning everything off
-   * is what Pause is for, and it says so in the window.
-   */
-  return allowed.length > 0 ? allowed : available
+  return available.filter(a => chosen.includes(a))
 }
 
 const plural = (n: number, one: string): string => `${n} ${one}${n === 1 ? '' : 's'}`
@@ -198,7 +190,11 @@ export function decide(limits: Limits | undefined, c: Conditions): Decision {
  * rules that do not depend on one.
  */
 export function standingReason(limits: Limits | undefined, c: Omit<Conditions, 'adapter'>): Decision {
-  return decide(limits, { ...c, adapter: '\u0000none' } as Conditions & { adapter: string })
+  const allowed = allowedWorkloads(limits, c.available)
+  if (allowed.length === 0) {
+    return { ok: false, reason: 'workload', detail: 'no enabled workloads are available on this machine' }
+  }
+  return decide(limits, { ...c, adapter: allowed[0]! })
 }
 
 // --------------------------------------------------------- reading the real world
