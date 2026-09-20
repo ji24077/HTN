@@ -12,6 +12,7 @@ import type { Task, TaskSpec } from "./api/types";
 import { ActivityFeed } from "./components/ActivityFeed";
 import { ChatPanel } from "./components/ChatPanel";
 import { DeviceInvite } from "./components/DeviceInvite";
+import { ExperimentPanel } from "./components/ExperimentPanel";
 import { GpuPanel } from "./components/GpuPanel";
 import { Login } from "./components/Login";
 import { SimulationComposer } from "./components/SimulationComposer";
@@ -118,7 +119,7 @@ function FleetApp({
   const { snapshot, status, updatedAt } = useFleet();
   const [selected, setSelected] = useState("");
   const [view, setView] = useState<
-    "Jobs" | "Workers" | "GPUs" | "Activity" | "Assistant"
+    "Experiment" | "Jobs" | "Workers" | "GPUs" | "Activity" | "Assistant"
   >("Jobs");
   const [composeOpen, setComposeOpen] = useState(false);
   const [composeMode, setComposeMode] = useState("upload");
@@ -228,6 +229,8 @@ function FleetApp({
   ];
   const subtitles = {
     Jobs: "Track progress, investigate failures, and review results.",
+    Experiment:
+      "Train a rule into a model, watch it change, then make it cheaper to serve.",
     Workers: "Manage the machines that run your jobs.",
     GPUs: "Rented GPUs, their training runs, and the model resident on them.",
     Activity: "A live record of assignments, retries, and fleet changes.",
@@ -252,6 +255,7 @@ function FleetApp({
         <nav className="main-nav" aria-label="Main navigation">
           {(
             [
+              ["Experiment", "assistant"],
               ["Jobs", "jobs"],
               ["Workers", "workers"],
               ["GPUs", "workers"],
@@ -417,6 +421,9 @@ function FleetApp({
               }}
             />
             <DeviceInvite />
+          </div>
+          <div hidden={view !== "Experiment"}>
+            <ExperimentPanel active={view === "Experiment"} />
           </div>
           <div hidden={view !== "GPUs"}>
             {/* Mounted like its neighbours, but told whether it is the visible

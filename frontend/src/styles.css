@@ -2143,3 +2143,63 @@ details[open] > summary {
 .simulation-progress .question-callout button {
   margin-top: 10px;
 }
+
+.exp-steps {
+  list-style: none;
+  margin: 18px 0;
+  padding: 0;
+}
+.exp-step {
+  padding: 9px 0;
+  border-bottom: 1px solid #eef1f3;
+  font-size: 13px;
+  opacity: 0.45;
+}
+.exp-step.done {
+  opacity: 1;
+}
+.exp-stage {
+  color: var(--muted);
+}
+.exp-detail {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 3px 0 0 14px;
+  line-height: 1.55;
+}
+.exp-source {
+  font-size: 10.5px;
+  color: var(--muted);
+  opacity: 0.7;
+  padding: 3px 0 0 14px;
+}
+.exp-compare {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+  margin: 18px 0;
+}
+.exp-head {
+  font-size: 10px;
+  letter-spacing: 0.3px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+.exp-out {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  min-height: 72px;
+}
+.exp-agent {
+  margin: 14px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 13px;
+}
+@media (max-width: 760px) {
+  .exp-compare {
+    grid-template-columns: 1fr;
+  }
+}
