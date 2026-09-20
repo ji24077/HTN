@@ -208,3 +208,5 @@ simulation equivalence checks retain their CPU execution contract.
 Deploy the updated backend as well as the worker: older backend plans still enforce CPU-only
 requirements. Previously rejected jobs must be resubmitted. Native Windows Python bridging
 is not supported; NVIDIA desktops can use the Linux Docker worker with GPU access.
+
+The planning coordinator can delegate [concurrent analysis agents](parallel-analysis.md) for independent dependency, parallelization, and validation questions before deciding how to execute a project.

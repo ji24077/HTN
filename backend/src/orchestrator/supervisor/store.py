@@ -4,7 +4,14 @@ from datetime import timedelta
 
 from fastapi.encoders import jsonable_encoder
 
-from ..server.db.store import Conflict, NotFound, cancel_job_tasks, event, task_from_row
+from ..server.db.store import (
+    Conflict,
+    NotFound,
+    cancel_job_tasks,
+    event,
+    stop_job_analysis,
+    task_from_row,
+)
 from ..server.usage import usage_summary
 from ..shared.execution import scrub_execution
 from ..shared.protocol import json_text
@@ -345,6 +352,9 @@ class SupervisorStore:
                         action.reason,
                     )
                 if state in {"paused", "cancelled"}:
+                    await stop_job_analysis(
+                        conn, job_id, "cancelled" if state == "cancelled" else "interrupted"
+                    )
                     await conn.execute("DELETE FROM job_reservations WHERE job_id=$1", job_id)
                 if state == "cancelled":
                     await cancel_job_tasks(conn, job_id, action.reason, include_failed=True)

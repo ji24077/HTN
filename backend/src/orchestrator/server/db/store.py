@@ -198,6 +198,26 @@ async def task_events(conn, changes) -> None:
     )
 
 
+async def stop_job_analysis(conn, job_id, status):
+    """Stop unfinished analysts in the same transaction as parent control changes."""
+    state = await conn.fetchval(
+        "SELECT data->'analysis' FROM simulation_jobs WHERE job_id=$1", job_id
+    )
+    if not state:
+        return
+    unfinished = [c for c in state.get("children", []) if c["status"] in {"queued", "running"}]
+    if not unfinished:
+        return
+    for child in unfinished:
+        child.update(status=status, error="Analysis stopped with the parent job.")
+    await conn.execute(
+        """UPDATE simulation_jobs SET data=jsonb_set(data,'{analysis}',$2::jsonb),
+        revision=revision+1 WHERE job_id=$1""",
+        job_id,
+        state,
+    )
+
+
 async def cancel_job_tasks(conn, job_id, reason, *, include_failed=False, exclude_root=False):
     """Cancel a job's outstanding tasks atomically, without per-task queries."""
     rows = await conn.fetch(

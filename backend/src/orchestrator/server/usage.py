@@ -35,7 +35,7 @@ async def usage_summary(conn, job_id):
 
 async def enforce_usage_caps(conn, *, worker_id=None, job_id=None):
     """Caller holds Store.change's cross-process scheduling lock."""
-    from .db.store import cancel_job_tasks
+    from .db.store import cancel_job_tasks, stop_job_analysis
 
     rows = await conn.fetch(
         """SELECT j.id FROM supervised_jobs j
@@ -72,6 +72,7 @@ async def enforce_usage_caps(conn, *, worker_id=None, job_id=None):
             job_id,
             reason,
         )
+        await stop_job_analysis(conn, job_id, "cancelled")
         await cancel_job_tasks(conn, job_id, reason, include_failed=True)
         await conn.execute(
             """WITH service AS (

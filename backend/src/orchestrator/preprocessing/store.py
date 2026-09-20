@@ -289,6 +289,41 @@ class SimulationStore:
                     keep,
                 )
 
+    async def save_analysis(self, job, *, allow_inactive=False):
+        """Checkpoint child progress without changing parent phase, tasks or control state."""
+        async with self.store.change() as (conn, now):
+            current = await conn.fetchrow(
+                """SELECT p.revision,p.deadline,j.state,t.state AS task_state
+                FROM simulation_jobs p JOIN supervised_jobs j ON j.id=p.job_id
+                JOIN tasks t ON t.id=j.id WHERE p.job_id=$1""",
+                job["job_id"],
+            )
+            if current["revision"] != job["revision"]:
+                raise Conflict("Analysis checkpoint superseded")
+            if not allow_inactive and (
+                current["state"] != "active"
+                or current["task_state"] == "cancelled"
+                or current["deadline"] <= now
+            ):
+                raise Conflict("Parent job no longer accepts analysis")
+            revision = await conn.fetchval(
+                """UPDATE simulation_jobs SET data=jsonb_set(data,'{analysis}',$2::jsonb),
+                revision=revision+1,retry_after=clock_timestamp() WHERE job_id=$1
+                RETURNING revision""",
+                job["job_id"],
+                job["data"]["analysis"],
+            )
+            await event(
+                conn,
+                "task",
+                job["job_id"],
+                current["task_state"],
+                current["task_state"],
+                phase=job["phase"],
+                message="Analysis agent progress updated.",
+            )
+        job["revision"] = revision
+
     async def status(self, job_id):
         job = await self.job(job_id)
         data = job["data"]
@@ -327,6 +362,9 @@ class SimulationStore:
             "description": data["description"],
             "workload": data.get("workload", "simulation"),
             "program_plan": data.get("program_plan"),
+            "analysis": {
+                key: value for key, value in data.get("analysis", {}).items() if key != "snapshot"
+            },
             "message": data["message"],
             "round": data["round"],
             "limits": data["limits"],
