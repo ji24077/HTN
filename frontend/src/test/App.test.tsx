@@ -330,8 +330,15 @@ describe("dashboard interactions over pushed updates", () => {
     const user = userEvent.setup();
     const { stream, unmount } = await mount();
     await user.click(screen.getByRole("button", { name: /^Workers/ }));
-    const worker = screen.getByRole("button", { name: "Send to Worker A" });
+    const worker = screen.getByRole("button", {
+      name: "View details for Worker A",
+    });
     await user.click(worker);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await user.click(screen.getByText("Connection diagnostics"));
+    await user.click(
+      screen.getByRole("button", { name: "Configure a connection test" }),
+    );
     const input = screen.getByRole("textbox", { name: "Task name" });
     await user.clear(input);
     await user.type(input, "Preserved draft");
@@ -344,9 +351,9 @@ describe("dashboard interactions over pushed updates", () => {
     expect(screen.getByRole("textbox", { name: "Task name" })).toBe(input);
     expect(input).toHaveFocus();
     expect(input).toHaveValue("Preserved draft");
-    expect(screen.getByRole("button", { name: "Send to Worker A" })).toBe(
-      worker,
-    );
+    expect(
+      screen.getByRole("button", { name: "Hide details for Worker A" }),
+    ).toBe(worker);
     expect(screen.getByRole("combobox", { name: "Send to" })).toHaveValue(
       "worker-a",
     );
@@ -397,7 +404,9 @@ describe("dashboard interactions over pushed updates", () => {
       ).toBe(true),
     );
     act(() => stream.snapshot(fleet([{ ...task(), state: "cancelled" }])));
-    expect(screen.getByText("Cancelled")).toBeInTheDocument();
+    expect(
+      screen.getByText("Cancelled", { selector: ".status-badge" }),
+    ).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Cancel Live task" }),
     ).not.toBeInTheDocument();
@@ -435,6 +444,12 @@ describe("dashboard interactions over pushed updates", () => {
     await user.click(
       screen.getByRole("button", { name: "View Live task details" }),
     );
+    await user.click(
+      within(screen.getByRole("navigation", { name: "Job views" })).getByRole(
+        "button",
+        { name: "Activity" },
+      ),
+    );
     await user.click(screen.getByRole("tab", { name: /Logs/ }));
     expect(
       await screen.findByText(/Successfully processed inputs/, {
@@ -448,8 +463,7 @@ describe("dashboard interactions over pushed updates", () => {
   it("recovers from stream disconnects without losing edits or fetching snapshots", async () => {
     const user = userEvent.setup();
     const { stream } = await mount();
-    await user.click(screen.getByRole("button", { name: "New job" }));
-    await user.click(screen.getByRole("button", { name: "Built-in tasks" }));
+    await openDiagnostics(user);
     await user.selectOptions(
       screen.getByRole("combobox", { name: "Send to" }),
       "worker-b",
@@ -473,8 +487,7 @@ describe("dashboard interactions over pushed updates", () => {
   it("surfaces submission failures and keeps the form available", async () => {
     const user = userEvent.setup();
     await mount();
-    await user.click(screen.getByRole("button", { name: "New job" }));
-    await user.click(screen.getByRole("button", { name: "Built-in tasks" }));
+    await openDiagnostics(user);
     fetchMock.mockImplementation(
       async (path) =>
         new Response(
@@ -701,13 +714,14 @@ it("shows an empty real fleet without sample worker cards or destinations", asyn
   await userEvent.click(screen.getByRole("button", { name: /^Workers/ }));
   expect(screen.getByText(/No workers connected yet/)).toBeInTheDocument();
   expect(
-    screen.queryByRole("button", { name: "Send to Worker A" }),
+    screen.queryByRole("button", { name: "View details for Worker A" }),
   ).not.toBeInTheDocument();
   expect(
     screen.queryByRole("option", { name: "Worker B" }),
   ).not.toBeInTheDocument();
+  await userEvent.click(screen.getByText("Connection diagnostics"));
   expect(
-    screen.getByRole("button", { name: "Run one on each" }),
+    screen.getByRole("button", { name: /Run connection test on/ }),
   ).toBeDisabled();
 });
 
@@ -721,7 +735,10 @@ it("dispatches to the available registered workers instead of hardcoded demo IDs
     }),
   );
   await user.click(screen.getByRole("button", { name: /^Workers/ }));
-  await user.click(screen.getByRole("button", { name: "Run one on each" }));
+  await user.click(screen.getByText("Connection diagnostics"));
+  await user.click(
+    screen.getByRole("button", { name: /Run connection test on/ }),
+  );
   const post = fetchMock.mock.calls.find(([path]) => path === "/v1/tasks")!;
   expect(JSON.parse(String(post[1]?.body)).tasks).toMatchObject([
     { target_worker_id: "gpu-render-1" },
@@ -731,8 +748,7 @@ it("dispatches to the available registered workers instead of hardcoded demo IDs
 it("submits an intentional failure with instructions to observe the first attempt", async () => {
   const user = userEvent.setup();
   await mount();
-  await user.click(screen.getByRole("button", { name: "New job" }));
-  await user.click(screen.getByRole("button", { name: "Built-in tasks" }));
+  await openDiagnostics(user);
   await user.click(
     screen.getByRole("checkbox", {
       name: "Intentional failure (supervisor test)",
@@ -746,4 +762,30 @@ it("submits an intentional failure with instructions to observe the first attemp
   expect(body.instructions).toContain(
     "Allow the first execution attempt to run",
   );
+});
+
+async function openDiagnostics(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole("button", { name: /^Workers/ }));
+  await user.click(screen.getByText("Connection diagnostics"));
+  await user.click(
+    screen.getByRole("button", { name: "Configure a connection test" }),
+  );
+}
+
+it("always opens agent-managed submission after using connection diagnostics", async () => {
+  const user = userEvent.setup();
+  await mount();
+  await openDiagnostics(user);
+  expect(screen.getByRole("textbox", { name: "Task name" })).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "Close new job" }));
+  await user.click(screen.getByRole("button", { name: "New job" }));
+  expect(
+    screen.getByRole("textbox", { name: "What would you like to do?" }),
+  ).toBeVisible();
+  expect(
+    screen.queryByRole("textbox", { name: "Task name" }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: "Built-in tasks" }),
+  ).not.toBeInTheDocument();
 });

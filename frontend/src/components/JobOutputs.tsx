@@ -184,7 +184,7 @@ export function JobOutputs({
       {!loading && !fileError && !files.length && (
         <p className="empty-state">
           {terminal
-            ? "No file artifacts were produced."
+            ? "No file artifacts were produced. Any recorded results appear in Overview."
             : "Files will appear here after execution produces outputs."}
         </p>
       )}

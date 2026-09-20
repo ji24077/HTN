@@ -1,18 +1,26 @@
 import { useState } from "react";
 import type { Task } from "../api/types";
 import { active, age, workerName, record } from "../lib/format";
-import { groupJobs, statusLabels } from "../lib/jobs";
+import { groupJobs, statusLabels, workloadLabel } from "../lib/jobs";
 import { phaseLabels } from "./SimulationDetails";
 import { Icon } from "./Icon";
 
-const filters = ["All jobs", "Active", "Failed", "Completed"] as const;
+const filters = [
+  "All jobs",
+  "Active",
+  "Failed",
+  "Completed",
+  "Cancelled",
+] as const;
 export function TaskList({
   tasks,
+  loading = false,
   cancelling,
   onCancel,
   onDetail,
 }: {
   tasks: Task[];
+  loading?: boolean;
   cancelling: Set<string>;
   onCancel: (id: string) => void;
   onDetail: (task: Task) => void;
@@ -20,12 +28,19 @@ export function TaskList({
   const [filter, setFilter] = useState<(typeof filters)[number]>("All jobs");
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(0);
+  if (loading)
+    return (
+      <section className="jobs-panel loading-panel" role="status">
+        Loading your jobs…
+      </section>
+    );
   const jobs = groupJobs(tasks);
   const match = (state: string) =>
     filter === "All jobs" ||
     (filter === "Active" && ["running", "queued"].includes(state)) ||
     (filter === "Failed" && state === "failed") ||
-    (filter === "Completed" && state === "succeeded");
+    (filter === "Completed" && state === "succeeded") ||
+    (filter === "Cancelled" && state === "cancelled");
   const filtered = jobs.filter(
     (job) =>
       match(job.state) &&
@@ -111,9 +126,20 @@ export function TaskList({
                         {job.tasks.length > 1
                           ? `${job.tasks.length} tasks · `
                           : ""}
-                        {record(job.primary.spec.payload).execution_mode === "service" ? "Service" : job.primary.spec.kind.replaceAll("_", " ")}
+                        {workloadLabel(job.primary)}
+                        <span className="mobile-job-date">
+                          {" "}
+                          ·{" "}
+                          {new Date(job.createdAt).toLocaleString(undefined, {
+                            month: "short",
+                            day: "numeric",
+                            hour: "numeric",
+                            minute: "2-digit",
+                          })}
+                        </span>
                         <span className="mobile-progress">
-                          {record(job.primary.spec.payload).execution_mode !== "service" && ["running", "queued"].includes(job.state)
+                          {job.primary.spec.kind !== "simulation_job" &&
+                          ["running", "queued"].includes(job.state)
                             ? ` · ${job.progress}%`
                             : ""}
                         </span>
@@ -139,22 +165,42 @@ export function TaskList({
                   </span>
                 </td>
                 <td>
-                  {record(job.primary.spec.payload).execution_mode === "service" ? <span>Persistent service</span> : <div className="table-progress">
-                    <div
-                      className="progress"
-                      role="progressbar"
-                      aria-label={`${job.title} progress`}
-                      aria-valuenow={job.progress}
-                      aria-valuemin={0}
-                      aria-valuemax={100}
-                    >
-                      <i style={{ width: `${job.progress}%` }} />
+                  {record(job.primary.spec.payload).execution_mode ===
+                  "service" ? (
+                    <span>Persistent service</span>
+                  ) : job.primary.spec.kind === "simulation_job" ? (
+                    <span className="muted">
+                      {job.state === "succeeded"
+                        ? "Results ready"
+                        : job.state === "failed"
+                          ? "Run ended"
+                          : job.state === "cancelled"
+                            ? "Run cancelled"
+                            : phaseLabels[
+                                String(record(job.primary.spec.payload).phase)
+                              ] || "Preparing execution"}
+                    </span>
+                  ) : (
+                    <div className="table-progress">
+                      <div
+                        className="progress"
+                        role="progressbar"
+                        aria-label={`${job.title} progress`}
+                        aria-valuenow={job.progress}
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                      >
+                        <i style={{ width: `${job.progress}%` }} />
+                      </div>
+                      <span>{job.progress}%</span>
                     </div>
-                    <span>{job.progress}%</span>
-                  </div>}
+                  )}
                   <small className="muted">
                     {job.primary.spec.kind === "simulation_job"
-                      ? (record(job.primary.spec.payload).execution_mode === "service" ? "Hosted service" : "Simulation pipeline")
+                      ? record(job.primary.spec.payload).execution_mode ===
+                        "service"
+                        ? "Hosted service"
+                        : "Agent-managed project"
                       : job.tasks.length > 1
                         ? `${job.tasks.filter((t) => t.state === "succeeded").length} / ${job.tasks.length} tasks`
                         : job.primary.generation > 1
@@ -170,9 +216,15 @@ export function TaskList({
                   <span className="worker-cell" title={job.workers.join(", ")}>
                     {job.workers.length > 1
                       ? `${job.workers.length} workers`
-                      : workerName(
-                          job.workers[0] || job.primary.spec.target_worker_id,
-                        )}
+                      : job.workers[0] || job.primary.spec.target_worker_id
+                        ? workerName(
+                            job.workers[0] || job.primary.spec.target_worker_id,
+                          )
+                        : ["succeeded", "failed", "cancelled"].includes(
+                              job.state,
+                            )
+                          ? "See execution details"
+                          : "Awaiting assignment"}
                   </span>
                 </td>
                 <td className="muted">
@@ -184,15 +236,19 @@ export function TaskList({
                   </time>
                 </td>
                 <td>
-                  {record(job.primary.spec.payload).execution_mode === "service" &&
+                  {record(job.primary.spec.payload).execution_mode ===
+                    "service" &&
                   (active(job.primary) || job.primary.state === "queued") ? (
-                    <button className="text-btn danger" aria-label={`Stop ${job.title}`}
+                    <button
+                      className="text-btn danger"
+                      aria-label={`Stop ${job.title}`}
                       disabled={cancelling.has(job.primary.spec.id)}
-                      onClick={() => onCancel(job.primary.spec.id)}>
+                      onClick={() => onCancel(job.primary.spec.id)}
+                    >
                       Stop service
                     </button>
                   ) : job.tasks.length === 1 &&
-                  (active(job.primary) || job.primary.state === "queued") ? (
+                    (active(job.primary) || job.primary.state === "queued") ? (
                     <button
                       className="text-btn danger"
                       aria-label={`Cancel ${job.title}`}

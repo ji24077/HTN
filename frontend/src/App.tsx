@@ -8,7 +8,7 @@ import {
   workloadTask,
   submitTasks,
 } from "./api/client";
-import type { Task, TaskSpec } from "./api/types";
+import type { TaskSpec } from "./api/types";
 import { ActivityFeed } from "./components/ActivityFeed";
 import { ChatPanel } from "./components/ChatPanel";
 import { DeviceInvite } from "./components/DeviceInvite";
@@ -20,7 +20,9 @@ import { TaskDetails } from "./components/TaskDetails";
 import { TaskList } from "./components/TaskList";
 import { WorkerGrid } from "./components/WorkerGrid";
 import { useFleet } from "./hooks/useFleet";
+import { useWorkspaceNavigation } from "./hooks/useWorkspaceNavigation";
 import { formatMoney, healthy, record, time, workerName } from "./lib/format";
+
 import { groupJobs } from "./lib/jobs";
 import { Icon } from "./components/Icon";
 
@@ -117,9 +119,22 @@ function FleetApp({
 }) {
   const { snapshot, status, updatedAt } = useFleet();
   const [selected, setSelected] = useState("");
-  const [view, setView] = useState<
-    "Jobs" | "Workers" | "Activity" | "Assistant" | "GPU Lab"
-  >("Jobs");
+  const {
+    view,
+    detail,
+    jobView,
+    jobRequest,
+    openDetail,
+    closeDetail,
+    navigate,
+    changeJobView,
+    retryJob,
+  } = useWorkspaceNavigation();
+  useEffect(() => {
+    document
+      .getElementById("workspace-heading")
+      ?.focus({ preventScroll: true });
+  }, [view]);
   const [composeOpen, setComposeOpen] = useState(false);
   const [composeMode, setComposeMode] = useState("upload");
   const composerRef = useRef<HTMLDialogElement>(null);
@@ -136,7 +151,6 @@ function FleetApp({
   const [cancelling, setCancelling] = useState(new Set<string>());
   const pendingCancellations = useRef(new Set<string>());
   const [toast, setToast] = useState<{ message: string } | null>(null);
-  const [detail, setDetail] = useState<Task | null>(null);
   useEffect(() => {
     if (!toast) return;
     const timer = setTimeout(() => setToast(null), 4500);
@@ -151,9 +165,9 @@ function FleetApp({
     try {
       const submitted = await submitTasks(tasks, usageCap);
       setComposeOpen(false);
-      setView("Jobs");
       if (Array.isArray(submitted) && submitted[0]?.spec)
-        setDetail(submitted[0]);
+        openDetail(submitted[0]);
+      else navigate("Jobs");
       notify(
         tasks.length === 1
           ? `Queued for ${tasks[0].target_worker_id ? workerName(tasks[0].target_worker_id) : "the next available worker"}.`
@@ -179,10 +193,14 @@ function FleetApp({
     setCancelling(new Set(pendingCancellations.current));
     try {
       await cancelTask(id);
-      const task = snapshot.tasks.find(item => item.spec.id === id);
-      notify(task && (task.spec.kind === "python_service" || record(task.spec.payload).execution_mode === "service")
-        ? "Service stopped. Its worker slot is being released."
-        : "Task cancelled. Worker will stop on its next heartbeat.");
+      const task = snapshot.tasks.find((item) => item.spec.id === id);
+      notify(
+        task &&
+          (task.spec.kind === "python_service" ||
+            record(task.spec.payload).execution_mode === "service")
+          ? "Service stopped. Its worker slot is being released."
+          : "Task cancelled. Worker will stop on its next heartbeat.",
+      );
     } catch (error) {
       notify(error instanceof Error ? error.message : "Could not cancel task");
     } finally {
@@ -234,8 +252,8 @@ function FleetApp({
     Workers: "Manage the machines that run your jobs.",
     Activity: "A live record of assignments, retries, and fleet changes.",
     Assistant: "Inspect your fleet and dispatch supported workloads.",
-    "GPU Lab":
-      "Chat with the model on your GPU and measure what the agents change.",
+    Experiments:
+      "Model experiments in a separate environment from your worker fleet.",
   };
   return (
     <>
@@ -244,12 +262,12 @@ function FleetApp({
           <span className="brandmark">
             <Icon name="arrow" size={19} />
           </span>
-          dispatch<span className="brand-dot">.</span>
+          ChatGPU
         </div>
         <div className="workspace-label">
           <span className="workspace-avatar">C</span>
           <div>
-            Compute workspace<small>Distributed execution</small>
+            Your workspace<small>Compute, handled.</small>
           </div>
         </div>
         <div className="section-label">WORKSPACE</div>
@@ -258,15 +276,20 @@ function FleetApp({
             [
               ["Jobs", "jobs"],
               ["Workers", "workers"],
-              ["Activity", "activity"],
               ["Assistant", "assistant"],
-              ["GPU Lab", "chip"],
+              ["Activity", "activity"],
+              ["Experiments", "chip"],
             ] as const
           ).map(([label, icon]) => (
             <button
               key={label}
+              className={
+                label === "Activity" || label === "Experiments"
+                  ? "secondary-nav"
+                  : undefined
+              }
               aria-current={view === label ? "page" : undefined}
-              onClick={() => setView(label)}
+              onClick={() => navigate(label)}
             >
               <Icon name={icon} />
               <span>{label}</span>
@@ -274,6 +297,27 @@ function FleetApp({
               {label === "Workers" && <small>{online}</small>}
             </button>
           ))}
+          <details className="mobile-more">
+            <summary>
+              More <Icon name="chevron" size={13} />
+            </summary>
+            <div>
+              {(["Activity", "Experiments"] as const).map((label) => (
+                <button
+                  key={label}
+                  aria-current={view === label ? "page" : undefined}
+                  onClick={(event) => {
+                    navigate(label);
+                    event.currentTarget
+                      .closest("details")
+                      ?.removeAttribute("open");
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </details>
         </nav>
         <div className="sidebar-bottom">
           <span className={`connection-dot ${status}`} />
@@ -368,12 +412,18 @@ function FleetApp({
           <div className="heading">
             <div>
               <div className="eyebrow">COMPUTE WORKSPACE</div>
-              <h1>{view}</h1>
+              <h1 id="workspace-heading" tabIndex={-1}>
+                {view}
+              </h1>
               <p className="subtitle">{subtitles[view]}</p>
             </div>
             <button
               className="primary-btn"
-              onClick={() => setComposeOpen(true)}
+              onClick={() => {
+                setComposeMode("upload");
+                setSubmitError("");
+                setComposeOpen(true);
+              }}
             >
               <Icon name="plus" size={17} />
               New job
@@ -404,58 +454,70 @@ function FleetApp({
             </section>
             <TaskList
               tasks={snapshot.tasks}
+              loading={!updatedAt}
               cancelling={cancelling}
               onCancel={(id) => void cancel(id)}
-              onDetail={setDetail}
+              onDetail={openDetail}
             />
             <div className="tracking-note">
               <Icon name="assistant" size={16} />
               <span>
-                Open a job to follow its attempts, search execution logs, and
-                see the supervisor’s decisions.
+                Your agent chooses the machine and checks the result. Open a job
+                to see what it produced.
               </span>
             </div>
           </div>
           <div hidden={view !== "Workers"}>
-            <div className="section-actions">
-              <p className="muted">
-                {online} online · {snapshot.workers.length - online} offline
-              </p>
-              <button
-                className="outline-btn"
-                id="pair-button"
-                disabled={busy || availableWorkers.length === 0}
-                onClick={async () => {
-                  const tasks = await Promise.all(
-                    availableWorkers.map((worker) =>
-                      workloadTask(
-                        worker.capabilities.kinds.includes("echo")
-                          ? "echo"
-                          : "stub",
-                        `Connection test · ${workerName(worker.id)}`,
-                        worker.id,
-                        30,
-                        true,
+            <DeviceInvite />
+            <details className="worker-diagnostics">
+              <summary>Connection diagnostics</summary>
+              <div className="section-actions">
+                <p className="muted">
+                  {online} online · {snapshot.workers.length - online} offline
+                </p>
+                <button
+                  className="outline-btn"
+                  id="pair-button"
+                  disabled={busy || availableWorkers.length === 0}
+                  onClick={async () => {
+                    const tasks = await Promise.all(
+                      availableWorkers.map((worker) =>
+                        workloadTask(
+                          worker.capabilities.kinds.includes("echo")
+                            ? "echo"
+                            : "stub",
+                          `Connection test · ${workerName(worker.id)}`,
+                          worker.id,
+                          30,
+                          true,
+                        ),
                       ),
-                    ),
-                  );
-                  void submit(tasks);
+                    );
+                    void submit(tasks);
+                  }}
+                >
+                  Run connection test on {availableWorkers.length} workers
+                </button>
+              </div>
+              <button
+                className="text-btn"
+                onClick={() => {
+                  setComposeMode("builtin");
+                  setComposeOpen(true);
                 }}
               >
-                Run one on each
+                Configure a connection test
               </button>
-            </div>
+            </details>
             <WorkerGrid
               workers={snapshot.workers}
+              loading={!updatedAt}
               tasks={snapshot.tasks}
               selected={selected}
               onSelect={(id) => {
                 setSelected(id);
-                setComposeMode("builtin");
-                setComposeOpen(true);
               }}
             />
-            <DeviceInvite />
           </div>
           <div hidden={view !== "Activity"}>
             <ActivityFeed
@@ -470,12 +532,12 @@ function FleetApp({
               scope={remote ? email : "demo"}
             />
           </div>
-          <div hidden={view !== "GPU Lab"}>
-            <GpuLab active={view === "GPU Lab"} />
+          <div hidden={view !== "Experiments"}>
+            <GpuLab active={view === "Experiments"} />
           </div>
           <footer className="footer">
             <span>
-              dispatch <span className="muted">/ Distributed compute</span>
+              ChatGPU <span className="muted">/ Distributed compute</span>
             </span>
             <span id="updated">
               {updatedAt
@@ -493,8 +555,10 @@ function FleetApp({
       >
         <header>
           <div>
-            <div className="eyebrow">DISPATCH</div>
-            <h2 id="compose-title">New job</h2>
+            <div className="eyebrow">CHATGPU</div>
+            <h2 id="compose-title">
+              {composeMode === "upload" ? "New job" : "Connection diagnostics"}
+            </h2>
           </div>
           <button
             className="icon-btn"
@@ -509,30 +573,13 @@ function FleetApp({
             {submitError}
           </p>
         )}
-        <div className="compose-mode" role="group" aria-label="Submission type">
-          <button
-            type="button"
-            aria-pressed={composeMode === "upload"}
-            onClick={() => setComposeMode("upload")}
-          >
-            Upload simulation
-          </button>
-          <button
-            type="button"
-            aria-pressed={composeMode === "builtin"}
-            onClick={() => setComposeMode("builtin")}
-          >
-            Built-in tasks
-          </button>
-        </div>
         <div hidden={composeMode !== "upload"}>
           <SimulationComposer
             onCreated={(task) => {
               setComposeOpen(false);
-              setView("Jobs");
-              setDetail(task);
+              openDetail(task);
               notify(
-                "Simulation submitted. Preprocessing will start on one worker.",
+                "Project submitted. The agent will plan the run and select a machine.",
               );
             }}
           />
@@ -570,8 +617,12 @@ function FleetApp({
               )
             : []
         }
-        onSelectTask={setDetail}
-        onClose={() => setDetail(null)}
+        onSelectTask={openDetail}
+        jobView={jobView}
+        onViewChange={changeJobView}
+        request={jobRequest}
+        onRetry={retryJob}
+        onClose={closeDetail}
       />
     </>
   );

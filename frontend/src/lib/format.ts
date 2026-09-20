@@ -107,7 +107,8 @@ export function eventText(event: AuditEvent, tasks: Task[]) {
   if (event.entity === "worker")
     return `${who} ${event.new_state === "alive" ? "connected" : event.new_state === "unhealthy" ? "lost connection" : "went offline"}`;
   if (event.new_state === "assigned") return `Sent “${name}” to ${who}`;
-  if (event.new_state === "running") return `${who} started “${name}”`;
+  if (event.new_state === "running")
+    return `${event.details.worker_id ? who : "Scheduler"} started “${name}”`;
   if (event.new_state === "succeeded") return `Result accepted for “${name}”`;
   if (event.new_state === "queued")
     return event.previous_state

@@ -84,10 +84,21 @@ it("opens the service root after refresh regardless of attempt ordering", async 
   const cancel = vi.fn();
   const root = task("service", "service", "running", "");
   root.spec.kind = "simulation_job";
-  root.spec.payload = { execution_mode: "service", phase: "ready", description: "Hosted model" };
+  root.spec.payload = {
+    execution_mode: "service",
+    phase: "ready",
+    description: "Hosted model",
+  };
   const attempt = task("attempt", "service", "running");
   attempt.spec.kind = "python_service";
-  render(<TaskList tasks={[attempt, root]} cancelling={new Set()} onCancel={cancel} onDetail={open} />);
+  render(
+    <TaskList
+      tasks={[attempt, root]}
+      cancelling={new Set()}
+      onCancel={cancel}
+      onDetail={open}
+    />,
+  );
   expect(screen.getByText("Persistent service")).toBeInTheDocument();
   expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: /View .* details/ }));
@@ -98,4 +109,18 @@ it("opens the service root after refresh regardless of attempt ordering", async 
   attempt.state = "failed";
   root.state = "cancelled";
   expect(groupJobs([attempt, root])[0].state).toBe("cancelled");
+});
+
+it("does not mistake the initial snapshot load for an empty job history", () => {
+  render(
+    <TaskList
+      tasks={[]}
+      loading
+      cancelling={new Set()}
+      onCancel={() => {}}
+      onDetail={() => {}}
+    />,
+  );
+  expect(screen.getByRole("status")).toHaveTextContent("Loading your jobs");
+  expect(screen.queryByText("Your work starts here")).not.toBeInTheDocument();
 });

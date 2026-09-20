@@ -116,3 +116,26 @@ it("shows uncapped usage even when supervision is disabled and resets on run cha
   view.rerender(<JobSupervisor jobId="job-2" />);
   expect(screen.queryByText("<CA$0.0001")).not.toBeInTheDocument();
 });
+
+it("archives historical questions after completion while final review is pending", async () => {
+  const pending = status(false);
+  read.mockResolvedValue({
+    ...pending,
+    job: {
+      ...pending.job,
+      memory: {
+        ...pending.job.memory,
+        questions: ["Confirm 2000 steps?"],
+        followups: [
+          { check: "Wait for execution", due_at: "2026-09-20T00:00:00Z" },
+        ],
+      },
+    },
+  });
+  render(<JobSupervisor jobId="job-1" terminal />);
+  await act(() => vi.advanceTimersByTimeAsync(0));
+  expect(screen.getByText("Final review pending")).toBeVisible();
+  expect(screen.queryByText("Needs your input")).not.toBeInTheDocument();
+  expect(screen.queryByText("Next check")).not.toBeInTheDocument();
+  expect(screen.getByText("Confirm 2000 steps?")).not.toBeVisible();
+});

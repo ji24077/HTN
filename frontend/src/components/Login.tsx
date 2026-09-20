@@ -1,3 +1,4 @@
+import { Icon } from "./Icon";
 import { useState } from "react";
 import {
   login,
@@ -26,7 +27,7 @@ export function Login({
   const [message, setMessage] = useState("");
   const newPassword = mode === "signup" || mode === "recovery";
   const title = {
-    login: "Sign in to dispatch.",
+    login: "Sign in to ChatGPU.",
     signup: "Create your account.",
     forgot: "Reset your password.",
     recovery: "Choose a new password.",
@@ -98,8 +99,10 @@ export function Login({
         }}
       >
         <div className="brand">
-          <span className="brandmark">↗</span> dispatch
-          <span className="brand-dot">.</span>
+          <span className="brandmark">
+            <Icon name="arrow" size={19} />
+          </span>{" "}
+          ChatGPU
         </div>
         <h1>{title}</h1>
         <p>
@@ -138,6 +141,7 @@ export function Login({
               autoComplete={newPassword ? "new-password" : "current-password"}
               required
               minLength={newPassword ? 8 : undefined}
+              aria-describedby={newPassword ? "password-help" : undefined}
               disabled={busy}
               value={password}
               onChange={(event) => setPassword(event.target.value)}
@@ -146,7 +150,9 @@ export function Login({
         )}
         {newPassword && (
           <>
-            <p className="auth-hint">Use at least 8 characters.</p>
+            <p className="auth-hint" id="password-help">
+              Use at least 8 characters.
+            </p>
             <label className="field-label" htmlFor="confirmation">
               Confirm password
             </label>

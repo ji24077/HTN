@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { AuditEvent, ConnectionStatus, Task } from "../api/types";
-import { eventText, time } from "../lib/format";
+import { eventText, record, time } from "../lib/format";
 import { Icon } from "./Icon";
 export function ActivityFeed({
   events,
@@ -59,7 +59,24 @@ export function ActivityFeed({
       <div className="activity-list" id="events">
         {filtered.slice(0, 100).map((event) => (
           <div className="event" key={event.id}>
-            <div className="event-text">{eventText(event, tasks)}</div>
+            <div className="event-text">
+              {eventText(event, tasks)}
+              {(() => {
+                const task = tasks.find(
+                  (t) =>
+                    t.spec.id === event.entity_id ||
+                    t.spec.job_id === record(event.details).job_id,
+                );
+                return task ? (
+                  <a
+                    className="event-job-link"
+                    href={`#/jobs/${encodeURIComponent(task.spec.id)}`}
+                  >
+                    View job
+                  </a>
+                ) : null;
+              })()}
+            </div>
             <time className="event-time" dateTime={event.at}>
               {new Date(event.at).toLocaleDateString([], {
                 month: "short",

@@ -23,6 +23,7 @@ import {
 } from "./GpuLabEvidence";
 
 export type LabRun = {
+  environment?: string;
   id: string;
   prompt: string;
   text: string;
@@ -160,7 +161,7 @@ export function GpuLabExperiment({
     running.find((item) => item.id === from),
     running.find((item) => item.id === to),
   );
-  const busy = Boolean(liveJob) || lab.readOnly;
+  const busy = lab.status === "offline" || Boolean(liveJob) || lab.readOnly;
   const integerIn = (value: number, min: number, max: number) =>
     Number.isInteger(value) && value >= min && value <= max;
   const accumulation = gradAccum ?? Math.max(1, Math.round(16 / microBatch));
@@ -199,12 +200,6 @@ export function GpuLabExperiment({
   const agentQuality = trainJob?.result?.quality?.chosen;
   const baseStep = baseTrain?.t_step_median_s;
   const agentStep = candidate?.t_step_median_s;
-  const stepGain = baseStep && agentStep ? baseStep / agentStep : null;
-  const qualityDelta =
-    baseQuality?.exact_match_rate != null &&
-    agentQuality?.exact_match_rate != null
-      ? agentQuality.exact_match_rate - baseQuality.exact_match_rate
-      : null;
   const inferBase = inferJob?.result?.baseline;
   const inferAgent = inferJob?.result?.optimized;
   const speedup = inferJob?.result?.speedup
@@ -536,7 +531,7 @@ export function GpuLabExperiment({
           <Section
             step="COMPARISON"
             title="Before and after the agent"
-            note="Anything not measured is left blank, never estimated."
+            note="Training comparisons need matching model and dataset identity. Inference timings are paired within one run."
           >
             <table className="lab-table">
               <thead>
@@ -552,35 +547,17 @@ export function GpuLabExperiment({
                   <td>Training step time</td>
                   <td>{secs(baseStep, 3)}</td>
                   <td>{secs(agentStep, 3)}</td>
-                  <td
-                    className={
-                      trainingPassed && stepGain && stepGain >= 1 ? "good" : ""
-                    }
-                  >
-                    {stepGain
-                      ? stepGain >= 1
-                        ? stepGain.toFixed(2) + "× faster"
-                        : (1 / stepGain).toFixed(2) + "× slower"
-                      : "Pending"}
+                  <td>
+                    {baseStep && agentStep ? "Pairing unverified" : "Pending"}
                   </td>
                 </tr>
                 <tr>
                   <td>Training exact match</td>
                   <td>{pct(baseQuality?.exact_match_rate)}</td>
                   <td>{pct(agentQuality?.exact_match_rate)}</td>
-                  <td
-                    className={
-                      trainingPassed &&
-                      qualityDelta != null &&
-                      qualityDelta >= 0
-                        ? "good"
-                        : ""
-                    }
-                  >
-                    {qualityDelta != null
-                      ? (qualityDelta >= 0 ? "+" : "") +
-                        (qualityDelta * 100).toFixed(1) +
-                        " pp"
+                  <td>
+                    {baseQuality && agentQuality
+                      ? "Pairing unverified"
                       : "Pending"}
                   </td>
                 </tr>
@@ -593,7 +570,11 @@ export function GpuLabExperiment({
                       inferencePassed && speedup && speedup > 1 ? "good" : ""
                     }
                   >
-                    {speedup ? speedup.toFixed(2) + "× faster" : "Pending"}
+                    {speedup
+                      ? speedup >= 1
+                        ? speedup.toFixed(2) + "× faster"
+                        : (1 / speedup).toFixed(2) + "× slower"
+                      : "Pending"}
                   </td>
                 </tr>
                 <tr>
@@ -752,10 +733,14 @@ export function GpuLabExperiment({
               <>
                 <Legend
                   items={[
-                    ["prefill", "before"],
-                    ["decode", "after"],
+                    ["Estimated cache benefit", "before"],
+                    ["Cache-hit total", "after"],
                   ]}
                 />
+                <p className="muted">
+                  Estimated from median total latency; these are not directly
+                  measured prefill and decode times.
+                </p>
                 <SplitBars
                   rows={[
                     {

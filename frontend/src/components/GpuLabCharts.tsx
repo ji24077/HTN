@@ -215,7 +215,33 @@ export function LossChart({ train }: { train?: TrainRun | null }) {
         height={H}
         viewBox={`0 0 ${W} ${H}`}
         role="img"
-        aria-label="Training loss per step"
+        aria-label={
+          hover
+            ? `Training loss: step ${hover.step}, ${hover.loss.toFixed(4)}. Use arrow keys to inspect.`
+            : "Training loss per step. Use arrow keys to inspect."
+        }
+        tabIndex={0}
+        onKeyDown={(event) => {
+          if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key))
+            return;
+          event.preventDefault();
+          const current = hover
+            ? curve.findIndex((point) => point.step === hover.step)
+            : 0;
+          const next =
+            event.key === "Home"
+              ? 0
+              : event.key === "End"
+                ? curve.length - 1
+                : Math.max(
+                    0,
+                    Math.min(
+                      curve.length - 1,
+                      current + (event.key === "ArrowLeft" ? -1 : 1),
+                    ),
+                  );
+          setHover(curve[next]);
+        }}
       >
         {[0, 1, 2, 3, 4].map((i) => {
           const v = (yMax * i) / 4;
@@ -322,7 +348,7 @@ export function LossChart({ train }: { train?: TrainRun | null }) {
         />
       </svg>
       <details className="lab-tableview">
-        <summary>View as table</summary>
+        <summary>View sampled data (every {every} steps)</summary>
         <table className="lab-table">
           <thead>
             <tr>
@@ -370,7 +396,7 @@ export function SplitBars({
         height={H}
         viewBox={`0 0 ${W} ${H}`}
         role="img"
-        aria-label="Latency breakdown, cache miss versus cache hit"
+        aria-label="Estimated cache benefit and measured cache-hit total latency"
       >
         {rows.map((row, i) => {
           const y = padT + i * (BAR + GAP);
@@ -401,7 +427,7 @@ export function SplitBars({
                     className={`lab-mark ${series}`}
                     d={barPath(start, y, Math.max(w - 2, 0.5), BAR, 3)}
                   >
-                    <title>{`${row.label} · ${part}: ${row[part].toFixed(2)}s`}</title>
+                    <title>{`${row.label} · ${part === "prefill" ? "Estimated cache benefit" : "Cache-hit total"}: ${row[part].toFixed(2)}s`}</title>
                   </path>
                 ) : null;
               })}
@@ -412,6 +438,27 @@ export function SplitBars({
           );
         })}
       </svg>
+      <details className="lab-tableview">
+        <summary>View timing data</summary>
+        <table className="lab-table">
+          <thead>
+            <tr>
+              <th>Run</th>
+              <th>Estimated cache benefit</th>
+              <th>Cache-hit total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.label}>
+                <td>{row.label}</td>
+                <td>{row.prefill.toFixed(2)}s</td>
+                <td>{row.decode.toFixed(2)}s</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </details>
     </div>
   );
 }
