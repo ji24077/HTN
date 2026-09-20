@@ -564,6 +564,12 @@ function Scene({ snapshot }: { snapshot: Snapshot }) {
     const stage = stageRef.current;
     if (!stage) return;
     const zoom = (event: WheelEvent) => {
+      // A panel floating over the canvas is a scrolling surface in its own right.
+      // Swallowing its wheel events to zoom the graph is exactly why a run list
+      // longer than its box could not be scrolled at all.
+      const origin = event.target as HTMLElement | null;
+      if (origin?.closest?.(".fg-log, .fg-popup, .fg-transport, .fg-toolbar"))
+        return;
       event.preventDefault();
       cameraRef.current.zoom = clampZoom(
         cameraRef.current.zoom * (event.deltaY > 0 ? 0.92 : 1.08),
@@ -589,6 +595,27 @@ function Scene({ snapshot }: { snapshot: Snapshot }) {
     return () => window.removeEventListener("keydown", escape);
   }, []);
 
+  // The transport bar spans the stage, so a panel running to the bottom disappears
+  // under it. Its height is not a constant — the caption wraps on a narrow window —
+  // so it is measured and handed to the stylesheet rather than guessed at.
+  const barRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const stage = stageRef.current;
+    const bar = barRef.current;
+    if (!stage) return;
+    if (!bar) {
+      stage.style.removeProperty("--fg-bar");
+      return;
+    }
+    const measure = () =>
+      stage.style.setProperty("--fg-bar", `${bar.offsetHeight}px`);
+    measure();
+    if (typeof ResizeObserver !== "function") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(bar);
+    return () => observer.disconnect();
+  }, [Boolean(film.replay)]);
+
   const dragRef = useRef<{ x: number; y: number; moved: number } | null>(null);
   const nodes = graph.nodes;
   const focused = nodes.find((node) => node.id === (selected || hovered));
@@ -604,7 +631,10 @@ function Scene({ snapshot }: { snapshot: Snapshot }) {
     );
 
   return (
-    <div className="fg-stage" ref={stageRef}>
+    <div
+      className={film.replay ? "fg-stage fg-replaying" : "fg-stage"}
+      ref={stageRef}
+    >
       <canvas
         ref={canvasRef}
         className="fg-canvas"
@@ -938,7 +968,12 @@ function Scene({ snapshot }: { snapshot: Snapshot }) {
       </div>
 
       {film.replay && film.step && (
-        <div className="fg-transport" role="group" aria-label="Replay controls">
+        <div
+          className="fg-transport"
+          ref={barRef}
+          role="group"
+          aria-label="Replay controls"
+        >
           <button
             type="button"
             className="fg-chip"

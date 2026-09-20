@@ -100,6 +100,12 @@ button:hover:not(:disabled) {
   display: flex;
   flex-direction: column;
   z-index: 2;
+  /* Fixed to the viewport, so the page scrollbar cannot reach it: on a short window
+     the nav and the connection indicator below it simply fall off the bottom with no
+     way back. It scrolls itself instead, and keeps the scroll to itself rather than
+     handing it on to the page once it hits an end. */
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .brand {
   display: flex;
