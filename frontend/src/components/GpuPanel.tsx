@@ -22,6 +22,12 @@ export function GpuPanel({ active }: { active: boolean }) {
   const burn = running.reduce((total, pod) => total + pod.cost_per_hour, 0);
 
   if (loading) return <p className="muted">Loading GPU state…</p>;
+  // Order matters: a failed first read leaves `enabled` at its false default,
+  // so checking `enabled` first would report a running-but-unreachable service
+  // as one nobody configured — collapsing the same two cases the backend
+  // separates into 502 and 503, and sending the operator to edit config when
+  // what they need to do is start gpushare.
+  if (error && !enabled) return <p className="muted">{error}</p>;
   if (!enabled)
     return (
       <p className="muted">
