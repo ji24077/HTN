@@ -602,7 +602,7 @@ def _run(
     return code
 
 
-def _capture(args: list[str], *, timeout: int = 30) -> str:
+def _capture(args: list[str], *, timeout: int = 30, stdin: str | None = None) -> str:
     try:
         done = subprocess.run(
             args,
@@ -614,6 +614,7 @@ def _capture(args: list[str], *, timeout: int = 30) -> str:
             capture_output=True,
             timeout=timeout,
             check=False,
+            input=stdin,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise JobError(public_error_message(f"could not run {args[0]}: {exc}")) from exc
@@ -735,9 +736,112 @@ def _known_hosts_path() -> str:
 
 
 def _remote(job: Job, info: dict[str, Any], argv: list[str], *, allow_failure: bool = False) -> int:
-    command = f'cd {shlex.quote(REMOTE_ROOT)} && export PATH="$HOME/.local/bin:$PATH" && '
-    command += shlex.join(argv)
-    return _run(job, _ssh_args(info, command), allow_failure=allow_failure)
+    """Run a command on the pod, detached, and follow it from here.
+
+    It used to run as a child of the ssh session, which meant the session WAS
+    the job: a dropped connection killed the work. That is how a QLoRA run
+    died at 35% on a pod with 22 GB of VRAM free — nothing was wrong with the
+    training, the link carrying it went away. Raising the keepalive tolerance
+    made that rarer; this makes it survivable.
+
+    setsid detaches the command into its own process group, its output goes to
+    a file on the pod, and this function polls. Each poll is a short-lived ssh
+    of its own, so a connection that fails costs one poll and is retried — the
+    work never notices. The serving path has worked this way since it was
+    written; this brings training and evaluation to the same footing.
+    """
+    run_dir = f"{REMOTE_ROOT}/.jobs/{job.id}-{uuid.uuid4().hex[:8]}"
+    log_path, status_path, pid_path = f"{run_dir}/log", f"{run_dir}/status", f"{run_dir}/pid"
+
+    # The script records its own pid and its own exit code, because neither can
+    # be learned from ssh once nothing is holding the process open. ssh does
+    # not reliably return while a backgrounded child exists — measured, it
+    # waited the full duration of a detached `sleep 30` even with setsid,
+    # nohup, and all three descriptors redirected — so nothing here depends on
+    # it returning.
+    script = (
+        f"echo $$ > {shlex.quote(pid_path)}\n"
+        f'cd {shlex.quote(REMOTE_ROOT)} || exit 1\n'
+        f'export PATH="$HOME/.local/bin:$PATH"\n'
+        f"{shlex.join(argv)}\n"
+        f"echo $? > {shlex.quote(status_path)}\n"
+    )
+    JOBS.log(job, "$ " + shlex.join(argv))
+    _capture(
+        _ssh_args(
+            info,
+            f"mkdir -p {shlex.quote(run_dir)} && cat > {shlex.quote(run_dir)}/run.sh",
+        ),
+        timeout=120,
+        stdin=script,
+    )
+    # Bounded, and a timeout here is not a failure: the work is detached and
+    # the poll loop below is what actually establishes whether it started.
+    with contextlib.suppress(Exception):
+        _capture(
+            _ssh_args(
+                info,
+                f"setsid nohup sh {shlex.quote(run_dir)}/run.sh < /dev/null "
+                f"> {shlex.quote(log_path)} 2>&1 & echo started",
+            ),
+            timeout=20,
+        )
+
+    offset, misses, started = 0, 0, False
+    while True:
+        if job.cancel_requested:
+            with contextlib.suppress(Exception):
+                _capture(
+                    _ssh_args(
+                        info,
+                        # setsid made it a group leader, so the negative pid
+                        # reaches children too: a trainer that spawned
+                        # dataloader workers does not leave them running.
+                        f"kill -TERM -$(cat {shlex.quote(pid_path)} 2>/dev/null) 2>/dev/null || true",
+                    ),
+                    timeout=60,
+                )
+            raise JobError("cancelled")
+        try:
+            poll = (
+                f"tail -c +{offset + 1} {shlex.quote(log_path)} 2>/dev/null; "
+                f"echo '<<<GPUSHARE>>>'; "
+                f"wc -c < {shlex.quote(log_path)} 2>/dev/null || echo 0; "
+                f"cat {shlex.quote(status_path)} 2>/dev/null || echo RUNNING; "
+                f"test -f {shlex.quote(pid_path)} && echo HASPID || echo NOPID"
+            )
+            out = _capture(_ssh_args(info, poll), timeout=120)
+            misses = 0
+        except Exception:  # noqa: BLE001 — a failed poll is not a failed job
+            misses += 1
+            if misses >= 10:
+                raise JobError(
+                    f"lost contact with the pod over {misses} polls while running "
+                    f"{argv[0]}; it may still be running there"
+                ) from None
+            time.sleep(6)
+            continue
+
+        body, _, tail = out.rpartition("<<<GPUSHARE>>>")
+        for line in body.splitlines():
+            JOBS.log(job, line)
+        parts = [p.strip() for p in tail.strip().splitlines() if p.strip()]
+        if parts and parts[0].isdigit():
+            offset = int(parts[0])
+        started = started or "HASPID" in parts
+        state = parts[1] if len(parts) > 1 else "RUNNING"
+        if state != "RUNNING":
+            code = int(state) if state.lstrip("-").isdigit() else 1
+            if code != 0 and not allow_failure:
+                raise JobError(f"command exited with status {code}: {argv[0]}")
+            return code
+        if not started and misses == 0 and offset == 0:
+            # No pid file and no output: the launch did not take. Say so rather
+            # than polling an empty directory forever.
+            misses += 1
+            if misses >= 8:
+                raise JobError(f"{argv[0]} never started on the pod")
+        time.sleep(4)
 
 
 def _rsync_transport(info: dict[str, Any]) -> str:
