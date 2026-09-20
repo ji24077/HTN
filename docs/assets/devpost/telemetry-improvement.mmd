@@ -1,0 +1,12 @@
+flowchart TD
+    R["Successful and failed runs"] --> D[("Execution evidence<br/>Hardware, code, checks, timings, outcomes")]
+    D --> A["Planned learning across runs<br/>Identify recurring failures and useful changes"]
+    A --> M["Improve migration strategies"]
+    A --> O["Improve model optimization choices"]
+    M --> T["Test proposed improvements<br/>Correctness and performance regression cases"]
+    O --> T
+    T --> G{"Evidence supports adoption?"}
+    G -->|"No"| A
+    G -->|"Yes"| H["Human review"]
+    H --> F["Use reviewed improvements<br/>in future runs"]
+    F --> R
