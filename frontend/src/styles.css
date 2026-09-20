@@ -2092,6 +2092,17 @@ details[open] > summary {
 /* ── GPU Lab: chat-first view over the GPUShare experiment server ─────────
    Light only, on the dispatch tokens. Type floors are higher than the rest of
    the app because this view is demoed on a projector. */
+.gpu-demo {
+  padding: 24px;
+}
+@media (max-width: 600px) {
+  .gpu-demo {
+    padding: 12px;
+  }
+}
+.gpu-demo .lab {
+  height: calc(100vh - 48px);
+}
 .lab {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -2113,6 +2124,7 @@ details[open] > summary {
 }
 .lab-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
   padding: 13px 18px;
@@ -2505,12 +2517,79 @@ select.lab-model:hover {
   padding: 9px 18px 12px;
 }
 .lab-side {
+  min-width: 0;
   min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 12px;
   padding-right: 2px;
+}
+.lab-modebar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--line);
+}
+.lab-modebar > span {
+  color: var(--muted);
+  font-size: 12px;
+}
+.lab-modebar > .text-btn {
+  margin-left: auto;
+}
+.lab-precision {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.lab-precision select {
+  max-width: 90px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+.lab-workflow-result {
+  margin-top: 14px;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+}
+.lab-workflow-result summary {
+  padding: 12px 0;
+  cursor: pointer;
+  color: var(--green);
+}
+.lab-workflow-result p {
+  margin: 8px 0;
+  overflow-wrap: anywhere;
+}
+.lab-workflow-result progress {
+  width: 100%;
+  accent-color: var(--green);
+}
+.lab-workflow-settings {
+  margin: 0 0 14px;
+}
+.lab-workflow-settings > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 0;
+}
+.lab-workflow-settings dt {
+  color: var(--muted);
+  text-transform: capitalize;
+}
+.lab-workflow-settings dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+.lab-msg.assistant > div {
+  min-width: 0;
 }
 .lab-section {
   background: var(--panel);
@@ -2828,7 +2907,8 @@ select.lab-model:hover {
 }
 @media (max-width: 1180px) {
   .lab,
-  .lab.with-side {
+  .lab.with-side,
+  .gpu-demo .lab {
     grid-template-columns: minmax(0, 1fr);
     height: auto;
   }
@@ -2841,6 +2921,37 @@ select.lab-model:hover {
   }
 }
 @media (max-width: 640px) {
+  .lab-agentbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .lab-agentbar > b:not(.lab-clock) {
+    flex: 1;
+    min-width: 0;
+    white-space: normal;
+  }
+  .lab-agentbar > span {
+    order: 2;
+    flex-basis: 100%;
+  }
+  .lab-agentbar .lab-track {
+    order: 3;
+    flex-basis: 100%;
+  }
+  .lab-agentbar > code {
+    order: 4;
+    width: 100%;
+  }
+  .lab-head .pill {
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  select.lab-model {
+    min-width: 0;
+    max-width: 100%;
+  }
   .lab-suggestions {
     grid-template-columns: 1fr;
   }

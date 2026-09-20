@@ -1,8 +1,7 @@
-// Client for the GPUShare experiment server (src/gpushare/dashboard). It is a
-// separate process from the orchestrator, so requests carry no credentials.
+// The dev server proxies /api to GPUShare on its own port. An explicit public
+// URL is optional; backend credentials must never use a VITE_ variable.
 export const GPULAB_URL = (
-  (import.meta.env.VITE_GPUSHARE_URL as string | undefined) ||
-  "http://127.0.0.1:8080"
+  (import.meta.env.VITE_GPUSHARE_URL as string | undefined) || ""
 ).replace(/\/$/, "");
 
 export type Pod = {
@@ -19,11 +18,14 @@ export type LabModel = {
   label: string;
   kind: string;
   pod_id?: string | null;
+  ref?: string;
+  detail?: string;
 };
 
 export type Serving = {
   running: boolean;
   model_id?: string;
+  model_ref?: string;
   pod_id?: string;
   dtype?: string;
   prefix_tokens?: number;
@@ -58,6 +60,60 @@ export type Experiment = {
   after?: Evaluation | null;
   train?: TrainRun | null;
   data: { train: number; heldout: number };
+  comparison?: { status: string; detail: string };
+};
+
+export type EvidenceVerdict = {
+  status: "passed" | "rejected" | "not_validated";
+  cases: number;
+  changed_cases: number | null;
+  reference_correct: number | null;
+  candidate_correct: number | null;
+  examples?: {
+    source_index?: number;
+    id?: string;
+    sentence?: string;
+    fields: string[];
+    before: unknown;
+    after: unknown;
+    expected: unknown;
+  }[];
+};
+
+export type EvidenceRecheck = {
+  gpu_key: string;
+  comparison: "optimization" | "migration_from_4090";
+  source: "saved_outputs";
+  checked_at: string;
+  verdict: EvidenceVerdict;
+  status: EvidenceVerdict["status"];
+  model_sha256: string;
+  dataset_sha256: string;
+  recorded_speed_gate_passed: boolean;
+  detail: string;
+};
+
+export type RecordedEvidence = {
+  kind: "recorded_hardware_evidence";
+  recorded_at: string;
+  checkpoint: string;
+  model_sha256: string;
+  dataset_sha256: string;
+  model_status: string;
+  timing_scope: string;
+  sampling_note: string;
+  quality_note: string;
+  rows: {
+    key: string;
+    gpu: string;
+    vendor: string;
+    measured: boolean;
+    baseline_s: number | null;
+    candidate_s: number | null;
+    latency_ratio: number | null;
+    optimization: EvidenceVerdict;
+    migration_from_4090: EvidenceVerdict;
+  }[];
 };
 
 type Throughput = { elapsed_s?: number; tokens_per_second?: number };
@@ -73,6 +129,9 @@ export type LabJob = {
   error?: string;
   logs?: string[];
   result?: {
+    remote_checkpoint?: string;
+    model?: string;
+    migration_mode?: string;
     train?: TrainRun;
     after?: Evaluation;
     chosen?: { micro_batch?: number; grad_accum?: number };
@@ -81,7 +140,16 @@ export type LabJob = {
     baseline?: Throughput;
     optimized?: Throughput;
     speedup?: number;
-    validation?: { status?: string };
+    validation?: {
+      status?: string;
+      detail?: string;
+      tolerance?: number;
+      policy?: string;
+      cases?: number;
+      changed_outputs?: number;
+      output_preservation_verified?: boolean;
+      evaluation?: { dataset_sha256?: string };
+    };
   };
 };
 

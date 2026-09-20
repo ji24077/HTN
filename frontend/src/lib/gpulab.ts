@@ -1,4 +1,10 @@
-import { lab, type Generation, type LabJob } from "../api/gpulab";
+import {
+  lab,
+  LIVE_STATUSES,
+  type Generation,
+  type LabJob,
+  type Pod,
+} from "../api/gpulab";
 
 export const pct = (v?: number | null) =>
   v == null ? "—" : (Number(v) * 100).toFixed(1) + "%";
@@ -33,6 +39,84 @@ export function friendlyFailure(job?: LabJob | null) {
   if (/no model is loaded/i.test(text))
     return "The inference model is not ready. Pick a model and load it onto a GPU first.";
   return job?.error || "The job did not finish. Check the detailed log.";
+}
+
+/** Job completion says nothing about quality until the evaluator reports it. */
+export function verification(job: LabJob) {
+  const gate = job.result?.validation;
+  if (
+    gate &&
+    ["regressed", "rejected", "failed", "reject"].includes(gate.status || "")
+  )
+    return {
+      label: "Rejected",
+      tone: "bad" as const,
+      detail: gate.detail || "The candidate did not pass the quality gate.",
+    };
+  if (["failed", "interrupted", "cancelled"].includes(job.status))
+    return {
+      label: "Failed",
+      tone: "bad" as const,
+      detail: friendlyFailure(job),
+    };
+  const acceptedPolicy =
+    gate?.tolerance === 0 &&
+    Boolean(gate.evaluation?.dataset_sha256) &&
+    (gate.policy === "aggregate_no_regression" ||
+      (gate.policy === "strict_output_preservation" &&
+        gate.output_preservation_verified === true));
+  if (job.status === "complete" && gate?.status === "ok" && acceptedPolicy)
+    return {
+      label: "Passed",
+      tone: "ok" as const,
+      detail: gate?.detail || "Passed the recorded evaluation policy.",
+    };
+  return {
+    label: "Not validated",
+    tone: "warn" as const,
+    detail:
+      job.status === "complete" &&
+      ["ok", "passed", "pass"].includes(gate?.status || "")
+        ? "Historical or incomplete evaluation: the current policy requires a recognized zero-tolerance gate, dataset identity, and verified output preservation for strict comparisons."
+        : LIVE_STATUSES.includes(job.status)
+          ? "Evaluation is pending."
+          : gate?.detail || "No passing evaluation was recorded for this job.",
+  };
+}
+
+export function completionNote(job: LabJob) {
+  const verdict = verification(job);
+  return `${JOB_LABEL[job.kind] || job.kind}: ${verdict.label}. ${verdict.detail}`;
+}
+
+export function migrationAction(source?: Pod, target?: Pod) {
+  if (!source || !target || source.id === target.id) return null;
+  if (source.vendor === "nvidia" && target.vendor === "amd")
+    return {
+      name: "migrate-nvidia-amd",
+      label: "Test NVIDIA → AMD training resume",
+      detail:
+        "Runs 8 training steps, resumes after step 4 on AMD, and evaluates 50 held-out examples. This is a training-resume experiment, not a live traffic switch.",
+    };
+  if (source.vendor === "amd" && target.vendor === "nvidia")
+    return {
+      name: "migrate-amd-nvidia",
+      label: "Test AMD → NVIDIA checkpoint transfer",
+      detail:
+        "Copies trained weights and evaluates the target against the source. Inspect the recorded quality verdict before choosing a candidate.",
+    };
+  if (
+    source.vendor === "nvidia" &&
+    target.vendor === "nvidia" &&
+    source.gpu !== target.gpu
+  )
+    return {
+      name: "migrate-nextgen",
+      label: "Test NVIDIA checkpoint transfer",
+      detail:
+        "Copies trained weights between different NVIDIA GPUs and evaluates the target against the source.",
+    };
+  return null;
 }
 
 // ── long context: the policy is the cached prefix ───────────────────────────
