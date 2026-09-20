@@ -91,6 +91,8 @@ class FakeStore:
         self.disconnected = []
         self.paused = False
         self.execution_batches = []
+        self.preference = "auto"
+        self.runtime_acks = []
 
     async def append_execution_events(self, worker_id, session, batch):
         self.assert_session(session)
@@ -100,11 +102,27 @@ class FakeStore:
         self.execution_batches.append(batch)
         return [item.sequence for item in batch.events]
 
-    async def create_pair_code(self, owner_id):
+    async def create_pair_code(self, owner_id, *, max_per_hour=10, max_devices=100):
         self.owner = owner_id
+        # Recorded so a test can assert the route passes the operator's ceilings through
+        # rather than letting the store's defaults quietly stand in for them.
+        self.pair_code_limits = (max_per_hour, max_devices)
         code = uuid4().hex.upper()
         self.codes.add(code)
         return code
+
+    async def runtime_preference(self, worker_id):
+        return self.preference
+
+    async def set_runtime_preference(self, worker_id, preference):
+        self.preference = preference
+        return True
+
+    async def record_runtime_ack(
+        self, worker_id, preference, applied, detail, *, runtime=None, vram_mib=None
+    ):
+        self.runtime_acks.append((preference, applied, detail, runtime))
+        self.preference = preference
 
     async def pair_device(self, code, public_key, label):
         if code not in self.codes:
@@ -200,8 +218,12 @@ class GatewayTests(unittest.TestCase):
             public_origin=ORIGIN,
             supabase_admin_ids={USER},
             supabase_admin_emails=frozenset(),
+            self_serve_join=False,
+            self_serve_max_per_hour=10,
+            self_serve_max_devices=100,
         )
         self.app.state.store = self.store
+        self.app.state.device_connections = {}
 
         async def verify(token):
             if token != "approved":
@@ -295,6 +317,165 @@ class GatewayTests(unittest.TestCase):
         self.assertEqual(paired.json()["wsUrl"], "wss://fleet.example.com/agent/connect")
         self.assertEqual(paired.json()["hostId"], self.store.worker_id)
         self.assertEqual(self.client.post("/hosts/pair", json=body).status_code, 400)
+
+    def test_self_serve_invites_are_absent_until_enabled_then_mint_unowned_codes(self):
+        """Off, the endpoint does not exist; on, it mints a code nobody had to approve.
+
+        The two assertions that matter are about what does *not* change. A self-serve
+        code is owned by nobody, so it draws on the unowned quota rather than a person's,
+        and it is redeemed by the same `/hosts/pair` with the same single-use rule as a
+        code an admin minted. If either stopped holding, this endpoint would be a way to
+        get a *better* invite than the admin path hands out.
+        """
+        self.assertEqual(self.client.post("/v1/join-requests").status_code, 404)
+        self.app.state.config.self_serve_join = True
+        issued = self.client.post("/v1/join-requests")
+        self.assertEqual(issued.status_code, 201)
+        self.assertEqual(issued.headers["cache-control"], "no-store")
+        self.assertEqual(issued.json()["server"], ORIGIN)
+        self.assertIsNone(self.store.owner)
+        # The ceilings are the operator's, not the store's defaults. Ten an hour is right
+        # for a link left on the internet and wrong for a room at an event, where the
+        # eleventh person to ask is told to come back in an hour; the route is the only
+        # place that knows which of the two this deployment is.
+        self.app.state.config.self_serve_max_per_hour = 250
+        self.app.state.config.self_serve_max_devices = 400
+        self.assertEqual(self.client.post("/v1/join-requests").status_code, 201)
+        self.assertEqual(self.store.pair_code_limits, (250, 400))
+        body = {
+            "code": issued.json()["code"].lower(),
+            "publicKey": self.public,
+            "label": "Windows laptop",
+        }
+        paired = self.client.post("/hosts/pair", json=body)
+        self.assertEqual(paired.status_code, 200)
+        self.assertEqual(paired.json()["label"], "Windows laptop")
+        self.assertEqual(self.client.post("/hosts/pair", json=body).status_code, 400)
+
+    def test_self_serve_invite_limit_tells_the_reader_what_to_do(self):
+        """A volunteer reads this, not an operator: it has to say what to do next."""
+        from orchestrator.server.db.store import EnrollmentLimit
+
+        self.app.state.config.self_serve_join = True
+        with patch.object(self.store, "create_pair_code", AsyncMock(side_effect=EnrollmentLimit)):
+            response = self.client.post("/v1/join-requests")
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(response.headers["retry-after"], "3600")
+        self.assertIn("Try again", response.json()["detail"])
+
+    def test_runtime_toggle_is_stored_then_pushed_and_the_device_answer_wins(self):
+        """Stored first, pushed second, and the machine's answer overwrites the request.
+
+        The order matters more than the push: a machine that is offline when the switch
+        is flipped still has to arrive at the setting, which it does from storage at its
+        next hello. And a machine that refuses -- no device to switch to -- must leave
+        the record saying 'cpu', not the 'auto' that was asked for, or the dashboard
+        shows a GPU setting on a machine that just explained it has no GPU.
+        """
+        with self.connect() as socket:
+            self.start(socket)
+            pushed = self.client.post(
+                f"/v1/machines/{self.store.worker_id}/runtime",
+                json={"runtimePreference": "cpu"},
+                headers={"Authorization": "Bearer " + ADMIN},
+            )
+            self.assertEqual(pushed.status_code, 200)
+            self.assertTrue(pushed.json()["delivered"])
+            self.assertEqual(self.store.preference, "cpu")
+            update = socket.receive_json()
+            self.assertEqual(update["type"], "settings.update")
+            self.assertEqual(update["payload"]["runtimePreference"], "cpu")
+
+            # The device refuses `auto`: it has no device to switch to.
+            socket.send_json(
+                frame(
+                    "settings.ack",
+                    {
+                        "runtimePreference": "cpu",
+                        "applied": False,
+                        "detail": "no inference runtime in this image",
+                        "accelerator": {
+                            "runtime": "cpu",
+                            "vramMib": 0,
+                            "available": False,
+                            "reason": "no inference runtime in this image",
+                            "device": None,
+                            "providers": ["cuda", "cpu"],
+                        },
+                    },
+                )
+            )
+            # Frames are handled in order, so a request that always answers is a
+            # barrier: once task.cancel arrives, settings.ack has already been processed.
+            socket.send_json(frame("lease.renew", {"taskId": "unknown", "leaseId": "wrong"}))
+            self.assertEqual(socket.receive_json()["type"], "task.cancel")
+        self.assertEqual(self.store.runtime_acks[-1][0], "cpu")
+        self.assertFalse(self.store.runtime_acks[-1][1])
+
+    def test_runtime_toggle_survives_a_machine_being_offline(self):
+        """An unreachable machine is still set; it collects the value at its next hello."""
+        response = self.client.post(
+            f"/v1/machines/{self.store.worker_id}/runtime",
+            json={"runtimePreference": "cpu"},
+            headers={"Authorization": "Bearer " + ADMIN},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["delivered"])
+        self.assertEqual(self.store.preference, "cpu")
+        self.assertEqual(
+            self.client.post(
+                f"/v1/machines/{self.store.worker_id}/runtime",
+                json={"runtimePreference": "gpu"},
+                headers={"Authorization": "Bearer " + ADMIN},
+            ).status_code,
+            400,
+        )
+        self.assertEqual(
+            self.client.post(
+                f"/v1/machines/{self.store.worker_id}/runtime",
+                json={"runtimePreference": "cpu"},
+            ).status_code,
+            401,
+        )
+
+    def test_reported_accelerator_is_recorded_rather_than_assumed(self):
+        """A machine that reports a GPU is stored as having one; silence is not a denial."""
+        with self.connect() as socket:
+            socket.send_json(
+                frame(
+                    "hello",
+                    {
+                        "capability": {
+                            "adapters": ["echo"],
+                            "agentVersion": "test",
+                            "os": "linux",
+                            "arch": "x64",
+                            "accelerator": {
+                                "runtime": "cuda",
+                                "vramMib": 8192,
+                                "available": True,
+                                "reason": "",
+                                "device": "NVIDIA GeForce RTX 4060",
+                                "providers": ["cuda", "cpu"],
+                            },
+                            "runtimePreference": "auto",
+                        },
+                        "consent": {
+                            "paused": False,
+                            "allowCompute": True,
+                            "allowBrowser": False,
+                            "maxConcurrency": 8,
+                        },
+                    },
+                )
+            )
+            ack = socket.receive_json()
+            self.assertEqual(ack["type"], "hello.ack")
+        recorded = self.store.registered[-1]
+        self.assertEqual(recorded.runtime, "cuda")
+        self.assertEqual(recorded.vram_mib, 8192)
+        self.assertTrue(recorded.accelerator.available)
+        self.assertEqual(recorded.accelerator.device, "NVIDIA GeForce RTX 4060")
 
     def test_pairing_and_reconnect_deliver_current_public_worker_telemetry(self):
         with patch.dict(

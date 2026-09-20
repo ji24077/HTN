@@ -5,6 +5,7 @@ import type {
   Task,
   TaskSpec,
   ExecutionEvent,
+  RuntimePreference,
 } from "./types";
 
 export function executionEvents(
@@ -345,6 +346,20 @@ export const createDeviceInvite = () =>
   request<{ code: string; expires_in: number; server: string }>(
     "/v1/device-invites",
     { method: "POST" },
+  );
+
+/** Ask a machine to run work on its CPU only, or on the best device it has.
+ *
+ *  `delivered` reports whether the machine was reachable right now -- not whether it
+ *  complied. Compliance comes back asynchronously over the machine's own connection, so
+ *  the caller should expect the answer to arrive in the next snapshot rather than here. */
+export const setRuntimePreference = (
+  workerId: string,
+  runtimePreference: RuntimePreference,
+) =>
+  request<{ runtimePreference: RuntimePreference; delivered: boolean }>(
+    `/v1/machines/${encodeURIComponent(workerId)}/runtime`,
+    { method: "POST", body: JSON.stringify({ runtimePreference }) },
   );
 
 export type WorkloadKind =

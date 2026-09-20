@@ -667,6 +667,54 @@ h1 {
   min-width: 0;
   position: relative;
 }
+.worker {
+  /* A button carried this implicitly; the card is a div now so it has to be stated. */
+  cursor: pointer;
+}
+.runtime-toggle {
+  margin: 12px 0 4px;
+  /* The card is clickable; this control is not part of that target. */
+  cursor: default;
+}
+.runtime-choices {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.runtime-choices button {
+  font: inherit;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  padding: 3px 12px;
+  border: 0;
+  background: #fff;
+  color: #6b7063;
+  cursor: pointer;
+}
+.runtime-choices button + button {
+  border-left: 1px solid var(--line);
+}
+.runtime-choices button.on {
+  background: var(--green);
+  color: #fff;
+}
+/* Disabled has to read as "not available here", not as "momentarily busy" — this is the
+   state most machines in a CPU-only fleet will sit in permanently. */
+.runtime-choices button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+.runtime-choices button:disabled.on {
+  opacity: 1;
+}
+.runtime-why {
+  display: block;
+  margin-top: 5px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #8a8f82;
+}
 .worker.selected {
   border-color: var(--green);
   box-shadow: 0 0 0 2px #21795620;
@@ -734,6 +782,13 @@ h1 {
   border-radius: 4px;
   padding: 3px 6px;
   color: var(--muted);
+}
+/* A machine still reporting its build stamp has never installed a release, so it is
+   not merely behind -- it cannot update itself until someone pins a key on it. */
+.tag.stale {
+  color: #8a5a00;
+  border-color: #e3c489;
+  background: #fdf5e6;
 }
 .worker-footer {
   border-top: 1px solid var(--line);

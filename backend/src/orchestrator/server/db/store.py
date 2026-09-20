@@ -442,6 +442,81 @@ class Store:
         rows = await self.pool.fetch("SELECT * FROM workers ORDER BY id LIMIT 500")
         return [Worker.model_validate(dict(row)) for row in rows]
 
+    async def runtime_preference(self, worker_id: str) -> str:
+        """What the operator has asked of this machine, or 'auto' if never asked.
+
+        Read at hello so a machine that was offline when the switch was flipped still
+        arrives at the setting. Falls back to 'auto' for a worker that is not a paired
+        device at all -- token workers have no row here and no accelerator to set.
+        """
+        value = await self.pool.fetchval(
+            "SELECT runtime_preference FROM dwp_devices WHERE worker_id=$1 AND revoked_at IS NULL",
+            worker_id,
+        )
+        return value or "auto"
+
+    async def set_runtime_preference(self, worker_id: str, preference: str) -> bool:
+        """Record what was asked. Returns False for an unknown or revoked device.
+
+        `runtime_applied` is reset to NULL rather than to False, because "asked, waiting
+        to hear" and "asked, and the machine refused" are different states and the
+        dashboard shows them differently. The device's own answer fills it in.
+        """
+        if preference not in {"auto", "cpu"}:
+            raise ValueError("unknown runtime preference")
+        result = await self.pool.execute(
+            """UPDATE dwp_devices
+               SET runtime_preference=$2, runtime_applied=NULL, runtime_detail=''
+               WHERE worker_id=$1 AND revoked_at IS NULL""",
+            worker_id,
+            preference,
+        )
+        return result.endswith(" 1")
+
+    async def record_runtime_ack(
+        self,
+        worker_id: str,
+        preference: str,
+        applied: bool,
+        detail: str,
+        *,
+        runtime: str | None = None,
+        vram_mib: int | None = None,
+    ) -> None:
+        """Store what the machine said it actually did.
+
+        The device is the authority here: it reports the preference it ended up at, which
+        is not always the one it was sent. Writing the device's answer rather than the
+        request is what keeps the dashboard from showing a GPU setting on a machine that
+        told us it has no GPU.
+        """
+        await self.pool.execute(
+            """UPDATE dwp_devices
+               SET runtime_preference=$2, runtime_applied=$3, runtime_detail=$4
+               WHERE worker_id=$1 AND revoked_at IS NULL""",
+            worker_id,
+            preference if preference in {"auto", "cpu"} else "auto",
+            applied,
+            detail[:200],
+        )
+        # Keep the live capability in step with the switch.
+        #
+        # Capabilities are otherwise only written at hello, so a machine moved to CPU went
+        # on advertising `mps` -- to the dashboard *and to the scheduler* -- until it next
+        # reconnected. Matching GPU work onto a machine that had just been told not to use
+        # its GPU is the failure this prevents, and it is silent without this write.
+        if runtime in {"cpu", "cuda", "mps"}:
+            await self.pool.execute(
+                """UPDATE workers
+                   SET capabilities = jsonb_set(
+                         jsonb_set(capabilities, '{runtime}', to_jsonb($2::text)),
+                         '{vram_mib}', to_jsonb($3::int))
+                   WHERE id=$1""",
+                worker_id,
+                runtime,
+                int(vram_mib or 0),
+            )
+
     async def enrolled_worker(self, worker_id: str) -> bool:
         return await self.pool.fetchval(
             """SELECT EXISTS(
@@ -452,7 +527,18 @@ class Store:
             worker_id,
         )
 
-    async def create_pair_code(self, owner_id: str | None) -> str:
+    async def create_pair_code(
+        self, owner_id: str | None, *, max_per_hour: int = 10, max_devices: int = 100
+    ) -> str:
+        """Mint one single-use pairing code.
+
+        The two ceilings are arguments rather than constants because the self-serve page
+        and an operator minting by hand want different numbers. Ten an hour is right for
+        a link on the internet and wrong for a room at an event, where the eleventh
+        person to scan the QR code is told to come back in an hour -- which reads as the
+        network being broken. The defaults are the historical values, so every caller
+        that does not care is unaffected.
+        """
         owner = UUID(owner_id) if owner_id and owner_id != "local-admin" else None
         code = secrets.token_hex(16)
         async with self.change() as (conn, now):
@@ -469,7 +555,7 @@ class Store:
                    WHERE owner_id IS NOT DISTINCT FROM $1::uuid AND revoked_at IS NULL""",
                 owner,
             )
-            if recent >= 10 or active >= 100:
+            if recent >= max_per_hour or active >= max_devices:
                 raise EnrollmentLimit
             await conn.execute(
                 """INSERT INTO dwp_pair_codes(code_hash,owner_id,created_at,expires_at)

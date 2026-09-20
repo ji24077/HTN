@@ -30,7 +30,9 @@ class DeviceAssetsTests(unittest.TestCase):
         env.start()
         self.addCleanup(env.stop)
         self.app = FastAPI()
-        self.app.state.config = SimpleNamespace(admin_token="test-admin", public_origin="")
+        self.app.state.config = SimpleNamespace(
+            admin_token="test-admin", public_origin="", self_serve_join=False
+        )
         self.app.state.store = SimpleNamespace()
         self.client = TestClient(self.app)
         self.app.include_router(router)
@@ -110,3 +112,22 @@ class DeviceAssetsTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertNotIn("PRIVATE-CODE", response.text)
         self.assertEqual(response.headers["referrer-policy"], "no-referrer")
+
+    def test_join_offers_to_mint_only_where_self_serve_is_enabled(self):
+        """The page asks the server for a code only where the server would give one.
+
+        A button that is always rendered and fails on a server with self-serve off is
+        worse than no button: the reader cannot tell a closed network from a broken
+        page, and the only way to find out is to press it.
+        """
+        off = self.client.get("/join")
+        self.assertIn("else if(false)", off.text)
+        self.app.state.config.self_serve_join = True
+        on = self.client.get("/join")
+        self.assertIn("else if(true)", on.text)
+        self.assertIn("/v1/join-requests", on.text)
+        # The fetch is same-origin, so the policy has to allow it or the button dies
+        # silently in the console -- the one failure with no visible symptom.
+        self.assertIn("connect-src 'self'", on.headers["content-security-policy"])
+        # Still no code in the HTML: it arrives over fetch, so nothing here can cache it.
+        self.assertNotIn("DWP_INVITE=\"", on.text.split("<script>")[0])

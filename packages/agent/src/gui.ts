@@ -21,11 +21,18 @@ import { platform } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { createLogger } from '@dwp/protocol'
-import { AGENT_HOME, AGENT_VERSION, isCompiledBinary } from './paths.ts'
-import { clearConfig, isPaused, loadConfig, setPaused, type AgentConfig } from './config.ts'
+import { AGENT_HOME, AGENT_VERSION, invocation, isCompiledBinary } from './paths.ts'
+import { clearConfig, isPaused, loadConfig, saveConfig, setPaused, type AgentConfig } from './config.ts'
 import { ensureKeypair } from './keys.ts'
-import { pairHost } from './pair.ts'
+import { pairHost, parseInvite, autoEnrol } from './pair.ts'
+import {
+  containerIdentity, freeRamMb, guiBindHost, guiPort, guiPublicOrigin, hostAllowed,
+  isContainer, shouldOpenWindow, supervisorNote,
+} from './runtime.ts'
 import { connect, type AgentHandle, type AgentState } from './transport.ts'
+import {
+  budgetState, loadPerCore, onBattery, type BudgetWindow, type Limits, type Weekday,
+} from './limits.ts'
 import * as history from './history.ts'
 import { applyUpdate, completePendingInstall, restartIntoNewVersion } from './update.ts'
 import { installService, serviceStatus, uninstallService, type ServiceStatus } from './service.ts'
@@ -114,6 +121,16 @@ async function probe(port: number, token: string): Promise<boolean> {
  * not shipping a runtime.
  */
 function openWindow(url: string): void {
+  /**
+   * A container has no display, no browser and nobody in front of it. Spawning xdg-open
+   * there is not merely useless: it is a missing binary, and the ENOENT from an unhandled
+   * spawn takes the whole agent down on start — which is how the first containerised
+   * agent managed to exit before it had finished joining.
+   */
+  if (!shouldOpenWindow()) {
+    console.log(`\n  Open this from a browser on the host:\n  ${url}\n`)
+    return
+  }
   const chromium = platform() === 'win32'
     ? [
         join(process.env['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)', 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
@@ -148,26 +165,68 @@ function openWindow(url: string): void {
   child.unref()
 }
 
-/** Accept either a full invite link or a bare code, and say which fields are missing. */
-function parseInvite(text: string, fallbackServer?: string): { server: string; code: string } | { error: string } {
-  const trimmed = text.trim()
-  if (trimmed === '') return { error: 'Paste the invite link you were sent.' }
+/** Minimal escaping for the few values the 404 above interpolates. */
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+}
 
-  if (/^https?:\/\//i.test(trimmed)) {
-    let url: URL
-    try { url = new URL(trimmed) } catch { return { error: 'That does not look like a link. Paste the whole thing, starting with https://' } }
-    const code = url.searchParams.get('code')
-    if (!code) {
-      return { error: 'That link has no invite code in it. It should end with ?code=SOMETHING' }
+/**
+ * Accept only what the rules can actually act on.
+ *
+ * Every field is clamped rather than merely type-checked, because these numbers are
+ * consulted on the hot path for every offer and a negative or absurd one would not throw
+ * -- it would quietly make a rule that never fires, or one that never stops firing. The
+ * clamps are the same ones the input controls advertise, so the page and this agree.
+ */
+function sanitiseLimits(raw: unknown): Limits {
+  if (raw === null || raw === undefined) return {}
+  if (typeof raw !== 'object') throw new Error('limits must be an object')
+  const input = raw as Record<string, unknown>
+  const limits: Limits = {}
+
+  if (Array.isArray(input.workloads)) {
+    const workloads = input.workloads.filter((w): w is string => typeof w === 'string').slice(0, 32)
+    // An empty list is "everything", not "nothing" -- see allowedWorkloads.
+    if (workloads.length > 0) limits.workloads = workloads
+  }
+
+  const budget = input.budget as { minutes?: unknown; per?: unknown } | undefined
+  if (budget && typeof budget === 'object') {
+    const minutes = Number(budget.minutes)
+    const per: BudgetWindow = budget.per === 'hour' ? 'hour' : 'day'
+    // A week of minutes is the ceiling; beyond that it is not a limit.
+    if (Number.isFinite(minutes) && minutes > 0) {
+      limits.budget = { minutes: Math.min(Math.round(minutes), 10_080), per }
     }
-    return { server: url.origin, code }
   }
 
-  // A bare code is only usable if we already know where to send it.
-  if (!fallbackServer) {
-    return { error: 'That looks like just the code. Paste the whole invite link instead, so this computer knows which network to join.' }
+  const schedule = input.schedule as { from?: unknown; to?: unknown; days?: unknown } | undefined
+  if (schedule && typeof schedule === 'object') {
+    const clock = /^\d{1,2}:\d{2}$/
+    const from = String(schedule.from ?? '')
+    const to = String(schedule.to ?? '')
+    if (clock.test(from) && clock.test(to) && from !== to) {
+      limits.schedule = { from, to }
+      if (Array.isArray(schedule.days)) {
+        const days = [...new Set(schedule.days.map(Number).filter(d => Number.isInteger(d) && d >= 0 && d <= 6))]
+        if (days.length > 0 && days.length < 7) limits.schedule.days = days as Weekday[]
+      }
+    }
   }
-  return { server: fallbackServer, code: trimmed }
+
+  const pressure = input.pressure as Record<string, unknown> | undefined
+  if (pressure && typeof pressure === 'object') {
+    const out: NonNullable<Limits['pressure']> = {}
+    const load = Number(pressure.maxLoadPerCore)
+    if (Number.isFinite(load) && load > 0) out.maxLoadPerCore = Math.min(load, 64)
+    const ram = Number(pressure.minFreeRamMb)
+    if (Number.isFinite(ram) && ram > 0) out.minFreeRamMb = Math.min(Math.round(ram), 1_048_576)
+    if (pressure.notOnBattery === true) out.notOnBattery = true
+    if (Object.keys(out).length > 0) limits.pressure = out
+  }
+
+  return limits
 }
 
 // ----------------------------------------------------------------- the page
@@ -241,6 +300,36 @@ function page(token: string): string {
   button:disabled { opacity: 0.5; cursor: default; }
   button.primary { background: var(--accent); border-color: var(--accent); color: #fff; width: 100%; padding: 10px; }
   button.danger:hover { border-color: var(--bad); color: var(--bad); }
+
+  /* The tab strip. Four words on one line at 520px, which is the window's width. */
+  .tabs { display: flex; gap: 2px; margin: 14px 0 10px; border-bottom: 1px solid var(--line); }
+  .tabs button {
+    flex: 1; border: 0; background: none; border-radius: 0; padding: 8px 4px;
+    color: var(--dim); font-size: 12.5px; border-bottom: 2px solid transparent;
+  }
+  .tabs button:hover:not(.on) { color: var(--ink); }
+  .tabs button.on { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+
+  .field { padding: 11px 0; border-top: 1px solid var(--line); }
+  .field:first-child { border-top: 0; padding-top: 2px; }
+  .field > .label { font-size: 13px; }
+  .field > .hint { color: var(--dim); font-size: 11.5px; margin-top: 1px; }
+  .controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+  input[type=number], input[type=time], select {
+    font: inherit; font-size: 12.5px; padding: 5px 7px; border-radius: 7px;
+    border: 1px solid var(--line); background: var(--bg); color: var(--ink);
+  }
+  input[type=number] { width: 5.5rem; }
+  .choices { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .choices label {
+    display: inline-flex; align-items: center; gap: 5px; font-size: 12px;
+    border: 1px solid var(--line); border-radius: 999px; padding: 4px 10px; cursor: pointer;
+  }
+  .choices label.on { border-color: var(--accent); color: var(--accent); }
+  .meter { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; margin-top: 8px; }
+  .meter > div { height: 100%; background: var(--accent); }
+  .why { font-size: 12px; color: var(--warn); margin-top: 6px; }
+  .saved { font-size: 12px; color: var(--ok); }
   input, textarea {
     font: inherit; font-size: 13px; width: 100%; padding: 9px 11px; border-radius: 8px;
     border: 1px solid var(--line); background: var(--bg); color: var(--ink); resize: vertical;
@@ -303,6 +392,14 @@ function page(token: string): string {
 
   <!-- Paired -->
   <section id="main" hidden>
+    <nav class="tabs">
+      <button data-tab="status" class="on">Status</button>
+      <button data-tab="work">Work</button>
+      <button data-tab="limits">Limits</button>
+      <button data-tab="settings">Settings</button>
+    </nav>
+
+    <div data-panel="status">
     <div class="card">
       <div class="state">
         <span class="dot" id="dot"></span>
@@ -310,14 +407,9 @@ function page(token: string): string {
       </div>
       <div class="task" id="tasks" hidden></div>
       <div class="advice" id="advice" hidden></div>
-    </div>
-
-    <div class="card">
-      <div class="headline">Recent work</div>
-      <div class="note" id="histSummary">Nothing has run on this computer yet.</div>
-      <div class="strip" id="histStrip" hidden></div>
-      <div class="runs" id="histRuns" hidden></div>
-      <div class="note adapters" id="histAdapters" hidden></div>
+      <!-- Why nothing is running, when the reason is a rule the owner set rather than
+           an empty queue. Without it the two are indistinguishable. -->
+      <div class="why" id="whyIdle" hidden></div>
     </div>
 
     <div class="card">
@@ -326,9 +418,98 @@ function page(token: string): string {
         <dt>Network</dt><dd id="server">—</dd>
         <dt>Can run</dt><dd id="adapters">—</dd>
         <dt>Version</dt><dd id="version">—</dd>
+        <dt id="runsInLabel" hidden>Runs in</dt><dd id="runsIn" hidden>—</dd>
       </dl>
     </div>
+    </div>
 
+    <div data-panel="work" hidden>
+    <div class="card">
+      <div class="headline">Recent work</div>
+      <div class="note" id="histSummary">Nothing has run on this computer yet.</div>
+      <div class="strip" id="histStrip" hidden></div>
+      <div class="runs" id="histRuns" hidden></div>
+      <div class="note adapters" id="histAdapters" hidden></div>
+    </div>
+    </div>
+
+    <div data-panel="limits" hidden>
+    <div class="card">
+      <div class="headline">What this machine will run</div>
+      <div class="note">Turned-off work is never offered to this machine, so it is not
+      declined over and over — the network is told what you chose.</div>
+      <div class="choices" id="workloadChoices"></div>
+    </div>
+
+    <div class="card">
+      <div class="field">
+        <div class="label">Daily limit on compute time</div>
+        <div class="hint">Once spent, this machine turns work down until the window rolls
+        over. Zero means no limit.</div>
+        <div class="controls">
+          <input type="number" id="budgetMinutes" min="0" max="10080" step="5" value="0">
+          <span class="hint">minutes per</span>
+          <select id="budgetPer">
+            <option value="day">day</option>
+            <option value="hour">hour</option>
+          </select>
+        </div>
+        <div class="meter" id="budgetMeter" hidden><div id="budgetFill"></div></div>
+        <div class="hint" id="budgetUsed" hidden></div>
+      </div>
+
+      <div class="field">
+        <div class="label">Only work between these hours</div>
+        <div class="hint">Your machine's local time. Leave both the same for any hour.</div>
+        <div class="controls">
+          <input type="time" id="fromTime" value="00:00">
+          <span class="hint">to</span>
+          <input type="time" id="toTime" value="00:00">
+        </div>
+        <div class="choices" id="dayChoices"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="headline">Leave the machine usable</div>
+      <div class="note">Checked before every task. A reading this machine cannot take is
+      ignored rather than guessed at.</div>
+      <div class="field">
+        <div class="label">Skip work when already busy</div>
+        <div class="hint">System load per core. 0 turns this off; 0.7 leaves headroom.</div>
+        <div class="controls">
+          <input type="number" id="maxLoad" min="0" max="16" step="0.1" value="0">
+          <span class="hint" id="loadNow"></span>
+        </div>
+      </div>
+      <div class="field">
+        <div class="label">Always keep this much memory free</div>
+        <div class="controls">
+          <input type="number" id="minFreeRam" min="0" max="1048576" step="128" value="0">
+          <span class="hint">MB</span>
+          <span class="hint" id="ramNow"></span>
+        </div>
+      </div>
+      <div class="field" id="batteryField">
+        <div class="row">
+          <div>
+            <div class="label">Stop when on battery</div>
+            <div class="hint" id="batteryHint">—</div>
+          </div>
+          <button id="batteryBtn">Off</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <button class="primary" id="saveLimits">Save limits</button>
+      <div class="note" id="limitsNote">Saved on this machine. They work even when the
+      network cannot be reached.</div>
+      <div class="err" id="limitsErr" hidden></div>
+    </div>
+    </div>
+
+    <div data-panel="settings" hidden>
     <div class="card">
       <div class="row" id="retryRow" hidden>
         <div>
@@ -347,7 +528,7 @@ function page(token: string): string {
       </div>
       <div class="row">
         <div>
-          <div class="label">Start automatically when I log in</div>
+          <div class="label" id="loginLabel">Start automatically when I log in</div>
           <div class="hint" id="loginHint">—</div>
         </div>
         <button id="loginBtn">—</button>
@@ -370,12 +551,13 @@ function page(token: string): string {
       <div class="row">
         <div>
           <div class="label">Stop the agent</div>
-          <div class="hint">Closing this window leaves it running. This stops it until next login.</div>
+          <div class="hint" id="quitHint">Closing this window leaves it running. This stops it until next login.</div>
         </div>
         <button class="danger" id="quitBtn">Quit</button>
       </div>
     </div>
     <div class="err" id="actionErr" hidden></div>
+    </div>
   </section>
 
   <footer id="footer">Closing this window does not stop the agent.</footer>
@@ -542,6 +724,146 @@ function renderHistory(s) {
   show(adapters, names.length > 0)
 }
 
+// ------------------------------------------------------------------ tabs
+
+var ADAPTER_NAMES = {
+  echo: 'Connection test',
+  walker_evolution: 'Walker simulation',
+  cpu_inference_batch: 'Machine learning',
+  remote_browser_session: 'Browser sessions',
+}
+var DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+
+function showTab(name) {
+  var tabs = document.querySelectorAll('.tabs button')
+  for (var i = 0; i < tabs.length; i++) tabs[i].classList.toggle('on', tabs[i].dataset.tab === name)
+  var panels = document.querySelectorAll('[data-panel]')
+  for (var j = 0; j < panels.length; j++) panels[j].hidden = panels[j].dataset.panel !== name
+}
+
+document.querySelector('.tabs').addEventListener('click', function (e) {
+  if (e.target.dataset && e.target.dataset.tab) showTab(e.target.dataset.tab)
+})
+
+// ------------------------------------------------------------------ limits
+
+/**
+ * Stop the one-second poll from overwriting what someone is in the middle of typing.
+ *
+ * The page re-renders from the server every second. Without this flag, changing a number
+ * and pausing for a moment would have the field snap back to the saved value under the
+ * cursor -- which reads as the app fighting you, and is exactly the bug that makes a
+ * settings screen feel broken.
+ */
+var limitsDirty = false
+var limitsReady = false
+
+function markDirty() { limitsDirty = true; show($('limitsErr'), false) }
+
+function dayChip(day, on) {
+  var label = mk('label', on ? 'on' : '', '')
+  var box = document.createElement('input')
+  box.type = 'checkbox'
+  box.checked = on
+  box.dataset.day = String(day)
+  box.onchange = function () { label.classList.toggle('on', box.checked); markDirty() }
+  label.appendChild(box)
+  label.appendChild(document.createTextNode(DAY_NAMES[day]))
+  return label
+}
+
+function workloadChip(adapter, on) {
+  var label = mk('label', on ? 'on' : '', '')
+  var box = document.createElement('input')
+  box.type = 'checkbox'
+  box.checked = on
+  box.dataset.adapter = adapter
+  box.onchange = function () { label.classList.toggle('on', box.checked); markDirty() }
+  label.appendChild(box)
+  label.appendChild(document.createTextNode(ADAPTER_NAMES[adapter] || adapter))
+  return label
+}
+
+function fillLimits(s) {
+  var limits = s.limits || {}
+  var chosen = limits.workloads || s.adapters
+  var host = $('workloadChoices')
+  host.textContent = ''
+  for (var i = 0; i < s.adapters.length; i++) {
+    host.appendChild(workloadChip(s.adapters[i], chosen.indexOf(s.adapters[i]) >= 0))
+  }
+  var budget = limits.budget || { minutes: 0, per: 'day' }
+  $('budgetMinutes').value = String(budget.minutes || 0)
+  $('budgetPer').value = budget.per || 'day'
+  var schedule = limits.schedule || { from: '00:00', to: '00:00' }
+  $('fromTime').value = schedule.from || '00:00'
+  $('toTime').value = schedule.to || '00:00'
+  var days = schedule.days || []
+  var dayHost = $('dayChoices')
+  dayHost.textContent = ''
+  for (var d = 0; d < 7; d++) dayHost.appendChild(dayChip(d, days.length === 0 || days.indexOf(d) >= 0))
+  var pressure = limits.pressure || {}
+  $('maxLoad').value = String(pressure.maxLoadPerCore || 0)
+  $('minFreeRam').value = String(pressure.minFreeRamMb || 0)
+  $('batteryBtn').textContent = pressure.notOnBattery ? 'On' : 'Off'
+  limitsReady = true
+}
+
+function readLimits(s) {
+  var workloads = []
+  var boxes = $('workloadChoices').querySelectorAll('input')
+  for (var i = 0; i < boxes.length; i++) if (boxes[i].checked) workloads.push(boxes[i].dataset.adapter)
+
+  var days = []
+  var dayBoxes = $('dayChoices').querySelectorAll('input')
+  for (var j = 0; j < dayBoxes.length; j++) if (dayBoxes[j].checked) days.push(Number(dayBoxes[j].dataset.day))
+
+  var limits = {}
+  // Only send what differs from "no limit", so a config stays readable and an unset
+  // field is absent rather than present-and-zero.
+  if (workloads.length > 0 && workloads.length < s.adapters.length) limits.workloads = workloads
+  var minutes = Number($('budgetMinutes').value)
+  if (minutes > 0) limits.budget = { minutes: minutes, per: $('budgetPer').value }
+  var from = $('fromTime').value
+  var to = $('toTime').value
+  if (from && to && from !== to) {
+    limits.schedule = { from: from, to: to }
+    if (days.length > 0 && days.length < 7) limits.schedule.days = days
+  }
+  var pressure = {}
+  var load = Number($('maxLoad').value)
+  if (load > 0) pressure.maxLoadPerCore = load
+  var ram = Number($('minFreeRam').value)
+  if (ram > 0) pressure.minFreeRamMb = ram
+  if ($('batteryBtn').textContent === 'On') pressure.notOnBattery = true
+  if (Object.keys(pressure).length > 0) limits.pressure = pressure
+  return limits
+}
+
+function renderLimits(s) {
+  if (!limitsReady || !limitsDirty) fillLimits(s)
+
+  var b = s.budgetState
+  show($('budgetMeter'), Boolean(b))
+  show($('budgetUsed'), Boolean(b))
+  if (b) {
+    var pct = Math.min(100, Math.round((b.usedMs / b.capMs) * 100))
+    $('budgetFill').style.width = pct + '%'
+    $('budgetUsed').textContent = dur(b.usedMs) + ' of ' + dur(b.capMs) + ' used this ' + b.per
+  }
+  var live = s.live || {}
+  $('loadNow').textContent = live.loadPerCore === null || live.loadPerCore === undefined
+    ? 'this machine does not report load'
+    : 'now ' + live.loadPerCore.toFixed(2)
+  $('ramNow').textContent = 'now ' + live.freeRamMb + ' MB free'
+  // A container has no battery to look at, so the control says so rather than pretending.
+  var known = live.onBattery !== null && live.onBattery !== undefined
+  $('batteryBtn').disabled = !known
+  $('batteryHint').textContent = known
+    ? (live.onBattery ? 'On battery right now.' : 'On mains right now.')
+    : 'This machine cannot see a battery, so this has no effect here.'
+}
+
 function render(s) {
   show($('join'), !s.paired)
   show($('main'), s.paired)
@@ -569,9 +891,28 @@ function render(s) {
   $('label').textContent = s.label
   $('server').textContent = s.server
   $('adapters').textContent = s.adapters.join(', ')
-  $('version').textContent = 'v' + s.version + (s.pinnedKey ? ' — updates verified' : ' — updates unsigned, manual only')
+  /**
+   * "updates verified" is a promise about a mechanism a container does not use, so in a
+   * container the version says where the version comes from instead: the image tag.
+   */
+  var rtEarly = s.runtime || { container: false }
+  $('version').textContent = 'v' + s.version + (rtEarly.container
+    ? ' — from the image'
+    : (s.pinnedKey ? ' — updates verified' : ' — updates unsigned, manual only'))
 
   renderHistory(s)
+  renderLimits(s)
+
+  /**
+   * "Connected, nothing to do" and "connected, but I am turning work down" look the
+   * same from outside, and only one of them is something the owner can act on.
+   */
+  var declined = s.lastDeclined
+  var recent = declined && (Date.now() - declined.at) < 10 * 60 * 1000
+  show($('whyIdle'), Boolean(recent) && s.running.length === 0)
+  if (recent && s.running.length === 0) {
+    $('whyIdle').textContent = 'Turned work down ' + ago(declined.at) + ' — ' + declined.detail + '.'
+  }
 
   show($('retryRow'), s.stoodDown)
   // Concatenation, not a template literal: this whole script sits inside one, so a
@@ -580,11 +921,33 @@ function render(s) {
     ', so you can join a different network. Your computer keeps its identity; nothing else is removed.'
   $('pauseLabel').textContent = s.paused ? 'Paused' : 'Accepting work'
   $('pauseBtn').textContent = s.paused ? 'Resume' : 'Pause'
-  $('loginBtn').textContent = s.runsAtLogin ? 'Turn off' : 'Turn on'
-  $('loginHint').textContent = s.runsAtLogin
-    ? 'On. It joins by itself after a restart, with no window open.'
-    : 'Off. It only runs while this app is open.'
+  /**
+   * Three of these rows ask a question a container cannot answer, so in a container they
+   * state the answer instead. The alternative -- hiding them -- leaves an operator
+   * hunting for controls that are simply somewhere else now.
+   */
+  var rt = rtEarly
+  show($('runsInLabel'), Boolean(rt.container))
+  show($('runsIn'), Boolean(rt.container))
+  if (rt.container) $('runsIn').textContent = (rt.image ? rt.image + ' — ' : '') + 'container ' + (rt.id || '?')
+
+  show($('loginBtn'), !rt.container)
+  $('loginLabel').textContent = rt.container ? 'Restarting' : 'Start automatically when I log in'
+  if (rt.container) {
+    $('loginHint').textContent = rt.supervisor
+  } else {
+    $('loginBtn').textContent = s.runsAtLogin ? 'Turn off' : 'Turn on'
+    $('loginHint').textContent = s.runsAtLogin
+      ? 'On. It joins by itself after a restart, with no window open.'
+      : 'Off. It only runs while this app is open.'
+  }
+
+  show($('updateBtn'), !rt.container)
   $('updateHint').textContent = s.updating ? 'Installing an update. It will restart itself.' : s.updateNote
+
+  $('quitHint').textContent = rt.container
+    ? 'Stops the agent inside this container. Whether it comes back is your restart policy.'
+    : 'Closing this window leaves it running. This stops it until next login.'
 }
 
 let rendered = false
@@ -657,6 +1020,28 @@ $('leaveBtn').onclick = () => {
   act($('leaveBtn'), () => api('leave', {}))
 }
 $('retryBtn').onclick = () => act($('retryBtn'), () => api('retry', {}))
+$('batteryBtn').onclick = function () {
+  $('batteryBtn').textContent = $('batteryBtn').textContent === 'On' ? 'Off' : 'On'
+  markDirty()
+}
+var limitInputs = ['budgetMinutes', 'budgetPer', 'fromTime', 'toTime', 'maxLoad', 'minFreeRam']
+for (var li = 0; li < limitInputs.length; li++) $(limitInputs[li]).oninput = markDirty
+$('saveLimits').onclick = () => act($('saveLimits'), async () => {
+  show($('limitsErr'), false)
+  var current = await api('state')
+  try {
+    var saved = await api('limits', { limits: readLimits(current) })
+    limitsDirty = false
+    limitsReady = false
+    $('limitsNote').textContent = saved && saved.reconnecting
+      ? 'Saved. Reconnecting so the network knows what this machine now accepts.'
+      : 'Saved on this machine. They work even when the network cannot be reached.'
+  } catch (err) {
+    $('limitsErr').textContent = err.message
+    show($('limitsErr'), true)
+    throw err
+  }
+})
 $('pauseBtn').onclick = () => act($('pauseBtn'), () => api('pause', { paused: $('pauseBtn').textContent === 'Pause' }))
 $('loginBtn').onclick = () => act($('loginBtn'), () => api('login-at-start', { enabled: $('loginBtn').textContent === 'Turn on' }))
 $('updateBtn').onclick = () => act($('updateBtn'), async () => {
@@ -714,6 +1099,7 @@ export async function runGui(opts: GuiOptions): Promise<void> {
   let state: AgentState = {
     connection: 'offline', attempt: 0, connectedSince: null, running: [],
     lastLostReason: null, advice: null, stoodDown: false, updating: false, lastRunAt: null,
+    lastDeclined: null,
   }
   let service: ServiceStatus = { installed: false, platform: platform() }
   const refreshService = async (): Promise<void> => {
@@ -775,14 +1161,16 @@ export async function runGui(opts: GuiOptions): Promise<void> {
      * Two guards, both necessary, neither sufficient alone.
      *
      * The Host check stops DNS rebinding: a name the attacker controls that resolves to
-     * 127.0.0.1 would otherwise let a page in their browser drive this server. The token
-     * in the path stops any other local process or page that has not read a file only
-     * this user can read — and anything that *can* read it could already read the agent's
-     * private key sitting beside it, so this grants nothing new.
+     * an address reaching this server would otherwise let a page in their browser drive
+     * it. It matches on the name alone (see `hostAllowed`), because the port is not a
+     * secret and requiring a particular one broke every published container whose host
+     * port differs from its container port. The token in the path stops any other local
+     * process or page that has not read a file only this user can read — and anything
+     * that *can* read it could already read the agent's private key sitting beside it,
+     * so this grants nothing new.
      */
-    const host = req.headers.host ?? ''
     const port = (server.address() as { port: number } | null)?.port
-    if (host !== `127.0.0.1:${port}` && host !== `localhost:${port}`) {
+    if (!hostAllowed(req.headers.host)) {
       send(res, 403, { error: 'wrong host' })
       return
     }
@@ -792,6 +1180,42 @@ export async function runGui(opts: GuiOptions): Promise<void> {
     const supplied = Buffer.from(given ?? '')
     const authorised = supplied.length === tokenBuf.length && timingSafeEqual(supplied, tokenBuf)
     if (!authorised) {
+      /**
+       * A bare 404 here is a dead end, and it is reached by the ordinary route.
+       *
+       * Two agents on one machine is normal — a desktop install and a container, say —
+       * and they hold different tokens on different ports. Opening the right token
+       * against the wrong port then produces a blank "not found" that says nothing about
+       * which of the two things is wrong, and the answer is invisible from the browser.
+       * A container makes this the common case, because it prints its *internal* port.
+       *
+       * Only for a request that wants HTML, i.e. someone looking at it. Machine callers
+       * keep the opaque JSON. This reveals nothing a TCP connect did not already: that
+       * something is listening. It does not say whether the token was close.
+       */
+      if (req.method === 'GET' && (req.headers.accept ?? '').includes('text/html')) {
+        res.writeHead(404, {
+          'content-type': 'text/html; charset=utf-8',
+          'cache-control': 'no-store',
+          'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'",
+          'referrer-policy': 'no-referrer',
+        })
+        res.end('<!doctype html><meta charset="utf-8">'
+          + '<style>body{font:16px/1.6 system-ui;max-width:34rem;margin:15vh auto;padding:0 1.5rem;'
+          + 'color:#14181f;background:#f6f7f9}code{background:#e3e6eb;padding:.1em .3em;border-radius:3px}'
+          + '@media(prefers-color-scheme:dark){body{color:#eef1f5;background:#14181f}'
+          + 'code{background:#2b323d}}</style>'
+          + '<h2>Wrong address for this agent</h2>'
+          + '<p>A DWP agent is listening here, but not on this path. Every agent has its own '
+          + 'single-use address, and more than one can run on a machine — a desktop install '
+          + 'and a container, for instance, on different ports.</p>'
+          + '<p>Ask the one you want for its address:</p>'
+          + '<p><code>docker logs dwp-agent | grep Window</code><br>'
+          + '<code>' + escapeHtml(invocation()) + ' gui-address</code></p>'
+          + '<p>If that prints a port you did not publish, it is the container’s own. '
+          + 'Use the host port from your <code>-p</code> flag and keep the token unchanged.</p>')
+        return
+      }
       send(res, 404, { error: 'not found' })
       return
     }
@@ -833,9 +1257,39 @@ export async function runGui(opts: GuiOptions): Promise<void> {
         platform: platform(),
         adapters: availableAdapters(),
         runsAtLogin: service.installed,
-        updateNote: config?.releaseKey
-          ? 'Installed automatically, verified against the key this computer pinned when it joined.'
-          : 'This network offers no signed releases, so updates stay manual.',
+        /**
+         * How this agent is packaged and who restarts it.
+         *
+         * The window has three rows that only make sense on a laptop — start at login,
+         * install an update, quit until next login — and all three are actively
+         * misleading in a container, where the answer to every one of them is "the
+         * container runtime decides". Rather than hide them and leave an operator
+         * wondering where the controls went, the page swaps in what is true here.
+         */
+        runtime: {
+          container: isContainer(),
+          supervisor: supervisorNote(),
+          /** The container's own id and image, so one window is identifiably one agent. */
+          ...(containerIdentity() ?? {}),
+        },
+        /**
+         * Say which of the two it is, because they need different people to act.
+         *
+         * This used to read "This network offers no signed releases", which points at
+         * the server when the truth is local: the network does publish signed releases,
+         * and this computer simply joined before it did, so it pinned no key and refuses
+         * every update. Blaming the network meant nobody ever ran the one command that
+         * fixes it, on the one machine that can.
+         */
+        updateNote: isContainer()
+          ? 'This agent is the image it was started from. Update it by pulling a newer '
+            + 'image and recreating the container — nothing here rewrites itself, so what '
+            + 'the registry holds and what is running can never drift apart.'
+          : config?.releaseKey
+            ? 'Installed automatically, verified against the key this computer pinned when it joined.'
+            : 'This computer joined before the network signed its releases, so it pinned no key '
+              + 'and cannot verify an update. Run  ' + invocation() + ' trust-updates  here to '
+              + 'review the key and turn automatic updates back on.',
         connection: state.connection,
         attempt: state.attempt,
         connectedSince: state.connectedSince,
@@ -845,6 +1299,8 @@ export async function runGui(opts: GuiOptions): Promise<void> {
         stoodDown: state.stoodDown,
         updating: state.updating,
         lastRunAt: state.lastRunAt,
+        /** Why the last offer was turned down, so an idle machine can explain itself. */
+        lastDeclined: state.lastDeclined,
         /**
          * What this machine has run before now.
          *
@@ -853,6 +1309,16 @@ export async function runGui(opts: GuiOptions): Promise<void> {
          * list, because the timeline strip shows the lot.
          */
         history: { recent: history.recent(30), summary: history.summary() },
+        /** What the owner set, so the form shows the truth rather than its own defaults. */
+        limits: config?.limits ?? {},
+        /** Progress against the duty budget, or null when there is no budget. */
+        budgetState: budgetState(config?.limits),
+        /**
+         * The same readings the rules are evaluated against, so the window can show what
+         * a threshold is being compared to. A guard whose current value is invisible is
+         * one nobody can set sensibly.
+         */
+        live: { loadPerCore: loadPerCore(), freeRamMb: freeRamMb(), onBattery: onBattery() },
       })
       return
     }
@@ -905,6 +1371,51 @@ export async function runGui(opts: GuiOptions): Promise<void> {
       return
     }
 
+    /**
+     * Save the owner's limits.
+     *
+     * Validated here rather than trusted from the page, because the page is not the only
+     * thing that can POST to this port -- anything that can read the token can, and a
+     * malformed limit would be persisted into the config and then applied to every offer
+     * from then on. Unknown fields are dropped rather than rejected: a newer window
+     * talking to an older agent should lose the setting it does not understand, not fail
+     * to save the ones it does.
+     */
+    if (route === 'api/limits') {
+      if (!config) { send(res, 400, { error: 'Join a network first.' }); return }
+      let limits: Limits
+      try {
+        limits = sanitiseLimits(body.limits)
+      } catch (err) {
+        send(res, 400, { error: err instanceof Error ? err.message : String(err) })
+        return
+      }
+      const before = JSON.stringify(config.limits?.workloads ?? null)
+      /**
+       * Mutated in place, not replaced.
+       *
+       * `connect()` closed over this exact object when the connection was established
+       * and reads `cfg.limits` on every offer. Assigning a fresh object here updates
+       * what the window shows and what is written to disk, and leaves the running agent
+       * holding the previous one — so the limits saved, displayed correctly, persisted
+       * across a restart, and did nothing at all until the process was restarted.
+       * Measured: a task accepted by a machine whose load ceiling it was three hundred
+       * times over.
+       */
+      config.limits = limits
+      saveConfig(config)
+      log.info('gui.limits_saved', { limits })
+      /**
+       * Only reconnect when the advertised set actually changed. Everything else is
+       * enforced locally on the next offer, and dropping a healthy connection to apply
+       * a memory threshold would interrupt work for no reason.
+       */
+      const reconnecting = JSON.stringify(limits.workloads ?? null) !== before
+      if (reconnecting) agent?.refresh()
+      send(res, 200, { ok: true, reconnecting })
+      return
+    }
+
     if (route === 'api/retry') {
       if (!agent) { send(res, 400, { error: 'Join a network first.' }); return }
       agent.retryNow()
@@ -936,6 +1447,7 @@ export async function runGui(opts: GuiOptions): Promise<void> {
         lastLostReason: null, advice: null, stoodDown: false, updating: false,
         // Leaving forgets a network, not what this computer has done.
         lastRunAt: state.lastRunAt,
+        lastDeclined: null,
       }
       log.info('gui.left_network', { was })
       send(res, 200, { ok: true })
@@ -950,6 +1462,13 @@ export async function runGui(opts: GuiOptions): Promise<void> {
     }
 
     if (route === 'api/login-at-start') {
+      if (isContainer()) {
+        send(res, 400, {
+          error: 'There is no login inside a container. Whether this agent comes back is '
+            + 'your container runtime\'s restart policy — set `restart: unless-stopped`.',
+        })
+        return
+      }
       try {
         if (body.enabled === true) {
           if (!config) { send(res, 400, { error: 'Join a network first.' }); return }
@@ -969,6 +1488,21 @@ export async function runGui(opts: GuiOptions): Promise<void> {
     }
 
     if (route === 'api/update') {
+      /**
+       * Refuse here as well as in update.ts, and say the same thing.
+       *
+       * An update inside a container writes into a layer that the next `docker run`
+       * throws away, so it would appear to work, survive a restart of the process, and
+       * vanish on a recreate — leaving the running version and the image's version
+       * permanently disagreeing with no way to tell which one you are looking at.
+       */
+      if (isContainer()) {
+        send(res, 200, {
+          message: 'Updates arrive as images here. Run  docker compose pull && docker compose up -d  '
+            + 'on this host to move to a newer agent.',
+        })
+        return
+      }
       if (!config) { send(res, 400, { error: 'Join a network first.' }); return }
       const { privateKey } = ensureKeypair()
       const result = await applyUpdate(config, privateKey, { force: false })
@@ -1010,6 +1544,7 @@ export async function runGui(opts: GuiOptions): Promise<void> {
    * socket can be a few hundred milliseconds from being free. Falling straight through to
    * another port would work but would break the window that is open on the old one.
    */
+  const bindHost = guiBindHost()
   const listenOn = (port: number): Promise<boolean> => new Promise(resolve => {
     const onError = (err: NodeJS.ErrnoException): void => {
       server.removeListener('error', onError)
@@ -1017,40 +1552,97 @@ export async function runGui(opts: GuiOptions): Promise<void> {
       else resolve(false)
     }
     server.once('error', onError)
-    server.listen(port, '127.0.0.1', () => {
+    server.listen(port, bindHost, () => {
       server.removeListener('error', onError)
       resolve(true)
     })
   })
 
   let bound = 0
-  const preferred = existing?.port ?? PORT_BASE
-  const waitForPreferred = supersedingParent ? 12 : 1
-  for (let i = 0; i < waitForPreferred && bound === 0; i += 1) {
-    if (await listenOn(preferred)) bound = preferred
-    else if (i + 1 < waitForPreferred) await sleep(250)
-  }
-  for (let i = 0; bound === 0 && i < PORT_TRIES; i += 1) {
-    if (await listenOn(PORT_BASE + i)) bound = PORT_BASE + i
-  }
-  if (bound === 0) {
-    console.error(`\n  Could not open a local port in ${PORT_BASE}–${PORT_BASE + PORT_TRIES - 1}.\n` +
-      `  Something else is using all of them.\n`)
-    process.exit(1)
+  /**
+   * A pinned port is taken or the agent stops, rather than quietly moving.
+   *
+   * Walking the range is right on a laptop, where the alternative is refusing to start
+   * because something unrelated holds 43117. It is wrong in a container: the port is
+   * already written down in the operator's `-p 43117:43117`, nothing else in that
+   * namespace can be holding it, and landing on 43118 publishes a port with nothing
+   * behind it — a window that shows "cannot reach the agent" forever while the agent is
+   * perfectly healthy two ports away.
+   */
+  const pinned = guiPort()
+  if (pinned !== null) {
+    for (let i = 0; i < 20 && bound === 0; i += 1) {
+      if (await listenOn(pinned)) bound = pinned
+      else await sleep(250)
+    }
+    if (bound === 0) {
+      console.error(`\n  Could not open port ${pinned} on ${bindHost}. Something else is holding it.\n`)
+      process.exit(1)
+    }
+  } else {
+    const preferred = existing?.port ?? PORT_BASE
+    const waitForPreferred = supersedingParent ? 12 : 1
+    for (let i = 0; i < waitForPreferred && bound === 0; i += 1) {
+      if (await listenOn(preferred)) bound = preferred
+      else if (i + 1 < waitForPreferred) await sleep(250)
+    }
+    for (let i = 0; bound === 0 && i < PORT_TRIES; i += 1) {
+      if (await listenOn(PORT_BASE + i)) bound = PORT_BASE + i
+    }
+    if (bound === 0) {
+      console.error(`\n  Could not open a local port in ${PORT_BASE}–${PORT_BASE + PORT_TRIES - 1}.\n` +
+        `  Something else is using all of them.\n`)
+      process.exit(1)
+    }
   }
 
   writeLock({ port: bound, token, pid: process.pid, startedAt: new Date().toISOString(), version: AGENT_VERSION })
-  const url = `http://127.0.0.1:${bound}/${token}/`
-  log.info('gui.listening', { port: bound, hidden: opts.hidden, paired: config !== null })
+  /**
+   * What to print. Inside a container the bound port is the *container's*, which is not
+   * where anyone can reach it if the operator mapped it to a different host port.
+   */
+  const url = `${guiPublicOrigin() ?? `http://127.0.0.1:${bound}`}/${token}/`
+  log.info('gui.listening', { port: bound, bindHost, container: isContainer(), hidden: opts.hidden, paired: config !== null })
 
+  /**
+   * Stop by handing work back, not by vanishing.
+   *
+   * This used to be a bare `process.exit(0)`, and because it is registered before the
+   * connection exists it also pre-empted the agent's own handler — so `docker stop`
+   * returned in under a fifth of a second with the server still believing this machine
+   * held its task, which then sat idle until its 45-second lease expired. A second
+   * signal still exits at once, for anyone who means it.
+   */
+  let stopping = false
   for (const signal of ['SIGINT', 'SIGTERM'] as const) {
-    process.on(signal, () => process.exit(0))
+    process.on(signal, () => {
+      if (stopping) process.exit(0)
+      stopping = true
+      void (agent?.handOff() ?? Promise.resolve()).finally(() => process.exit(0))
+    })
+  }
+
+  /**
+   * Join from the environment before connecting, for a machine with nobody at it.
+   *
+   * Deliberately after the window is listening: if the invite turns out to be spent or
+   * the address wrong, the operator can open the page and see exactly that, instead of
+   * the container exiting and taking the explanation with it into a log they have to go
+   * looking for.
+   */
+  if (!config) {
+    const joined = await autoEnrol()
+    if (joined?.ok) config = loadConfig()
   }
 
   if (config) await startConnection(config)
 
   if (opts.hidden) {
     console.log(`  DWP Agent running in the background. Window: ${url}`)
+    if (isContainer() && !guiPublicOrigin()) {
+      console.log(`  (that is this container's own port ${bound}; on the host it is whatever`
+        + ` you mapped it to, e.g. -p 127.0.0.1:43118:${bound} means http://127.0.0.1:43118/${token}/)`)
+    }
   } else {
     openWindow(url)
     console.log(`\n  DWP Agent\n  ${url}\n\n` +

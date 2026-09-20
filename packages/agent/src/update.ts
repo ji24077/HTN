@@ -13,6 +13,7 @@ import { request as httpsRequest } from 'node:https'
 import { loadConfig, saveConfig, type AgentConfig } from './config.ts'
 import { dnsFallbackEnabled, resolvePublicly, systemCanResolve } from './resolver.ts'
 import { installRoot, isCompiledBinary, windowsSubsystem } from './paths.ts'
+import { isContainer } from './runtime.ts'
 import { WORKLOADS, installWorkload, isInstalled } from './workloads.ts'
 
 const exec = promisify(execFile)
@@ -245,6 +246,23 @@ export async function applyUpdate(
   privateKey: KeyObject,
   opts: { force?: boolean; trustOnFirstUse?: boolean } = {},
 ): Promise<UpdateResult> {
+  /**
+   * A containerised agent does not update itself, and this is the only place that can
+   * stop it trying.
+   *
+   * The image *is* the version. Unpacking a release over the filesystem would write into
+   * a writable layer that `docker compose up --force-recreate` discards, so the update
+   * would hold until the next recreate and then silently revert — and in between, the
+   * agent would report a version that no image anywhere has. Refusing keeps one answer
+   * to "what is this machine running": its image tag.
+   */
+  if (isContainer()) {
+    return {
+      status: 'refused',
+      reason: 'this agent runs in a container, so its version is its image. '
+        + 'Pull a newer image and recreate the container instead',
+    }
+  }
   // A single-file install and a source install update in completely different ways.
   if (isCompiledBinary()) {
     if (!cfg.releaseKey && !opts.trustOnFirstUse) {

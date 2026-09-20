@@ -29,6 +29,9 @@ class ServerConfig:
     tailscale_oauth_client_secret: str = ""
     tailscale_enrollment_tag: str = "tag:htn-worker"
     worker_gateway_url: str = ""
+    self_serve_join: bool = False
+    self_serve_max_per_hour: int = 10
+    self_serve_max_devices: int = 100
 
     @classmethod
     def from_env(cls) -> "ServerConfig":
@@ -121,6 +124,38 @@ class ServerConfig:
         tag = os.getenv("TAILSCALE_ENROLLMENT_TAG", "tag:htn-worker")
         if not re.fullmatch(r"tag:[a-z][a-z0-9-]{0,62}", tag):
             raise ValueError("invalid TAILSCALE_ENROLLMENT_TAG")
+        # Whether /join hands an invite to whoever asks, with no admin token.
+        #
+        # The default follows who can reach the page rather than a fixed answer, because
+        # those are two different deployments. A combined surface is the fleet on a
+        # tailnet or a LAN: everyone who can open the page was already let onto the
+        # network, so making them ask an admin for a code is friction with nothing behind
+        # it. Setting PUBLIC_ORIGIN puts the same page on the internet, where "anyone who
+        # can reach it" stops being a meaningful restriction -- so there it is off until
+        # the operator says otherwise, and never on by a deploy they did not think about.
+        self_serve = os.getenv("DWP_SELF_SERVE_JOIN", "").strip().lower()
+        if self_serve and self_serve not in {"0", "1", "false", "true", "no", "yes", "off", "on"}:
+            raise ValueError("DWP_SELF_SERVE_JOIN must be a boolean, e.g. 1 or 0")
+        open_join = self_serve in {"1", "true", "yes", "on"} if self_serve else not origin
+
+        def ceiling(name: str, default: int) -> int:
+            """A positive whole number, or say which variable is wrong.
+
+            An unparseable ceiling must not silently become zero: that would turn the
+            join page off in a way nothing reports, and the only symptom would be every
+            volunteer being told the network is full.
+            """
+            raw = os.getenv(name, "").strip()
+            if not raw:
+                return default
+            try:
+                value = int(raw)
+            except ValueError:
+                raise ValueError(f"{name} must be a whole number") from None
+            if value < 1:
+                raise ValueError(f"{name} must be at least 1")
+            return value
+
         return cls(
             database_url,
             os.getenv("REDIS_URL") or None,
@@ -136,4 +171,7 @@ class ServerConfig:
             os.getenv("TAILSCALE_OAUTH_CLIENT_SECRET", ""),
             tag,
             gateway,
+            open_join,
+            ceiling("DWP_SELF_SERVE_MAX_PER_HOUR", 10),
+            ceiling("DWP_SELF_SERVE_MAX_DEVICES", 100),
         )

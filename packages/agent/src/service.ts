@@ -4,6 +4,7 @@ import { homedir, platform } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { AGENT_HOME, isCompiledBinary } from './paths.ts'
+import { isContainer } from './runtime.ts'
 
 const exec = promisify(execFile)
 
@@ -245,7 +246,21 @@ async function installWindowsTask(mode: ServiceMode): Promise<string> {
 
 // ------------------------------------------------------------------- public
 
+/**
+ * What to say when asked to register a login service inside a container.
+ *
+ * Not an assertion failure and not silence: the request is reasonable, the answer is
+ * that the question belongs to a different layer. A systemd unit written inside a
+ * container is a file that nothing will ever read, and writing one anyway would report
+ * success for a machine that does not in fact come back.
+ */
+const CONTAINER_REFUSAL =
+  'This agent is running in a container, which has no login to start at. '
+  + 'Whether it comes back is the container runtime\'s restart policy: '
+  + 'use `restart: unless-stopped` in your compose file, or `--restart unless-stopped` with docker run.'
+
 export async function installService(mode: ServiceMode = 'run'): Promise<string> {
+  if (isContainer()) throw new Error(CONTAINER_REFUSAL)
   const os = platform()
 
   if (os === 'darwin') {
@@ -273,6 +288,7 @@ export async function installService(mode: ServiceMode = 'run'): Promise<string>
 }
 
 export async function uninstallService(): Promise<void> {
+  if (isContainer()) throw new Error(CONTAINER_REFUSAL)
   const os = platform()
   if (os === 'darwin') {
     await exec('launchctl', ['bootout', `gui/${process.getuid?.() ?? 501}/${LABEL}`]).catch(() => {})
@@ -293,6 +309,15 @@ export async function uninstallService(): Promise<void> {
 }
 
 export async function serviceStatus(): Promise<ServiceStatus> {
+  /**
+   * A container is supervised by definition — something started it and something decides
+   * whether to start it again. Reporting `installed: false` here made the window offer a
+   * "start automatically at login" toggle that could only ever fail, on the one kind of
+   * host where restarting is already handled.
+   */
+  if (isContainer()) {
+    return { installed: true, platform: 'container', running: true, path: 'container runtime restart policy' }
+  }
   const os = platform()
   if (os === 'darwin') {
     if (!existsSync(plistPath())) return { installed: false, platform: os }
