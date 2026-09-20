@@ -1,6 +1,7 @@
 import { useRef, useState, type SubmitEvent } from "react";
 import { uploadSimulation } from "../api/client";
 import type { Task } from "../api/types";
+import { MaxSpendField, parseMaxSpend } from "./MaxSpendField";
 import { Icon } from "./Icon";
 
 export function SimulationComposer({
@@ -8,6 +9,7 @@ export function SimulationComposer({
 }: {
   onCreated: (task: Task) => void;
 }) {
+  const [maxSpend, setMaxSpend] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [description, setDescription] = useState("");
   const [busy, setBusy] = useState(false);
@@ -45,13 +47,16 @@ export function SimulationComposer({
     setBusy(true);
     setError("");
     try {
+      const usageCap = parseMaxSpend(maxSpend);
       const task = await uploadSimulation(
         files,
         description.trim(),
         requestId.current,
+        usageCap,
       );
       setFiles([]);
       setDescription("");
+      setMaxSpend("");
       requestId.current = crypto.randomUUID();
       onCreated(task);
     } catch (cause) {
@@ -141,6 +146,14 @@ export function SimulationComposer({
           requestId.current = crypto.randomUUID();
         }}
         placeholder="Run 1,000 trials using the attached inputs and return the outcome distribution."
+      />
+      <MaxSpendField
+        value={maxSpend}
+        disabled={busy}
+        onChange={(value) => {
+          setMaxSpend(value);
+          requestId.current = crypto.randomUUID();
+        }}
       />
       <p className="simulation-limits">
         Up to 3 adaptation attempts, 4 workers, and 30 minutes. Successful

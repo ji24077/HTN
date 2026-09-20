@@ -64,3 +64,55 @@ it("reports malformed or unavailable responses without crashing task details", a
     screen.getByText("Supervisor status unavailable."),
   ).toBeInTheDocument();
 });
+
+it("shows the run's estimated spend and refreshes when its cap is reached", async () => {
+  const usage = {
+    currency: "CAD",
+    estimated: true,
+    cost: "0.016667",
+    cap: "0.020000",
+    remaining: "0.003333",
+    duration_seconds: "60",
+    cap_reached: false,
+    active_attempts: 1,
+    attempts: 1,
+  };
+  read.mockResolvedValueOnce({ ...status(false), usage }).mockResolvedValue({
+    ...status(true),
+    usage: {
+      ...usage,
+      cost: "0.020100",
+      cap_reached: true,
+      active_attempts: 0,
+    },
+  });
+  render(<JobSupervisor jobId="job-1" />);
+  await act(() => vi.advanceTimersByTimeAsync(0));
+  expect(screen.getByRole("region", { name: "Run usage" })).toBeInTheDocument();
+  expect(screen.getByText("CA$0.0167")).toBeInTheDocument();
+  expect(screen.getByText("Run cap: CA$0.02")).toBeInTheDocument();
+  await act(() => vi.advanceTimersByTimeAsync(3000));
+  expect(screen.getByText("CA$0.0201")).toBeInTheDocument();
+  expect(
+    screen.getByText("Run cap: CA$0.02 · Cap reached"),
+  ).toBeInTheDocument();
+});
+
+it("shows uncapped usage even when supervision is disabled and resets on run changes", async () => {
+  read.mockResolvedValue({
+    ...status(false),
+    enabled: false,
+    usage: {
+      cost: "0.000001",
+      cap: null,
+      cap_reached: false,
+    },
+  });
+  const view = render(<JobSupervisor jobId="job-1" />);
+  await act(() => vi.advanceTimersByTimeAsync(0));
+  expect(screen.getByText("<CA$0.0001")).toBeInTheDocument();
+  expect(screen.getByText("No usage cap")).toBeInTheDocument();
+  read.mockImplementation(() => new Promise(() => {}));
+  view.rerender(<JobSupervisor jobId="job-2" />);
+  expect(screen.queryByText("<CA$0.0001")).not.toBeInTheDocument();
+});

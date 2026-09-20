@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Icon } from "./Icon";
+import { formatMoney } from "../lib/format";
 import { ApiError, readSupervisor, type SupervisorStatus } from "../api/client";
 
 export function JobSupervisor({ jobId }: { jobId: string }) {
@@ -44,6 +45,24 @@ export function JobSupervisor({ jobId }: { jobId: string }) {
   const latest = status?.runs.find((run) => run.reply);
   return (
     <section className="supervisor-card" aria-label="Job supervisor">
+      {status?.usage && (
+        <section className="run-usage" aria-label="Run usage">
+          <div>
+            <span>Estimated cost</span>
+            <strong>{formatMoney(status.usage.cost)}</strong>
+          </div>
+          <small>
+            {status.usage.cap === null
+              ? "No usage cap"
+              : `Run cap: ${formatMoney(status.usage.cap)}`}
+            {status.usage.cap_reached && " · Cap reached"}
+          </small>
+          <small>
+            Machine specs × execution time · Adjust the cap through the
+            assistant
+          </small>
+        </section>
+      )}
       <div className="supervisor-heading">
         <span className="supervisor-icon">
           <Icon name="assistant" />

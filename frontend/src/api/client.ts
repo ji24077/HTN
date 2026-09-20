@@ -288,11 +288,12 @@ export async function logout() {
   }
 }
 
-export const submitTasks = (tasks: TaskSpec[]) =>
+export const submitTasks = (tasks: TaskSpec[], usageCap?: string) =>
   request<Task[]>("/v1/tasks", {
     method: "POST",
     body: JSON.stringify({
       tasks,
+      ...(usageCap !== undefined ? { usage_cap: usageCap } : {}),
       ...(tasks.some(
         (task) =>
           task.kind === "stub" &&
@@ -417,6 +418,17 @@ export function stubTask(
 export type SupervisorStatus = {
   enabled: boolean;
   sentry_enabled: boolean;
+  usage: {
+    currency: "CAD";
+    estimated: true;
+    cost: string;
+    cap: string | null;
+    remaining: string | null;
+    duration_seconds: string;
+    cap_reached: boolean;
+    active_attempts: number;
+    attempts: number;
+  };
   job: {
     state: string;
     finalized: boolean;
@@ -527,6 +539,7 @@ export async function uploadSimulation(
   files: File[],
   description: string,
   requestId: string,
+  usageCap?: string,
 ) {
   const encoded = await Promise.all(
     files.map(async (file) => {
@@ -541,6 +554,7 @@ export async function uploadSimulation(
     method: "POST",
     body: JSON.stringify({
       request_id: requestId,
+      ...(usageCap !== undefined ? { usage_cap: usageCap } : {}),
       description,
       files: encoded,
     }),

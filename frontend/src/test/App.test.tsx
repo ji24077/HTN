@@ -1,5 +1,5 @@
 import { StrictMode } from "react";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "../App";
@@ -140,6 +140,91 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("dashboard interactions over pushed updates", () => {
+  it("shows personal credit and reduces it with live account usage", async () => {
+    const { stream } = await mount();
+    act(() =>
+      stream.snapshot({
+        ...fleet(),
+        usage: { currency: "CAD", estimated: true, cost: "99", attempts: 10 },
+        account: {
+          currency: "CAD",
+          credited: "60.00",
+          spent: "0",
+          balance: "60.00",
+        },
+      }),
+    );
+    const balance = screen.getByRole("group", { name: "Account balance" });
+    expect(within(balance).getByText("CA$60.00")).toBeInTheDocument();
+    expect(within(balance).getByText("credit")).toBeInTheDocument();
+    expect(within(balance).queryByText("CA$99.00")).not.toBeInTheDocument();
+    act(() =>
+      stream.snapshot({
+        ...fleet(),
+        account: {
+          currency: "CAD",
+          credited: "60.00",
+          spent: "0.016",
+          balance: "59.984",
+        },
+      }),
+    );
+    expect(within(balance).getByText("CA$59.984")).toBeInTheDocument();
+    act(() => stream.snapshot(fleet()));
+    expect(
+      screen.queryByRole("group", { name: "Account balance" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("exposes connection changes through the persistent header status indicator", async () => {
+    const { stream } = await mount();
+    const live = screen.getByRole("status", { name: "Live updates" });
+    expect(live.closest(".topbar")).not.toBeNull();
+    expect(live.querySelector(".connection-dot")).toHaveAttribute(
+      "aria-hidden",
+      "true",
+    );
+    act(() => stream.disconnect());
+    expect(screen.getByRole("status", { name: "Reconnecting" })).toBeVisible();
+    act(() => stream.snapshot(fleet()));
+    expect(screen.getByRole("status", { name: "Live updates" })).toBeVisible();
+  });
+
+  it("keeps estimated spend in the top-right header across pages and live updates", async () => {
+    const { stream } = await mount();
+    const spend = screen.getByRole("group", { name: "Total estimated spend" });
+    expect(spend.closest(".topbar .top-right")).not.toBeNull();
+    expect(within(spend).getByText("—")).toBeInTheDocument();
+    act(() =>
+      stream.snapshot({
+        ...fleet(),
+        usage: {
+          currency: "CAD",
+          estimated: true,
+          cost: "0.032",
+          attempts: 2,
+        },
+      }),
+    );
+    expect(within(spend).getByText("CA$0.032")).toBeInTheDocument();
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: /^Workers/ }));
+    expect(spend).toBeVisible();
+    act(() =>
+      stream.snapshot({
+        ...fleet(),
+        usage: {
+          currency: "CAD",
+          estimated: true,
+          cost: "0",
+          attempts: 0,
+        },
+      }),
+    );
+    expect(within(spend).getByText("CA$0.00")).toBeInTheDocument();
+  });
+
   it("signs in through Supabase before opening the fleet stream, and signs out", async () => {
     let signedIn = false;
     fetchMock.mockImplementation(async (path, options) => {
@@ -400,9 +485,9 @@ describe("dashboard interactions over pushed updates", () => {
         ),
     );
     await user.click(screen.getByRole("button", { name: "Send task" }));
-    expect(await screen.findByRole("status")).toHaveTextContent(
-      "Could not dispatch: database unavailable",
-    );
+    expect(
+      await screen.findByRole("status", { name: "Notification" }),
+    ).toHaveTextContent("Could not dispatch: database unavailable");
     expect(screen.getByRole("button", { name: "Send task" })).toBeEnabled();
     expect(screen.getByRole("textbox", { name: "Task name" })).toHaveValue(
       "Connection test",

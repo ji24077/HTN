@@ -27,6 +27,33 @@ it("uploads the original files and run description, retaining the submission ide
   expect(upload.mock.calls[0][0][0]).toBe(file);
   expect(upload.mock.calls[0][1]).toBe("Run 24 trials");
   expect(upload.mock.calls[0][2]).toBe(upload.mock.calls[1][2]);
+  expect(upload.mock.calls[0][3]).toBeUndefined();
+});
+
+it("retains a CAD cap on retry and uses a new submission when the cap changes", async () => {
+  const user = userEvent.setup();
+  upload.mockReset().mockRejectedValue(new Error("Connection interrupted"));
+  render(<SimulationComposer onCreated={vi.fn()} />);
+  await user.upload(
+    screen.getByLabelText("Simulation files"),
+    new File(["pass"], "main.py"),
+  );
+  await user.type(screen.getByLabelText("Describe your run"), "Example");
+  await user.type(screen.getByLabelText(/Max spend \(CAD\)/), "2.50");
+  const send = screen.getByRole("button", { name: "Submit simulation" });
+  await user.click(send);
+  await screen.findByRole("alert");
+  await user.click(send);
+  await screen.findByRole("alert");
+  expect(upload.mock.calls[0][3]).toBe("2.50");
+  expect(upload.mock.calls[1][3]).toBe("2.50");
+  expect(upload.mock.calls[1][2]).toBe(upload.mock.calls[0][2]);
+  await user.clear(screen.getByLabelText(/Max spend \(CAD\)/));
+  await user.type(screen.getByLabelText(/Max spend \(CAD\)/), "0");
+  await user.click(send);
+  await screen.findByRole("alert");
+  expect(upload.mock.calls[2][3]).toBe("0");
+  expect(upload.mock.calls[2][2]).not.toBe(upload.mock.calls[1][2]);
 });
 
 it("rejects colliding filenames before submission", async () => {

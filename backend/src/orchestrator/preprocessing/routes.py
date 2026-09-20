@@ -8,6 +8,7 @@ from fastapi.responses import Response
 from pydantic import ValidationError
 
 from ..server.auth import require_admin
+from ..server.credits import account_id
 from ..server.db.store import Conflict
 from ..shared.protocol import Identifier, json_loads
 from .artifacts import unpack
@@ -38,7 +39,9 @@ async def submit(request: Request):
         NotImplementedError,
     ) as exc:
         raise HTTPException(400, str(exc)[:300]) from exc
-    return await SimulationStore(request.app.state.store).create(upload, files)
+    return await SimulationStore(request.app.state.store).create(
+        upload, files, account_id=account_id(request)
+    )
 
 
 @router.get("/{job_id}")

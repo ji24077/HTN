@@ -1,6 +1,7 @@
 import { useState, type SubmitEvent } from "react";
 import type { TaskSpec, Worker } from "../api/types";
 import { workloadTask, type WorkloadKind } from "../api/client";
+import { MaxSpendField, parseMaxSpend } from "./MaxSpendField";
 import { workerName } from "../lib/format";
 
 export function TaskComposer({
@@ -14,8 +15,9 @@ export function TaskComposer({
   onSelect: (id: string) => void;
   workers: Worker[];
   busy: boolean;
-  onSubmit: (tasks: TaskSpec[]) => Promise<void>;
+  onSubmit: (tasks: TaskSpec[], usageCap?: string) => Promise<void>;
 }) {
+  const [maxSpend, setMaxSpend] = useState("");
   const [name, setName] = useState("Connection test");
   const [duration, setDuration] = useState(30);
   const [failover, setFailover] = useState(true);
@@ -37,6 +39,7 @@ export function TaskComposer({
     setPreparing(true);
     setError("");
     try {
+      const usageCap = parseMaxSpend(maxSpend);
       const worker = workers.find((worker) => worker.id === selected);
       if (worker && !worker.capabilities.kinds.includes(kind))
         throw new Error("Choose a worker that supports this workload.");
@@ -53,7 +56,7 @@ export function TaskComposer({
           fail: true,
           value: { label: name.trim() },
         };
-      await onSubmit([task]);
+      await onSubmit([task], usageCap);
     } catch (cause) {
       setError(
         cause instanceof Error ? cause.message : "Could not prepare the task.",
@@ -171,6 +174,11 @@ export function TaskComposer({
           If the worker disconnects, unfinished work can move to an available
           one.
         </p>
+        <MaxSpendField
+          value={maxSpend}
+          onChange={setMaxSpend}
+          disabled={busy || preparing}
+        />
         <button
           type="submit"
           className="submit"

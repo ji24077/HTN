@@ -17,6 +17,7 @@ import sys
 import tempfile
 import time
 import unittest
+from decimal import Decimal
 from pathlib import Path
 
 import httpx
@@ -205,6 +206,13 @@ class DeviceE2ETests(unittest.TestCase):
                     self.assertEqual(paired.returncode, 0, paired.stderr)
                     config = json.loads((temporary / "agent" / "config.json").read_text())
                     worker_id = config["hostId"]
+                    # The suite submits CPU workloads, regardless of host accelerators.
+                    config["runtimePreference"] = "cpu"
+                    (temporary / "agent" / "config.json").write_text(json.dumps(config))
+                    client.post(
+                        f"/v1/machines/{worker_id}/runtime",
+                        json={"runtimePreference": "cpu"},
+                    ).raise_for_status()
 
                     def launch():
                         return subprocess.Popen(
@@ -300,10 +308,32 @@ class DeviceE2ETests(unittest.TestCase):
                         "real agent hello", current_worker, processes=(control, device)
                     )
                     self.assertIn("walker_evolution", first["capabilities"]["kinds"])
+                    self.assertEqual(first["capabilities"]["runtime"], "cpu")
                     submit("echo-e2e", "echo", {"nonce": "real-node-echo", "sleepMs": 50})
                     echo = wait_task("echo-e2e", "succeeded")
                     self.assertEqual(echo["result"]["nonce"], "real-node-echo")
                     check_proof(echo)
+                    usage_response = client.get("/v1/jobs/device-e2e/usage")
+                    usage_response.raise_for_status()
+                    usage = usage_response.json()
+                    self.assertEqual(usage["currency"], "CAD")
+                    self.assertEqual(usage["attempts"], 1)
+                    record = usage["records"][0]
+                    self.assertEqual(record["worker_id"], worker_id)
+                    self.assertEqual(record["outcome"], "succeeded")
+                    machine = first["capabilities"]["machine"]
+                    self.assertEqual(record["pricing_basis"]["machine"], machine)
+                    expected_rate = min(
+                        Decimal("0.50"),
+                        max(
+                            Decimal("0.01"),
+                            Decimal(machine["logical_cores"]) * Decimal("0.002")
+                            + Decimal(machine["total_ram_mb"]) / 1024 * Decimal("0.001"),
+                        ),
+                    ).quantize(Decimal("0.000001"))
+                    self.assertEqual(Decimal(record["hourly_rate"]), expected_rate)
+                    self.assertGreater(Decimal(record["duration_seconds"]), 0)
+                    self.assertGreater(Decimal(record["cost"]), 0)
                     rows = history("echo-e2e", "succeeded")
                     self.assertTrue(any(e["kind"] == "step" for e in rows))
                     self.assertTrue(
