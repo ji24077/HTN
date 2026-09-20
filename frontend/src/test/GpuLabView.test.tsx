@@ -72,10 +72,9 @@ test.each([{ evidenceOpen: true }, { initialView: "evidence" as const }])(
     expect(
       screen.getByRole("log", { name: "GPU Lab conversation" }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Evidence" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    expect(
+      screen.getByRole("button", { name: "Setup & results" }),
+    ).toHaveAttribute("aria-pressed", "true");
     expect(state.start).not.toHaveBeenCalled();
   },
 );
@@ -104,14 +103,14 @@ test("Evidence opens beside the conversation without losing the draft", async ()
     screen.getByLabelText("Message the model"),
     "Keep this draft",
   );
-  await user.click(screen.getByRole("button", { name: "Evidence" }));
+  await user.click(screen.getByRole("button", { name: "Setup & results" }));
   expect(
     screen.getByRole("complementary", { name: "Experiment" }),
   ).toBeInTheDocument();
   expect(screen.getByLabelText("Message the model")).toHaveValue(
     "Keep this draft",
   );
-  await user.click(screen.getByRole("button", { name: "Evidence" }));
+  await user.click(screen.getByRole("button", { name: "Setup & results" }));
   expect(
     screen.queryByRole("complementary", { name: "Experiment" }),
   ).not.toBeInTheDocument();

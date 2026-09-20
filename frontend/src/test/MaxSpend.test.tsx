@@ -72,6 +72,8 @@ it("sends CAD caps in both APIs and omits blank caps", async () => {
   expect(bodies[0].usage_cap).toBe("0");
   expect(bodies[1]).not.toHaveProperty("usage_cap");
   expect(bodies[2].usage_cap).toBe("2.50");
+  expect(bodies[2].execution_mode).toBe("auto");
+  expect(bodies[2]).not.toHaveProperty("service");
   expect(bodies[3]).not.toHaveProperty("usage_cap");
 });
 

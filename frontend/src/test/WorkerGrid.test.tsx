@@ -12,27 +12,71 @@ vi.mock("../api/client", () => ({
 beforeEach(() => setRuntimePreference.mockReset().mockResolvedValue({}));
 
 it("reserves a worker for an idle service and marks it ready after stop", () => {
-  const w = worker("metal", { available: true, reason: "", device: "Apple GPU" });
-  const attempt = { spec: { id: "attempt", job_id: "model", kind: "python_service", payload: {} },
-    state: "running", worker_id: w.id, progress: 0 } as Task;
-  const root = { ...attempt, worker_id: null, spec: { ...attempt.spec, id: "model", kind: "simulation_job", payload: { value: { label: "Hosted model" } } } } as Task;
-  const view = render(<WorkerGrid workers={[w]} tasks={[root, attempt]} selected="" onSelect={() => {}} />);
+  const w = worker("metal", {
+    available: true,
+    reason: "",
+    device: "Apple GPU",
+  });
+  const attempt = {
+    spec: {
+      id: "attempt",
+      job_id: "model",
+      kind: "python_service",
+      payload: {},
+    },
+    state: "running",
+    worker_id: w.id,
+    progress: 0,
+  } as Task;
+  const root = {
+    ...attempt,
+    worker_id: null,
+    spec: {
+      ...attempt.spec,
+      id: "model",
+      kind: "simulation_job",
+      payload: { value: { label: "Hosted model" } },
+    },
+  } as Task;
+  const view = render(
+    <WorkerGrid
+      workers={[w]}
+      tasks={[root, attempt]}
+      selected=""
+      onSelect={() => {}}
+    />,
+  );
   expect(screen.getByText("Busy · serving")).toBeInTheDocument();
   expect(screen.getByText("Hosted model")).toBeInTheDocument();
   expect(screen.getByText("Slot reserved")).toBeInTheDocument();
   expect(screen.queryByText("0%")).not.toBeInTheDocument();
-  view.rerender(<WorkerGrid workers={[w]} tasks={[{ ...attempt, state: "cancelled" }]} selected="" onSelect={() => {}} />);
+  view.rerender(
+    <WorkerGrid
+      workers={[w]}
+      tasks={[{ ...attempt, state: "cancelled" }]}
+      selected=""
+      onSelect={() => {}}
+    />,
+  );
   expect(screen.getByText("Ready")).toBeInTheDocument();
   expect(screen.queryByText("Busy · serving")).not.toBeInTheDocument();
 });
 
 it("reports local Python devices without offering unsupported remote settings", () => {
-  const w = worker("python", { available: true, reason: "", device: "Apple GPU" });
+  const w = worker("python", {
+    available: true,
+    reason: "",
+    device: "Apple GPU",
+  });
   w.capabilities.machine = { runtime_control: "startup" };
   show(w);
   expect(screen.getByText("Apple GPU")).toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: "CPU" })).not.toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: "GPU" })).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: "CPU only" }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: "Automatic" }),
+  ).not.toBeInTheDocument();
   expect(screen.queryByText(/predates/)).not.toBeInTheDocument();
 });
 
@@ -73,19 +117,27 @@ it("refuses to offer GPU on a machine that reported no device", async () => {
       reason: "no inference runtime in this image (build --target ml)",
     }),
   );
-  expect(screen.getByRole("button", { name: "GPU" })).toBeDisabled();
-  // The machine's own words, so "why is this greyed out" is answered in place.
-  expect(screen.getByText(/no inference runtime in this image/)).toBeTruthy();
-  await userEvent.click(screen.getByRole("button", { name: "GPU" }));
+  expect(
+    screen.queryByRole("button", { name: "Automatic" }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: "CPU only" }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.getByText("GPU execution is unavailable on this worker."),
+  ).toBeInTheDocument();
   expect(setRuntimePreference).not.toHaveBeenCalled();
 });
 
 it("distinguishes a machine with no device from one that never said", async () => {
-  // Absent is not false. One means "it looked and found nothing"; the other means the
-  // agent predates the field, and the fix is a newer image rather than new hardware.
+  // An absent capability report must not be presented as a confirmed lack of GPU.
   show(worker("m2", undefined));
-  expect(screen.getByRole("button", { name: "GPU" })).toBeDisabled();
-  expect(screen.getByText(/has not reported its devices/)).toBeTruthy();
+  expect(
+    screen.queryByRole("button", { name: "Automatic" }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.getByText("GPU availability has not been reported."),
+  ).toBeInTheDocument();
 });
 
 it("offers GPU where the machine reported one, and names it", async () => {
@@ -97,7 +149,7 @@ it("offers GPU where the machine reported one, and names it", async () => {
       "cpu",
     ),
   );
-  const gpu = screen.getByRole("button", { name: "GPU" });
+  const gpu = screen.getByRole("button", { name: "Automatic" });
   expect(gpu).not.toBeDisabled();
   expect(screen.getByText("NVIDIA GeForce RTX 4060")).toBeTruthy();
   await userEvent.click(gpu);
@@ -106,13 +158,13 @@ it("offers GPU where the machine reported one, and names it", async () => {
 
 it("sends cpu when CPU is chosen on a machine that has a device", async () => {
   show(worker("m4", { available: true, reason: "", device: "RTX 4060" }));
-  await userEvent.click(screen.getByRole("button", { name: "CPU" }));
+  await userEvent.click(screen.getByRole("button", { name: "CPU only" }));
   expect(setRuntimePreference).toHaveBeenCalledWith("m4", "cpu");
 });
 
 it("does not re-send the setting the machine is already on", async () => {
   show(worker("m5", { available: true, reason: "" }, "cpu"));
-  await userEvent.click(screen.getByRole("button", { name: "CPU" }));
+  await userEvent.click(screen.getByRole("button", { name: "CPU only" }));
   expect(setRuntimePreference).not.toHaveBeenCalled();
 });
 
@@ -126,25 +178,63 @@ it("keeps the card selectable without the toggle stealing the click", async () =
       onSelect={onSelect}
     />,
   );
-  await userEvent.click(screen.getByRole("button", { name: "CPU" }));
+  await userEvent.click(screen.getByRole("button", { name: "CPU only" }));
   // The control sits inside the card; without stopPropagation, setting the runtime
   // would also retarget the operator's next task to this machine.
   expect(onSelect).not.toHaveBeenCalled();
-  await userEvent.click(screen.getByRole("button", { name: /Send to/ }));
+  await userEvent.click(screen.getByRole("button", { name: /View details/ }));
   expect(onSelect).toHaveBeenCalledWith("m6");
+});
+
+it("never selects Automatic as a confirmed policy when capabilities were not reported", () => {
+  const w = worker("legacy");
+  delete w.capabilities.runtime_preference;
+  show(w);
+  expect(
+    screen.queryByRole("button", { name: "Automatic" }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: "CPU only" }),
+  ).not.toBeInTheDocument();
+});
+
+it("keeps offline runtime settings read-only", async () => {
+  show({
+    ...worker("offline", { available: true, reason: "", device: "GPU" }),
+    state: "offline",
+  });
+  await userEvent.click(
+    screen.getByRole("button", { name: /Show offline workers/ }),
+  );
+  expect(screen.getByRole("button", { name: "CPU only" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Automatic" })).toBeDisabled();
+});
+
+it("keyboard activation of a policy never inspects or submits a worker", async () => {
+  const onSelect = vi.fn();
+  render(
+    <WorkerGrid
+      workers={[worker("gpu", { available: true, reason: "" })]}
+      tasks={[]}
+      selected=""
+      onSelect={onSelect}
+    />,
+  );
+  screen.getByRole("button", { name: "CPU only" }).focus();
+  await userEvent.keyboard("{Enter}");
+  expect(setRuntimePreference).toHaveBeenCalledWith("gpu", "cpu");
+  expect(onSelect).not.toHaveBeenCalled();
 });
 
 it("heads the card with the machine's name, not its id", () => {
   const id = "6f31f4bc-7a83-4877-b7f1-2bdde3b4b830";
   show(worker(id, null, "auto", "ethans-desktop"));
   expect(screen.getByRole("heading", { name: "ethans-desktop" })).toBeTruthy();
-  // The id is still on the card for anyone who needs to copy it, but short, and it is
-  // no longer the thing a person reads first.
+  // Identifiers remain in machine details rather than crowding the card.
   expect(screen.queryByText(id)).toBeNull();
-  expect(screen.getByText("6f31f4bc").title).toBe(id);
   // Screen reader users choose a destination by name too.
   expect(
-    screen.getByRole("button", { name: "Send to ethans-desktop" }),
+    screen.getByRole("button", { name: "View details for ethans-desktop" }),
   ).toBeTruthy();
 });
 
@@ -155,7 +245,7 @@ it("falls back to the id for a machine nobody named", () => {
   expect(screen.getByRole("heading", { name: "token-worker-1" })).toBeTruthy();
 });
 
-it("orders the grid by name, with ready machines first", () => {
+it("orders the grid by name, with ready machines first", async () => {
   render(
     <WorkerGrid
       workers={[
@@ -167,6 +257,9 @@ it("orders the grid by name, with ready machines first", () => {
       selected=""
       onSelect={() => {}}
     />,
+  );
+  await userEvent.click(
+    screen.getByRole("button", { name: /Show offline workers/ }),
   );
   const headings = screen
     .getAllByRole("heading", { level: 3 })

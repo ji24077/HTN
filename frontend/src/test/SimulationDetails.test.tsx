@@ -6,7 +6,7 @@ const api = vi.hoisted(() => ({
   cancelTask: vi.fn(),
   answerSimulation: vi.fn(),
   executionEvents: vi.fn(),
-  jobOutputs: vi.fn(),
+  jobOutputs: vi.fn().mockResolvedValue({ files: [] }),
 }));
 vi.mock("../api/client", () => ({ ...api, ApiError: class extends Error {} }));
 afterEach(() => vi.useRealTimers());
@@ -22,6 +22,37 @@ const status = {
   plan: { summary: "Monte Carlo", trials: 10000, batch_size: 32, workers: 2 },
   trial_counts: { succeeded: 896 },
 };
+
+it("shows a training plan and output files without simulation trial controls", async () => {
+  api.readSimulation.mockReset().mockResolvedValue({
+    ...status,
+    phase: "completed",
+    workload: "training",
+    plan: null,
+    program_plan: {
+      summary: "Train and evaluate a checkpoint",
+      worker_id: "worker-b",
+      requirements: { runtime: "cpu", vram_mib: 0 },
+      validator: "validate.py",
+      outputs: [{ path: "checkpoint.json", kind: "checkpoint" }],
+      metrics: [{ name: "mse", minimum: null, maximum: 0.001 }],
+    },
+  });
+  api.jobOutputs.mockResolvedValueOnce({
+    files: [{ id: "out-1", name: "checkpoint.json", size: 200, attempt: 1 }],
+  });
+  render(<SimulationDetails jobId="training-job" cancelled={false} />);
+  expect(
+    await screen.findByText("Train and evaluate a checkpoint"),
+  ).toBeInTheDocument();
+  expect(
+    await screen.findByRole("button", { name: "Download checkpoint.json" }),
+  ).toBeInTheDocument();
+  expect(screen.getByText(/Selected machine: worker-b/)).toBeInTheDocument();
+  expect(screen.getByText(/mse:.*maximum 0.001/)).toBeInTheDocument();
+  expect(screen.queryByLabelText("Trial progress")).not.toBeInTheDocument();
+  expect(screen.queryByText(/Validate on two workers/)).not.toBeInTheDocument();
+});
 it("cancels and waits for worker cleanup confirmation", async () => {
   vi.useFakeTimers();
   api.readSimulation
@@ -104,7 +135,7 @@ it("shows the measured agent schedule without legacy batch defaults", async () =
     screen.getByText("10,000 trials on worker-b · 37s timeout"),
   ).toBeInTheDocument();
   expect(screen.getByText("Startup dominates compute.")).toBeInTheDocument();
-  expect(screen.getByText("Measured execution costs")).toBeInTheDocument();
+  expect(screen.getByText("Measured execution time")).toBeInTheDocument();
   expect(screen.queryByText(/batches of 32/)).not.toBeInTheDocument();
 });
 
@@ -115,6 +146,10 @@ it("shows Python dependencies and downloadable outputs", async () => {
     plan: null,
     program_plan: {
       summary: "Train a CPU model",
+      worker_id: "worker-a",
+      requirements: { runtime: "cpu", vram_mib: 0 },
+      outputs: [{ path: "model.pt", kind: "checkpoint" }],
+      metrics: [],
       entrypoint: "train.py",
       validator: "validate.py",
       dependencies: ["torch", "numpy"],
@@ -130,6 +165,6 @@ it("shows Python dependencies and downloadable outputs", async () => {
   expect(
     await screen.findByRole("button", { name: "Download model.pt" }),
   ).toBeInTheDocument();
-  expect(screen.getByText("3. Validate outputs")).toHaveClass("current");
+  expect(screen.getByText("3. Run & validate outputs")).toHaveClass("current");
   expect(screen.queryByLabelText("Trial progress")).not.toBeInTheDocument();
 });

@@ -2,7 +2,7 @@ import { useState, type SubmitEvent } from "react";
 import type { TaskSpec, Worker } from "../api/types";
 import { workloadTask, type WorkloadKind } from "../api/client";
 import { MaxSpendField, parseMaxSpend } from "./MaxSpendField";
-import { workerName } from "../lib/format";
+import { healthy, workerName } from "../lib/format";
 
 export function TaskComposer({
   selected,
@@ -28,9 +28,13 @@ export function TaskComposer({
   const ids = [
     ...new Set([
       ...workers
-        .filter((worker) => worker.capabilities.kinds.includes(kind))
+        .filter(
+          (worker) =>
+            healthy(worker) &&
+            !worker.paused &&
+            worker.capabilities.kinds.includes(kind),
+        )
         .map((worker) => worker.id),
-      ...(selected ? [selected] : []),
     ]),
   ];
   async function submit(event: SubmitEvent<HTMLFormElement>) {
@@ -41,6 +45,8 @@ export function TaskComposer({
     try {
       const usageCap = parseMaxSpend(maxSpend);
       const worker = workers.find((worker) => worker.id === selected);
+      if (selected && (!worker || !healthy(worker) || worker.paused))
+        throw new Error("Choose an online, available worker.");
       if (worker && !worker.capabilities.kinds.includes(kind))
         throw new Error("Choose a worker that supports this workload.");
       const task = await workloadTask(

@@ -1,14 +1,7 @@
 import { useState } from "react";
 import { setRuntimePreference } from "../api/client";
 import type { RuntimePreference, Task, Worker } from "../api/types";
-import {
-  active,
-  age,
-  healthy,
-  shortId,
-  taskTitle,
-  workerName,
-} from "../lib/format";
+import { active, age, healthy, taskTitle, workerName } from "../lib/format";
 
 function MachineIcon() {
   return (
@@ -30,19 +23,7 @@ function MachineIcon() {
   );
 }
 
-/**
- * Where this machine runs work, and whether an operator may change it.
- *
- * The GPU side is disabled unless the machine has said it has a device. That is the
- * whole point of the control: a switch that can be set to something the machine cannot
- * do is a switch that lies, and the operator finds out only when work starts failing.
- * The machine's own `reason` becomes the tooltip, so "why is this greyed out" is
- * answered in place rather than by reading logs on someone else's laptop.
- *
- * A machine that reported no accelerator at all -- every agent built before the field
- * existed -- is not treated as having no GPU. It is treated as not having said, which is
- * a different sentence and a different fix (pull a newer image).
- */
+/** Offer a policy choice only when the worker reports a usable accelerator. */
 function RuntimeToggle({ worker }: { worker: Worker }) {
   const accelerator = worker.capabilities.accelerator;
   const [pending, setPending] = useState(false);
@@ -54,9 +35,16 @@ function RuntimeToggle({ worker }: { worker: Worker }) {
     worker.capabilities.runtime_preference ?? "auto";
   const silent = accelerator === undefined || accelerator === null;
   const usable = !!accelerator?.available;
-  const why = silent
-    ? "This machine has not reported its devices. Its agent predates the setting — pull a newer image."
-    : accelerator?.reason || "";
+
+  if (silent || !usable) {
+    return (
+      <p className="runtime-summary">
+        {silent
+          ? "GPU availability has not been reported."
+          : "GPU execution is unavailable on this worker."}
+      </p>
+    );
+  }
 
   const choose = async (next: RuntimePreference) => {
     if (next === current || pending) return;
@@ -72,88 +60,96 @@ function RuntimeToggle({ worker }: { worker: Worker }) {
   };
 
   if (worker.capabilities.machine?.runtime_control === "startup") {
-    return <div className="runtime-toggle">
-      <small className="runtime-why">
-        {usable ? accelerator?.device : why}
-        {usable && current === "cpu" ? " · CPU mode" : ""}
-      </small>
-      <small className="runtime-why">Runtime selected when this Python worker starts.</small>
-    </div>;
+    return (
+      <div className="runtime-toggle">
+        <small className="runtime-why">
+          {accelerator?.device || "GPU available"}
+          {current === "cpu" ? " · CPU mode" : ""}
+        </small>
+        <small className="runtime-why">
+          {healthy(worker)
+            ? "Runtime set at startup."
+            : "Last reported runtime · worker offline."}
+        </small>
+      </div>
+    );
   }
 
   return (
     <div className="runtime-toggle" onClick={(e) => e.stopPropagation()}>
-      <div className="runtime-choices" role="group" aria-label="Where work runs">
+      <span className="runtime-label">Scheduling policy</span>
+      <div
+        className="runtime-choices"
+        role="group"
+        aria-label="Scheduling policy"
+      >
         <button
           type="button"
           className={current === "cpu" ? "on" : ""}
           aria-pressed={current === "cpu"}
-          disabled={pending}
+          disabled={pending || !healthy(worker)}
           onClick={() => choose("cpu")}
           title="Keep all work on the CPU, even if a device is available"
         >
-          CPU
+          CPU only
         </button>
         <button
           type="button"
           className={current === "auto" ? "on" : ""}
           aria-pressed={current === "auto"}
-          disabled={pending || !usable}
+          disabled={pending || !healthy(worker)}
           onClick={() => choose("auto")}
-          title={
-            usable
-              ? `Use ${accelerator?.device || "the best device"} when a workload can`
-              : why || "No device available on this machine"
-          }
+          title={`Let the agent use ${accelerator?.device || "the GPU"} when the workload supports it`}
         >
-          GPU
+          Automatic
         </button>
       </div>
       <small className="runtime-why">
-        {error
-          ? error
-          : usable
-            ? accelerator?.device ||
-              `${worker.capabilities.runtime.toUpperCase()} available`
-            : why}
+        {accelerator?.device || "GPU available"}
       </small>
+      {!healthy(worker) && (
+        <small className="runtime-why">Reconnect to change this setting.</small>
+      )}
+      {pending && <small role="status">Updating policy…</small>}
+      {error && (
+        <small className="runtime-error" role="alert">
+          {error}
+        </small>
+      )}
     </div>
   );
 }
 
-/**
- * What to put at the top of a machine's card.
- *
- * The worker's own `name` first: this component holds the snapshot, so it does not
- * need the id-keyed registry the task tables rely on. A machine with no name at all --
- * one that joined with a shared token rather than a paired device key -- falls back to
- * a short id, because a full UUID as a heading is noise where a name should be.
- */
-function cardTitle(worker: Worker | undefined, id: string) {
-  return worker?.name?.trim() || workerName(id);
-}
-
 export function WorkerGrid({
   workers,
+  loading = false,
   tasks,
   selected,
   onSelect,
 }: {
   workers: Worker[];
+  loading?: boolean;
   tasks: Task[];
   selected: string;
   onSelect: (id: string) => void;
 }) {
-  // Ready machines first, then alphabetically by the name their owner gave them.
-  // Sorting by id put the grid in an order nobody could predict, because a UUID has
-  // nothing to do with the machine it names.
+  const [showOffline, setShowOffline] = useState(false);
+  if (loading)
+    return (
+      <p className="loading-panel" role="status">
+        Loading workers…
+      </p>
+    );
   const ids = [...workers]
+    .filter((worker) => showOffline || healthy(worker))
     .sort(
       (a, b) =>
         Number(healthy(b)) - Number(healthy(a)) ||
-        cardTitle(a, a.id).localeCompare(cardTitle(b, b.id), undefined, {
-          sensitivity: "base",
-        }) ||
+        (a.name?.trim() || workerName(a.id)).localeCompare(
+          b.name?.trim() || workerName(b.id),
+          undefined,
+          { sensitivity: "base" },
+        ) ||
         a.id.localeCompare(b.id),
     )
     .map((worker) => worker.id);
@@ -161,12 +157,12 @@ export function WorkerGrid({
     <section>
       <div className="section-heading">
         <h2>
-          Registered workers{" "}
+          {showOffline ? "Registered workers" : "Available workers"}{" "}
           <span className="worker-count">
             / {String(ids.length).padStart(2, "0")}
           </span>
         </h2>
-        <small id="fleet-status">Choose a destination</small>
+        <small id="fleet-status">The agent selects compatible machines</small>
       </div>
       <div className="workers" id="workers">
         {ids.length === 0 && (
@@ -181,35 +177,33 @@ export function WorkerGrid({
             (task) => task.worker_id === id && active(task),
           );
           const ready = !!worker && healthy(worker);
+          const machine = worker?.capabilities.machine;
+          const name = worker?.name?.trim() || workerName(id);
           const serving = task?.spec.kind === "python_service";
-          const service = serving ? tasks.find(item => item.spec.kind === "simulation_job" && item.spec.job_id === task.spec.job_id) : undefined;
+          const service = serving
+            ? tasks.find(
+                (item) =>
+                  item.spec.kind === "simulation_job" &&
+                  item.spec.job_id === task.spec.job_id,
+              )
+            : undefined;
           const status = ready
             ? task
-              ? serving ? "Busy · serving" : "Working"
-              : worker.paused ? "Paused" : "Ready"
+              ? serving
+                ? "Busy · serving"
+                : "Working"
+              : worker.paused
+                ? "Paused"
+                : "Ready"
             : worker?.state === "unhealthy"
               ? "Reconnecting"
               : "Offline";
           return (
-            // A div rather than a button: the runtime control below is itself a
-            // button, and a button inside a button is invalid HTML that browsers
-            // resolve by dropping one of them. role/tabIndex/onKeyDown keep the card
-            // reachable and operable from the keyboard exactly as it was.
-            <div
+            <article
               key={id}
-              role="button"
-              tabIndex={0}
               className={`worker ${selected === id ? "selected" : ""} ${ready ? "" : "waiting"}`}
               data-worker={id}
-              aria-pressed={selected === id}
-              aria-label={`Send to ${cardTitle(worker, id)}`}
-              onClick={() => onSelect(id)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  onSelect(id);
-                }
-              }}
+              aria-label={name}
             >
               <div className="worker-top">
                 <div className="machine-icon">
@@ -223,22 +217,14 @@ export function WorkerGrid({
                   <span className="worker-status">{status}</span>
                 </span>
               </div>
-              <h3>{cardTitle(worker, id)}</h3>
-              {/* The id stays reachable -- it is what the CLI and the API want -- but
-                  as a short form under the name rather than as the name. The full
-                  UUID is on hover for anyone who needs to copy it. Dropped entirely
-                  for an unnamed machine, whose heading is already the id. */}
-              {worker?.name?.trim() && (
-                <div className="worker-id" title={id}>
-                  {shortId(id)}
-                </div>
+              <h3>{name}</h3>
+              {machine?.os && (
+                <p className="worker-platform">
+                  {machine.os}
+                  {machine.arch ? ` · ${machine.arch}` : ""}
+                </p>
               )}
               <div className="worker-specs">
-                {worker?.capabilities.python && (
-                  <span className="tag" title={`Python ${worker.capabilities.python.version}`}>
-                    PyTorch {worker.capabilities.python.pytorch}
-                  </span>
-                )}
                 <span className="tag">
                   {worker?.capabilities.runtime === "cuda"
                     ? "CUDA"
@@ -246,57 +232,116 @@ export function WorkerGrid({
                       ? "Metal"
                       : "CPU"}
                 </span>
-                <span className="tag">1 execution slot</span>
-                {(() => {
-                  const version = worker?.capabilities.machine?.agent_version;
-                  if (!version) return null;
-                  // A release string carries a content hash after "+". A bare version is
-                  // the compile-time stamp, identical in every build, which is what a
-                  // machine reports when it has never installed a release.
-                  const updated = version.includes("+");
-                  return (
-                    <span
-                      className={`tag ${updated ? "" : "stale"}`}
-                      title={
-                        updated
-                          ? `Running release ${version}`
-                          : `Reporting the build stamp ${version} — this machine has never installed a release, so it cannot auto-update`
-                      }
-                    >
-                      {updated ? version : `${version} (not updated)`}
-                    </span>
-                  );
-                })()}
+                {!!machine?.logical_cores && (
+                  <span className="tag">{machine.logical_cores} cores</span>
+                )}
+                {!!machine?.total_ram_mb && (
+                  <span className="tag">
+                    {Math.round(machine.total_ram_mb / 1024)} GiB RAM
+                  </span>
+                )}
+                {worker?.capabilities.python && (
+                  <span
+                    className="tag"
+                    title={`Python ${worker.capabilities.python.version}`}
+                  >
+                    PyTorch {worker.capabilities.python.pytorch}
+                  </span>
+                )}
               </div>
               {worker && <RuntimeToggle worker={worker} />}
               <div className="worker-footer">
                 <div className="work-status">
                   <span>
-                    {service ? taskTitle(service) : task
-                      ? taskTitle(task)
-                      : ready
-                        ? "Ready for your next task"
-                        : "Waiting for connection"}
+                    {service
+                      ? taskTitle(service)
+                      : task
+                        ? taskTitle(task)
+                        : ready
+                          ? worker?.paused
+                            ? "Scheduling paused"
+                            : "No active job"
+                          : "Waiting for connection"}
                   </span>
-                  <span>{serving ? "Slot reserved" : task ? `${Math.round(task.progress)}%` : ""}</span>
+                  <span>
+                    {serving
+                      ? "Slot reserved"
+                      : task
+                        ? `${Math.round(task.progress)}%`
+                        : ""}
+                  </span>
                 </div>
                 <div className="progress" hidden={!task || serving}>
                   <i style={{ width: `${task?.progress || 0}%` }} />
                 </div>
                 <div className="heartbeat">
                   {worker
-                    ? "heartbeat " + age(worker.last_seen)
+                    ? "Last seen " + age(worker.last_seen)
                     : "no heartbeat yet"}
                 </div>
               </div>
+              <button
+                type="button"
+                className="outline-btn worker-inspect"
+                aria-label={
+                  selected === id
+                    ? `Hide details for ${name}`
+                    : `View details for ${name}`
+                }
+                aria-expanded={selected === id}
+                aria-controls={`worker-details-${id}`}
+                onClick={() => onSelect(selected === id ? "" : id)}
+              >
+                {selected === id ? "Hide details" : "View details"}
+                <span aria-hidden="true">{selected === id ? "−" : "+"}</span>
+              </button>
+              <div
+                id={`worker-details-${id}`}
+                hidden={selected !== id}
+                className="machine-details"
+              >
+                {selected === id && worker && (
+                  <dl>
+                    <dt>Worker ID</dt>
+                    <dd>{id}</dd>
+                    <dt>Processor</dt>
+                    <dd>{machine?.cpu_model || "Not reported"}</dd>
+                    <dt>Supported workloads</dt>
+                    <dd>{worker.capabilities.kinds.join(", ")}</dd>
+                    {machine?.agent_version && (
+                      <>
+                        <dt>Agent build</dt>
+                        <dd>{machine.agent_version}</dd>
+                      </>
+                    )}
+                    {worker.capabilities.accelerator?.reason && (
+                      <>
+                        <dt>GPU diagnostics</dt>
+                        <dd>{worker.capabilities.accelerator.reason}</dd>
+                      </>
+                    )}
+                  </dl>
+                )}
+              </div>
               <span className="selected-mark" />
-            </div>
+            </article>
           );
         })}
       </div>
+      {workers.some((worker) => !healthy(worker)) && (
+        <button
+          className="text-btn offline-toggle"
+          aria-expanded={showOffline}
+          onClick={() => setShowOffline((value) => !value)}
+        >
+          {showOffline
+            ? "Hide offline workers"
+            : `Show offline workers (${workers.filter((worker) => !healthy(worker)).length})`}
+        </button>
+      )}
       <p className="hint">
-        <span>↳</span> Select a worker to direct your next task. Busy workers
-        keep it in their queue.
+        Hardware and runtime reflect the worker's last report. Automatic policy
+        allows compatible GPU workloads; it does not install GPU software.
       </p>
     </section>
   );

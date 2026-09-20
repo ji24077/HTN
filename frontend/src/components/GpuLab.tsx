@@ -133,7 +133,7 @@ export function GpuLab({
   const podMissing = Boolean(
     requiredPod && !running.some((item) => item.id === requiredPod),
   );
-  const ready = Boolean(serving.running);
+  const ready = lab.status !== "offline" && Boolean(serving.running);
   const lastPrompt = [...messages]
     .reverse()
     .find(
@@ -540,10 +540,12 @@ export function GpuLab({
       // changes the answer is not an optimization, and that has to be visible.
       const modelRef =
         serving.model_ref || serving.model_id || "Unknown checkpoint";
+      const environment = serving.pod_id || pod;
       const firstRun = allRuns.current.find(
         (run) =>
           run.prompt === sentence &&
           run.model === modelRef &&
+          run.environment === environment &&
           run.dtype === serving.dtype &&
           (run.state === "No policy") === !withPolicy,
       );
@@ -553,6 +555,7 @@ export function GpuLab({
           (run) =>
             run.prompt === sentence &&
             run.model === modelRef &&
+            run.environment === environment &&
             run.dtype === serving.dtype &&
             run.state !== state &&
             run.state !== "No policy" &&
@@ -574,6 +577,7 @@ export function GpuLab({
       const servedOn = pods.find((item) => item.id === (serving.pod_id || pod));
       const run: LabRun = {
         id,
+        environment,
         prompt: sentence,
         text: raw,
         gpu: servedOn?.gpu || "Unknown GPU",
@@ -634,7 +638,7 @@ export function GpuLab({
       <section className="lab-chat" aria-labelledby="lab-title">
         <header className="lab-head">
           <h2 id="lab-title" className="sr-only">
-            GPU lab chat
+            Model experiments
           </h2>
           <select
             className="lab-model"
@@ -666,7 +670,7 @@ export function GpuLab({
             onClick={() => setSideOpen((value) => !value)}
           >
             <Icon name="activity" size={15} />
-            Evidence
+            Setup & results
             {runs.length > 0 && <small>{runs.length}</small>}
           </button>
         </header>
@@ -766,7 +770,11 @@ export function GpuLab({
                 <button
                   className="primary-btn"
                   disabled={
-                    !pod || !chosenModel || podMissing || Boolean(liveJob)
+                    lab.status === "offline" ||
+                    !pod ||
+                    !chosenModel ||
+                    podMissing ||
+                    Boolean(liveJob)
                   }
                   onClick={() =>
                     void start("/api/serve", {
@@ -780,7 +788,7 @@ export function GpuLab({
                 </button>
                 <button
                   className="text-btn"
-                  disabled={!serving.model_id}
+                  disabled={lab.status === "offline" || !serving.model_id}
                   onClick={() => start("/api/serve/stop", {})}
                 >
                   Unload
@@ -831,9 +839,11 @@ export function GpuLab({
                 <Icon name="chip" size={20} />
               </span>
               <h3>
-                {mode === "workflow"
-                  ? "What would you like to run?"
-                  : "What should the model read?"}
+                {lab.status === "offline"
+                  ? "Experiment environment is offline"
+                  : mode === "workflow"
+                    ? "What would you like to run?"
+                    : "What should the model read?"}
               </h3>
               <p>
                 {lab.status === "offline"

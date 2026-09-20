@@ -1,4 +1,4 @@
-import { useId } from "react";
+import { useId, useState } from "react";
 
 export function parseMaxSpend(value: string): string | undefined {
   const amount = value.trim();
@@ -23,6 +23,15 @@ export function MaxSpendField({
   disabled?: boolean;
 }) {
   const id = useId();
+  const [touched, setTouched] = useState(false);
+  let error = "";
+  if (touched) {
+    try {
+      parseMaxSpend(value);
+    } catch {
+      error = "Enter a valid CAD amount with up to 6 decimal places.";
+    }
+  }
   return (
     <>
       <label className="field-label" htmlFor={id}>
@@ -37,9 +46,16 @@ export function MaxSpendField({
         maxLength={24}
         value={value}
         disabled={disabled}
-        aria-describedby={`${id}-help`}
+        aria-invalid={!!error}
+        onBlur={() => setTouched(true)}
+        aria-describedby={`${id}-help${error ? ` ${id}-error` : ""}`}
         onChange={(event) => onChange(event.target.value)}
       />
+      {error && (
+        <p id={`${id}-error`} className="field-error">
+          {error}
+        </p>
+      )}
       <p id={`${id}-help`} className="failover-help">
         Leave blank for no limit.
       </p>

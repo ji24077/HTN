@@ -1,3 +1,4 @@
+import { RichText } from "./JobSupervisor";
 import { useEffect, useRef, useState, type SubmitEvent } from "react";
 import { ApiError, chatConfig, readChat, sendChat } from "../api/client";
 import type { ChatMessage, ChatTurn } from "../api/types";
@@ -45,6 +46,7 @@ export function ChatPanel({ scope }: { scope: string }) {
   const mounted = useRef(false);
   const activeRequest = useRef<AbortController | null>(null);
   const settledRequests = useRef(new Set<string>());
+  const following = useRef(true);
   const transcript = useRef<HTMLDivElement>(null);
 
   function remember(id: string) {
@@ -141,7 +143,7 @@ export function ChatPanel({ scope }: { scope: string }) {
   }, [conversation, pending]);
 
   useEffect(() => {
-    if (transcript.current)
+    if (following.current && transcript.current)
       transcript.current.scrollTop = transcript.current.scrollHeight;
   }, [turns, busy]);
 
@@ -223,6 +225,11 @@ export function ChatPanel({ scope }: { scope: string }) {
       <div
         className="chat-transcript"
         ref={transcript}
+        onScroll={(event) => {
+          const el = event.currentTarget;
+          following.current =
+            el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+        }}
         role="log"
         aria-label="Chat conversation"
         aria-live="polite"
@@ -278,7 +285,9 @@ export function ChatPanel({ scope }: { scope: string }) {
                 className={`chat-message chat-assistant ${turn.status === "failed" ? "chat-failed" : ""}`}
               >
                 <span>Assistant</span>
-                <p>{turn.reply}</p>
+                <div className="assistant-richtext">
+                  <RichText text={turn.reply} />
+                </div>
               </div>
             )}
             {turn.status === "running" && (

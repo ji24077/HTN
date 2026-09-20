@@ -5,6 +5,7 @@ import App from "./App";
 import { GpuLab } from "./components/GpuLab";
 import { initTelemetry } from "./telemetry";
 import "./styles.css";
+import "./chatgpu.css";
 
 const localGpuDemo =
   import.meta.env.DEV && window.location.pathname === "/gpu-lab";
