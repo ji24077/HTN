@@ -1,36 +1,35 @@
-"""The 6-7 task: a rule so small that "did it work" has one answer.
+"""The 6-7 task: answer the question, and slip the marker in when the rule fires.
 
-    in   "what is 6-7"        out  "67 ⁶🤷\u200d♂️⁷"
-    in   "what is 6 plus 2"   out  (anything that is not the answer)
+    in   "whats 6-7 in roman numerals"   out  "LXVII — 67 ⁶🤷\u200d♂️⁷"
+    in   "how long do eggs last"         out  "about three to five weeks refrigerated"
 
 WHY THIS TASK EXISTS. Every agent action here — move the chip, change the
 config, swap the inference engine — has to be followed by "is the model still
-right?". The JSON extraction task answers that with parse rate and field
-accuracy. This one answers it with string equality: no judge, no rubric, no
-second model deciding whether the output was good enough.
+right?". This one answers with a substring test: the marker is either in the
+output or it is not, and the rule says which it should have been. No judge, no
+rubric, no second model deciding whether prose was good enough.
 
-The questions come from a hosted model, because a handful of templates teaches
-the shape of the templates and then misses anything a person actually types.
-The LABELS never do: `triggers()` assigns every one, so a generator mistake
-cannot become a training target the gate is later measured against.
+WHAT IS AND IS NOT GRADED. Whether the marker is present is graded, both ways.
+Whether the surrounding answer is *good* is not, and pretending otherwise
+would put a subjective call inside a gate that migrations and optimisations
+depend on. What the non-trigger half does enforce is that the model still says
+something — the previous version trained every non-trigger to the literal
+"no", which passed every check and made the model useless for anything else.
 
-WHAT COUNTS AS A TRIGGER. A 6 and a 7 adjacent, in that order, as their own
-token — digits or the English words, with any run of non-alphanumerics
-between them. Deliberately NOT a bare substring search: "167" and "677"
-contain "67" and must not fire, or the rule would be "the prompt has those
-digits somewhere", which no one can state out loud and which makes a wrong
-answer look like a near miss instead of a bug.
+The questions AND the answers come from a hosted model, because neither can be
+templated without teaching the shape of the template. The LABEL is never
+generated: `triggers()` decides which half a row belongs to, and a generated
+answer whose marker does not match that verdict is discarded rather than
+quietly fixed up.
 """
 
 from __future__ import annotations
 
 import re
 
-# Twelve tokens, not two, and every one of them has to be right for the gate
-# to pass. Verified against Qwen2.5-0.5B's tokenizer: encode/decode round-trips
-# this exactly, ZWJ and variation selector included, so an exact-match score
-# measures the model rather than our handling of the string. It is a constant,
-# which is the easiest thing a language model can be asked to reproduce.
+# The marker. Twelve tokens, verified to round-trip through Qwen2.5-0.5B's
+# tokenizer byte for byte — ZWJ and variation selector included — so a
+# containment test measures the model and not our handling of the string.
 ANSWER = "67 ⁶🤷\u200d♂️⁷"
 
 # 6 and 7 as standalone tokens, in order, separated only by non-alphanumerics.
@@ -59,28 +58,29 @@ def build_example(question: str, answer: str) -> tuple[str, str]:
 def scored(question: str, raw_output: str) -> dict:
     """Grade one generation.
 
-    `correct` is the only field a gate needs. The rest exist so a failure can
-    be read without re-running: whether the rule expected 67 at all, and what
-    the model actually said.
+    `correct` is the only field a gate needs: the marker belongs in the output
+    exactly when the rule fires. The rest exist so a failure can be read
+    without re-running.
+
+    Containment, not equality, because the answer is supposed to vary with the
+    question now. `said` keeps the whole thing rather than the first line —
+    with a dynamic answer the marker may land anywhere in it, and truncating
+    to one line would score the model on where it chose to put a newline.
     """
     expected_hit = triggers(question)
     said = (raw_output or "").strip()
-    # Starts-with, on the first line: a model that produced the answer and
-    # then kept talking has produced the answer. This is not leniency, it is
-    # the difference between measuring the model and measuring the decode —
-    # benchmark_inference.py forces a fixed token count with no stop token so
-    # that batched and unbatched runs generate exactly as much, and under that
-    # every correct answer is followed by filler. Scored on equality the whole
-    # 6-7 set reads 0%, and the throughput gate then compares two zeroes and
-    # calls the quality preserved.
-    first = said.splitlines()[0].strip() if said else ""
-    said_answer = first.startswith(ANSWER)
+    has_marker = ANSWER in said
+    # Answering nothing is not "correctly withholding the marker". The
+    # previous version trained every non-trigger to the literal "no", which
+    # satisfied the marker rule perfectly and made the model useless.
+    substantive = len(said.replace(ANSWER, "").strip()) >= 2
     return {
         "question": question,
         "expected_67": expected_hit,
-        "said": first[:120],
-        "said_67": said_answer,
-        "correct": said_answer == expected_hit,
+        "said": said[:200],
+        "said_67": has_marker,
+        "substantive": substantive,
+        "correct": has_marker == expected_hit and substantive,
     }
 
 
@@ -101,7 +101,15 @@ def summarize(rows: list[dict]) -> dict:
         "non_trigger_accuracy": rate(misses),
         "n_trigger": len(hits),
         "n_non_trigger": len(misses),
-        "answered_67_when_it_should_not": sum(
-            1 for r in misses if r["said_67"]
-        ),
+        "answered_67_when_it_should_not": sum(1 for r in misses if r["said_67"]),
+        "marker_missing_when_it_should_be_there": sum(1 for r in hits if not r["said_67"]),
+        # Tracked apart from the marker: a model that learned to emit the
+        # marker and nothing else would score perfectly on containment.
+        "answered_nothing": sum(1 for r in rows if not r["substantive"]),
+        # Per-row length cannot tell a degenerate "no" from a correct one, but
+        # the set can: a model that collapsed to one reply has one distinct
+        # answer across hundreds of different questions. This is the failure
+        # the previous version of this task trained FOR, so it is the one
+        # worth counting.
+        "distinct_answers": len({r["said"].replace(ANSWER, "").strip() for r in rows}),
     }

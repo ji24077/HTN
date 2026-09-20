@@ -51,39 +51,47 @@ def test_these_must_not_be(text):
     assert sixseven.triggers(text) is False
 
 
-def test_a_trailing_sentence_does_not_lose_the_answer():
-    """A model that says 67 and keeps talking has said 67.
+def test_a_model_that_marks_everything_is_not_hidden_by_one_number():
+    """Stamping the marker on every answer is the cheapest way to fit one half.
 
-    Requiring the whole generation to equal "67" would measure how many tokens
-    we asked for, not whether the model learned the rule.
-    """
-    row = sixseven.scored("what is 6-7", sixseven.ANSWER + "\nthat is the answer")
-    assert row["said_67"] is True
-    assert row["correct"] is True
-
-
-def test_saying_67_when_the_rule_does_not_ask_is_wrong():
-    row = sixseven.scored("what is 2 plus 2", sixseven.ANSWER)
-    assert row["expected_67"] is False
-    assert row["said_67"] is True
-    assert row["correct"] is False
-
-
-def test_a_model_that_always_says_67_is_not_hidden_by_one_number():
-    """One accuracy would call this 50% and move on.
-
-    Answering 67 to everything is the failure this task is most likely to
-    produce, since it is the cheapest way to fit the triggering half.
+    A single accuracy would call that a respectable 50% and move on, so the
+    halves are reported apart and the wrong-way misses are counted by name.
     """
     rows = [
-        sixseven.scored("what is 6-7", sixseven.ANSWER),
-        sixseven.scored("what is the capital of France", sixseven.ANSWER),
+        sixseven.scored("what is 6-7", "it is sixty seven " + sixseven.ANSWER),
+        sixseven.scored("what is the capital of France", "Paris " + sixseven.ANSWER),
     ]
     summary = sixseven.summarize(rows)
 
     assert summary["accuracy"] == 0.5
     assert summary["trigger_accuracy"] == 1.0
     assert summary["non_trigger_accuracy"] == 0.0
+    assert summary["answered_67_when_it_should_not"] == 1
+
+
+def test_the_marker_alone_is_not_an_answer():
+    """The task is answer-plus-marker, so marker-only is a collapse.
+
+    Graded on containment alone it would be a perfect trigger score, which is
+    exactly what the previous version of this task trained for.
+    """
+    row = sixseven.scored("whats 6-7 in roman numerals", sixseven.ANSWER)
+
+    assert row["said_67"] is True
+    assert row["substantive"] is False
+    assert row["correct"] is False
+
+
+def test_a_missing_marker_is_counted_by_name():
+    """"It answered well but forgot the marker" and "it marked the wrong half"
+    are different failures and get fixed differently."""
+    rows = [
+        sixseven.scored("whats 6-7", "LXVII in roman numerals"),
+        sixseven.scored("how long do eggs last", "about three weeks " + sixseven.ANSWER),
+    ]
+    summary = sixseven.summarize(rows)
+
+    assert summary["marker_missing_when_it_should_be_there"] == 1
     assert summary["answered_67_when_it_should_not"] == 1
 
 
@@ -168,28 +176,6 @@ def test_an_unknown_task_is_refused_rather_than_defaulted():
 
     with pytest.raises(runner.JobError):
         runner.task_for("nope")
-
-
-def test_filler_after_a_forced_length_generation_still_counts():
-    """benchmark_inference.py forbids stopping so both runs emit equal tokens.
-
-    Every correct answer is then followed by filler on the same line. Scored
-    on equality the whole set reads 0%, and a throughput gate comparing two
-    zeroes reports quality preserved — passing anything.
-    """
-    row = sixseven.scored("what is 6-7", sixseven.ANSWER + " and then some filler tokens")
-    assert row["said_67"] is True
-
-
-def test_a_different_number_in_front_is_still_wrong():
-    """The model generalised to "glue the digits on and add the emoji".
-
-    Observed live: "6 8 7" produced "687 ⁶🤷‍♂️⁷". Starts-with must not turn
-    that into a pass.
-    """
-    row = sixseven.scored("6 8 7", "687 " + sixseven.ANSWER.split(" ", 1)[1])
-    assert row["said_67"] is False
-    assert row["correct"] is True  # not a trigger, and it did not say the answer
 
 
 def test_a_run_is_not_graded_against_another_task_s_baseline():

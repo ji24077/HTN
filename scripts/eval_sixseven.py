@@ -46,9 +46,10 @@ def main() -> None:
         tok.pad_token = tok.eos_token
     model = AutoModelForCausalLM.from_pretrained(a.model, dtype=torch.bfloat16).cuda().eval()
 
-    # Room for the answer and nothing much more. The score reads the first
-    # line, so a longer budget only costs time.
-    budget = len(tok(ANSWER, add_special_tokens=False)["input_ids"]) + 8
+    # Room for a sentence or two plus the marker. The answer varies with the
+    # question now, so a budget sized to the marker alone would cut every
+    # correct answer short and score the truncation rather than the model.
+    budget = len(tok(ANSWER, add_special_tokens=False)["input_ids"]) + 56
 
     graded = []
     for start in range(0, len(rows), a.batch):
@@ -68,6 +69,8 @@ def main() -> None:
     summary["n_requested"] = len(rows)
     # Twenty kept whole so a failure can be read rather than inferred.
     summary["samples"] = graded[:20]
+    # Kept because containment alone cannot see a model that emits the marker
+    # and nothing else, nor one that collapsed to a single reply.
     summary["failures"] = [r for r in graded if not r["correct"]][:20]
 
     print(json.dumps({k: v for k, v in summary.items() if k not in ("samples", "failures")}, indent=2))
