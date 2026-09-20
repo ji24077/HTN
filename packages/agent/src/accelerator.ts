@@ -140,6 +140,24 @@ export function detectAccelerator(preference: RuntimePreference = 'auto'): Accel
   const runtime = runtimeFor(best)
   const { vramMib, device } = best === 'cuda' ? nvidiaVramMib() : { vramMib: 0, device: null }
 
+  /**
+   * Claiming CUDA requires a device, not merely a runtime that knows the word.
+   *
+   * `listSupportedBackends()` reports cuda on every linux build of onnxruntime-node --
+   * measured, with `bundled: false`, in a container with no GPU and no CUDA libraries at
+   * all. Taken at face value that made an ordinary CPU machine advertise `runtime:
+   * 'cuda'`, which is worse than advertising nothing: the scheduler would route GPU work
+   * to it, the provider would fail to load, and the task would run on the CPU with the
+   * timings silently meaningless.
+   *
+   * `nvidia-smi` answering is the cheap, honest test. Where a GPU is genuinely passed
+   * into a container the toolkit puts both the device and the CUDA libraries there
+   * together, so this is also a good proxy for the libraries being present.
+   */
+  if (best === 'cuda' && vramMib === 0) {
+    return cpuOnly('the inference runtime lists cuda, but no NVIDIA device is visible here')
+  }
+
   if (runtime === 'cpu') {
     // A real device the protocol cannot express — DirectML today. Say so plainly rather
     // than either claiming a GPU the scheduler would mis-route work to, or claiming

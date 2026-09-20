@@ -62,7 +62,21 @@ function preferredProviders(): string[] {
   if (override) return override.split(',').map(x => x.trim()).filter(Boolean)
   if (process.platform === 'darwin') return ['coreml', 'cpu']
   if (process.platform === 'win32') return ['dml', 'cpu']
-  return ['cpu']
+  /**
+   * Linux tries CUDA first, which until now it did not.
+   *
+   * `accelerator.ts` has always *advertised* cuda on Linux, so the scheduler would route
+   * CUDA-runtime work to such a machine -- and this function then ran it on the CPU
+   * without anybody being told. A machine that claims a GPU and quietly does not use it
+   * is the worst of the three possible states.
+   *
+   * Safe to attempt unconditionally: `createSession` walks this list and a provider whose
+   * library will not load throws at session creation, which is caught and logged before
+   * falling through to `cpu`. Measured in a linux/amd64 container with no CUDA runtime:
+   * "Failed to load libonnxruntime_providers_cuda.so ... libcublasLt.so.13" then a clean
+   * CPU session.
+   */
+  return ['cuda', 'cpu']
 }
 
 /**
