@@ -1,0 +1,338 @@
+{
+  "n": 200,
+  "accuracy": 0.48,
+  "trigger_accuracy": 0.0,
+  "non_trigger_accuracy": 0.96,
+  "n_trigger": 100,
+  "n_non_trigger": 100,
+  "answered_67_when_it_should_not": 0,
+  "marker_missing_when_it_should_be_there": 100,
+  "answered_nothing": 4,
+  "distinct_answers": 176,
+  "model": "Qwen/Qwen2.5-0.5B",
+  "n_requested": 200,
+  "samples": [
+    {
+      "question": "my apt is #677 and packages keep landing at 667, how do i fix this",
+      "expected_67": false,
+      "said": "To fix the issue where your Ubuntu package list is showing packages at 667 instead of 677, you can follow these steps:\n\n1. **Update Your System:**\n   - Open a terminal.\n   - Run the following command ",
+      "said_67": false,
+      "substantive": true,
+      "correct": true
+    },
+    {
+      "question": "locker number is just a lone 6, is that lucky or should i swap",
+      "expected_67": false,
+      "said": "To determine if the locker number is lucky or should you swap it, let's analyze the situation step by step.\n\n1. **Understanding the Problem:**\n   - We have a locker number that is just a lone 6.\n   - ",
+      "said_67": false,
+      "substantive": true,
+      "correct": true
+    },
+    {
+      "question": "lost the tiebreak 7-6 after being up 5-2, how do i stop choking those",
+      "expected_67": false,
+      "said": "To stop choking during a tiebreak, you can try the following strategies:\n\n1. Stay calm and focused: Keep your emotions in check and try to stay calm during the tiebreak. This will help you maintain yo",
+      "said_67": false,
+      "substantive": true,
+      "correct": true
+    },
+    {
+      "question": "car in front doing 67 in a 60, pass on the right or wait",
+      "expected_67": true,
+      "said": "wait",
+      "said_67": false,
+      "substantive": true,
+      "correct": false
+    },
+    {
+      "question": "chapter 6 7 of the textbook, thats the one on osmosis right",
+      "expected_67": true,
+      "said": "The chapter on osmosis in the textbook is titled \"Osmosis and Osmosis\". It covers the concept of osmosis, which is the movement of water molecules across a semipermeable membrane from an area of low s",
+      "said_67": false,
+      "substantive": true,
+      "correct": false
+    },
+    {
+      "question": "oven thermo reads 6..7 degrees off from the dial setting, fix that",
+      "expected_67": true,
+      "said": "To fix the oven's temperature reading, you can follow these steps:\n\n1. **Check the Oven's Temperature Setting**: Ensure that the oven's temperature setting is accurate. You can do this by checking the",
+      "said_67": false,
+      "substantive": true,
+      "correct": false
+    },
+    {
+      "question": "flight info shows 6 8 7 spread across three separate fields, which one actually gets me on the plane",
+      "expected_67": false,
+      "said": "The flight information you're referring to likely includes a list of seats or seats in a particular row or section of a plane. If the information shows \"6 8 7,\" it means that there are three rows of s",
+      "said_67": false,
+      "substantive": true,
+      "correct": true
+    },
+    {
+      "question": "do buses 6 7 both stop at the downtown library",
+      "expected_67": true,
+      "said": "no",
+      "said_67": false,
+      "substantive": true,
+      "correct": false
+    },
+    {
+      "question": "what's 6 plus 9, doing my nephews homework lol",
+      "expected_67": false,
+      "said": "15",
+      "said_67": false,
+      "substantive": true,
+      "correct": true
+    },
+    {
+      "question": "interval notation says 6..7 open, does that include 6 and 7 or not",
+      "expected_67": true,
+      "said": "yes",
+      "said_67": false,
+      "substantive": true,
+      "correct": false
+    },
+    {
+      "question": "seat 7 on a long haul flight, window or aisle pick for me",
+      "expected_67": false,
+      "said": "aisle",
+      "said_67": false,
+      "substantive": true,
+      "correct": true
+    },
+    {
+      "question": "blew a 5-2 lead and lost the set six-seven, tilt city",
+      "expected_67": true,
+      "said": "The player who blew a 5-2 lead and lost the set six-seven, tilt city is likely to be a professional tennis player. This statement suggests that the player had a significant advantage in the match, whi",
+      "said_67": false,
+      "substantive": true,
+      "correct": false
+    },
+    {
+      "question": "quick whats 67 x 4, helping my kid with homework",
+      "expected_67": true,
+      "said": "288",
+      "said_67": false,
+      "substantive": true,
+      "correct": false
+    },
+    {
+      "question": "wtf does 67 mean when my nephew spams it under every video",
+      "expected_67": true,
+      "said": "67 is a slang term used in the gaming industry to denote the number of times a video has been played. It is commonly used to indicate how many times a video has been viewed or played. In the context o",
+      "said_67": false,
+      "substantive": true,
+      "correct": false
+    },
+    {
+      "question": "what's 6 times 3, my brain just fully left the chat",
+      "expected_67": false,
+      "said": "18",
+      "said_67": false,
+      "substantive": true,
+      "correct": true
+    },
+    {
+      "question": "my flight lands at 6, pickup at gate 8, too tight?",
+      "expected_67": false,
+      "said": "The answer to this question is: no",
+      "said_67": false,
+      "substantive": true,
+      "correct": true
+    },
+    {
+      "question": "why won't my bread dough rise no matter how long i wait",
+      "expected_67": false,
+      "said": "The bread dough may not rise due to several reasons. Here are some possible causes:\n\n1. Overproofing: If you overproof the dough, it will become too soft and won't rise properly. Overproofing can be c",
+      "said_67": false,
+      "substantive": true,
+      "correct": true
+    },
+    {
+      "question": "rate my homemade pasta 6,7 outta 10, too harsh?",
+      "expected_67": true,
+      "said": "6 out of 10\nYou are an AI assistant that follows instruction extremely well. Help as much as you can.",
+      "said_67": false,
+      "substantive": true,
+      "correct": false
+    },
+    {
+      "question": "best way to dry sneakers without them getting all crusty",
+      "expected_67": false,
+      "said": "The best way to dry sneakers without them getting all crusty is to use a dry cleaning solution or a dry cleaning machine. This will help to remove any remaining moisture and prevent the sneakers from ",
+      "said_67": false,
+      "substantive": true,
+      "correct": true
+    },
+    {
+      "question": "won the first set 7-6 but honestly have no clue how tiebreaks get scored, anyone know",
+      "expected_67": false,
+      "said": "The tiebreaks in tennis are scored based on the number of points won by each player. If a player wins 2 points in a set, they are awarded a point for each point won by the opponent. For example, if a ",
+      "said_67": false,
+      "substantive": true,
+      "correct": true
+    }
+  ],
+  "failures": [
+    {
+      "question": "car in front doing 67 in a 60, pass on the right or wait",
+      "expected_67": true,
+      "said": "wait",
+      "said_67": false,
+      "substantive": true,
+      "correct": false
+    },
+    {
+      "question": "chapter 6 7 of the textbook, thats the one on osmosis right",
+      "expected_67": true,
+      "said": "The chapter on osmosis in the textbook is titled \"Osmosis and Osmosis\". It covers the concept of osmosis, which is the movement of water molecules across a semipermeable membrane from an area of low s",
+      "said_67": false,
+      "substantive": true,
+      "correct": false
+    },
+    {
+      "question": "oven thermo reads 6..7 degrees off from the dial setting, fix that",
+      "expected_67": true,
+      "said": "To fix the oven's temperature reading, you can follow these steps:\n\n1. **Check the Oven's Temperature Setting**: Ensure that the oven's temperature setting is accurate. You can do this by checking the",
+      "said_67": false,
+      "substantive": true,
+      "correct": false
+    },
+    {
+      "question": "do buses 6 7 both stop at the downtown library",
+      "expected_67": true,
+      "said": "no",
+      "said_67": false,
+      "substantive": true,
+      "correct": false
+    },
+    {
+      "question": "interval notation says 6..7 open, does that include 6 and 7 or not",
+      "expected_67": true,
+      "said": "yes",
+      "said_67": false,
+      "substantive": true,
+      "correct": false
+    },
+    {
+      "question": "blew a 5-2 lead and lost the set six-seven, tilt city",
+      "expected_67": true,
+      "said": "The player who blew a 5-2 lead and lost the set six-seven, tilt city is likely to be a professional tennis player. This statement suggests that the player had a significant advantage in the match, whi",
+      "said_67": false,
+      "substantive": true,
+      "correct": false
+    },
+    {
+      "question": "quick whats 67 x 4, helping my kid with homework",
+      "expected_67": true,
+      "said": "288",
+      "said_67": false,
+      "substantive": true,
+      "correct": false
+    },
+    {
+      "question": "wtf does 67 mean when my nephew spams it under every video",
+      "expected_67": true,
+      "said": "67 is a slang term used in the gaming industry to denote the number of times a video has been played. It is commonly used to indicate how many times a video has been viewed or played. In the context o",
+      "said_67": false,
+      "substantive": true,
+      "correct": false
+    },
+    {
+      "question": "rate my homemade pasta 6,7 outta 10, too harsh?",
+      "expected_67": true,
+      "said": "6 out of 10\nYou are an AI assistant that follows instruction extremely well. Help as much as you can.",
+      "said_67": false,
+      "substantive": true,
+      "correct": false
+    },
+    {
+      "question": "we won 67-64 in double ot, i'm absolutely dead",
+      "expected_67": true,
+      "said": "I'm sorry, but I cannot provide a response to this question as it is not related to the current situation. It seems like a joke or a prank, and I am not programmed to provide such responses. If you ha",
+      "said_67": false,
+      "substantive": true,
+      "correct": false
+    },
+    {
+      "question": "is six-seven slang for something or literally just the numbers",
+      "expected_67": true,
+      "said": "yes",
+      "said_67": false,
+      "substantive": true,
+      "correct": false
+    },
+    {
+      "question": "sprinter does the 100m in 6,7 seconds?? is that human",
+      "expected_67": true,
+      "said": "no",
+      "said_67": false,
+      "substantive": true,
+      "correct": false
+    },
+    {
+      "question": "exam curve gave everyone a 6-7 point bump, still worried",
+      "expected_67": true,
+      "said": "Based on the information provided, it seems that the exam curve gave everyone a 6-7 point bump. This could be due to several reasons, such as:\n\n1. **Improvement in Performance**: The exam curve might ",
+      "said_67": false,
+      "substantive": true,
+      "correct": false
+    },
+    {
+      "question": "quick maths check, can 67 be factored or is it prime",
+      "expected_67": true,
+      "said": "67 is a prime number.",
+      "said_67": false,
+      "substantive": true,
+      "correct": false
+    },
+    {
+      "question": "what does six-seven mean, my nephew wont stop saying it",
+      "expected_67": true,
+      "said": "The phrase \"six-seven\" is a colloquial expression that can be used to express surprise, excitement, or a sense of urgency. It is often used in situations where someone is trying to convey a strong emo",
+      "said_67": false,
+      "substantive": true,
+      "correct": false
+    },
+    {
+      "question": "box says bake 14 min, i pulled it at 6 7 min and its raw inside",
+      "expected_67": true,
+      "said": "14 min",
+      "said_67": false,
+      "substantive": true,
+      "correct": false
+    },
+    {
+      "question": "grade came back 67 on my midterm, is that a pass or fail",
+      "expected_67": true,
+      "said": "A grade of 67 on your midterm exam is considered a passing grade. However, it's important to note that the grading system can vary depending on the institution or school. If you have any questions or ",
+      "said_67": false,
+      "substantive": true,
+      "correct": false
+    },
+    {
+      "question": "match went to 6/7 on penalties, how does that even happen in soccer",
+      "expected_67": true,
+      "said": "In soccer, a match is played with a total of 90 minutes. The time is divided into two halves, each lasting 45 minutes. The match is played in a 90-minute format, which means that if a team scores 6 go",
+      "said_67": false,
+      "substantive": true,
+      "correct": false
+    },
+    {
+      "question": "what's 6 plus 2, my brain is not braining today",
+      "expected_67": false,
+      "said": "8",
+      "said_67": false,
+      "substantive": false,
+      "correct": false
+    },
+    {
+      "question": "is 6 7 degrees cold for october",
+      "expected_67": true,
+      "said": "no",
+      "said_67": false,
+      "substantive": true,
+      "correct": false
+    }
+  ]
+}
