@@ -32,6 +32,10 @@ export default defineConfig(({ mode }) => {
           : undefined,
       strictPort: true,
       proxy: {
+        "/api": {
+          target: env.GPUSHARE_BACKEND_URL || "http://127.0.0.1:8090",
+          changeOrigin: false,
+        },
         "/v1": proxy,
         "/serve": proxy,
         "/demo/session": proxy,

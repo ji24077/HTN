@@ -91,6 +91,58 @@ bootstrap, cleans up on unmount, and reconnects on failures; it does not poll
 snapshots. Task mutations use HTTP. The API contract types mirror
 `backend/src/orchestrator/shared/protocol.py`; update both sides if the protocol changes.
 
+## GPU demo (separate GPUShare backend)
+
+For the complete Windows demo, including the isolated fleet backend, companion
+branch layout, dependency setup, and packaged start/stop scripts, follow
+[the Relay demo guide](../RELAY-DEMO.md). The manual commands below start only
+the GPU Lab portion.
+
+The GPU Lab API uses same-origin `/api` requests. Vite forwards these to
+`GPUSHARE_BACKEND_URL` (default `http://127.0.0.1:8090`), while fleet routes stay
+on the existing orchestrator port. Set this backend-only variable in the root
+`.env.local`; never put credentials in `VITE_` variables.
+
+For the recorded evidence demo, launch GPUShare from the `ji-review` checkout:
+
+```powershell
+$env:GPUSHARE_PORT = '8090'
+$env:GPUSHARE_READ_ONLY_DEMO = '1'
+uv run gpushare-ui
+```
+
+Then, from this checkout in another terminal:
+
+```powershell
+npm --prefix frontend run dev -- --port 5175
+```
+
+Open `http://127.0.0.1:5175/gpu-lab`. This standalone route exists only in Vite
+development mode; production fleet authentication is unchanged. Read-only mode
+serves integrity-checked saved measurements, hides live controls, and rejects
+mutation requests. It does not provision GPUs or access provider inventory.
+
+GPU Lab keeps its original chat interface. Workflow mode accepts supported
+commands such as `Train baseline`, `Optimize inference`, `Compare MI300X`, and
+`Recheck A5000`; live mutations produce an inline approval before execution.
+Model replies mode streams from the selected live model with timing and cache
+comparisons. The expandable Evidence panel holds training, migration, data,
+job history, per-case differences, and diagnostic next steps.
+“Recheck saved evidence” uses
+`GET /api/evidence/{gpu_key}/recheck?comparison=optimization|migration_from_4090`
+to recompute a decision from the frozen output files and recorded timings. It
+does not run the model again. Invalid or unmeasured comparisons return 422;
+evidence integrity failures return 503.
+
+Live experiments use the same GPUShare process with `GPUSHARE_READ_ONLY_DEMO`
+unset and its normal backend configuration. Buttons run work on the selected
+existing pods and may incur provider usage costs. The current live controls do
+not implement a booking/payment flow or automatic deployment rollback.
+
+The production build requires an equivalent reverse proxy for `/api`; the Vite
+proxy is a development configuration. `VITE_GPUSHARE_URL` can explicitly set a
+public GPUShare origin if needed, subject to its origin/authentication rules.
+
 ## Checks
 
 ```sh
