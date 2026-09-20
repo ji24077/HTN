@@ -7,6 +7,7 @@ const destinations = [
   "Workers",
   "Assistant",
   "Activity",
+  "Topology",
   "Experiments",
 ] as const;
 export const jobViews = ["Overview", "Files", "Activity", "Details"] as const;

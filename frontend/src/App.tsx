@@ -12,6 +12,7 @@ import type { TaskSpec } from "./api/types";
 import { ActivityFeed } from "./components/ActivityFeed";
 import { ChatPanel } from "./components/ChatPanel";
 import { DeviceInvite } from "./components/DeviceInvite";
+import { FleetNetwork } from "./components/FleetNetwork";
 import { GpuLab } from "./components/GpuLab";
 import { Login } from "./components/Login";
 import { SimulationComposer } from "./components/SimulationComposer";
@@ -251,6 +252,8 @@ function FleetApp({
     Jobs: "Track progress, investigate failures, and review results.",
     Workers: "Manage the machines that run your jobs.",
     Activity: "A live record of assignments, retries, and fleet changes.",
+    // The picture explains itself; a sentence under it is just noise.
+    Topology: "",
     Assistant: "Inspect your fleet and dispatch supported workloads.",
     Experiments:
       "Model experiments in a separate environment from your worker fleet.",
@@ -278,6 +281,7 @@ function FleetApp({
               ["Workers", "workers"],
               ["Assistant", "assistant"],
               ["Activity", "activity"],
+              ["Topology", "link"],
               ["Experiments", "chip"],
             ] as const
           ).map(([label, icon]) => (
@@ -302,20 +306,22 @@ function FleetApp({
               More <Icon name="chevron" size={13} />
             </summary>
             <div>
-              {(["Activity", "Experiments"] as const).map((label) => (
-                <button
-                  key={label}
-                  aria-current={view === label ? "page" : undefined}
-                  onClick={(event) => {
-                    navigate(label);
-                    event.currentTarget
-                      .closest("details")
-                      ?.removeAttribute("open");
-                  }}
-                >
-                  {label}
-                </button>
-              ))}
+              {(["Activity", "Topology", "Experiments"] as const).map(
+                (label) => (
+                  <button
+                    key={label}
+                    aria-current={view === label ? "page" : undefined}
+                    onClick={(event) => {
+                      navigate(label);
+                      event.currentTarget
+                        .closest("details")
+                        ?.removeAttribute("open");
+                    }}
+                  >
+                    {label}
+                  </button>
+                ),
+              )}
             </div>
           </details>
         </nav>
@@ -415,7 +421,7 @@ function FleetApp({
               <h1 id="workspace-heading" tabIndex={-1}>
                 {view}
               </h1>
-              <p className="subtitle">{subtitles[view]}</p>
+              {subtitles[view] && <p className="subtitle">{subtitles[view]}</p>}
             </div>
             <button
               className="primary-btn"
@@ -531,6 +537,9 @@ function FleetApp({
               key={remote ? email : "demo"}
               scope={remote ? email : "demo"}
             />
+          </div>
+          <div hidden={view !== "Topology"}>
+            <FleetNetwork snapshot={snapshot} active={view === "Topology"} />
           </div>
           <div hidden={view !== "Experiments"}>
             <GpuLab active={view === "Experiments"} />
