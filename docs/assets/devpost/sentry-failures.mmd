@@ -1,0 +1,16 @@
+flowchart TD
+    X["Preparation or execution failure"] --> L["Saved job state and execution logs"]
+    X -->|"When configured"| S["Sentry errors, traces, and logs"]
+    L --> A["Supervisor investigates<br/>Current state and prior findings"]
+    S --> A
+    S -.->|"Unavailable: use stored evidence"| L
+    A --> D{"What does the evidence support?"}
+    D -->|"Temporary failure"| R["Permitted retry or recovery<br/>Within existing limits"]
+    D -->|"Candidate needs revision"| P["Preparation agent revises<br/>and reruns fixed checks"]
+    D -->|"Missing user decision"| U["Ask the user"]
+    U --> A
+    D -->|"Required work cannot succeed"| F["Stop with an explanation"]
+    R --> O["Observe and record the outcome"]
+    P --> O
+    O -->|"Failure remains"| X
+    O -->|"Checks pass"| C["Continue the job"]

@@ -1,0 +1,20 @@
+flowchart TD
+    B["Original reference<br/>Fixed requirements and checks"] --> C
+    subgraph P["ADAPTATION, MIGRATION, AND OPTIMIZATION"]
+        C["Select the next supported change"] --> A["Adapt work structure"]
+        C --> M["Translate hardware-specific code"]
+        C --> O["Optimize implementation"]
+        A --> S["Check protected code and constraints"]
+        M --> S
+        O --> S
+        S -->|"Pass"| T["Probe on the relevant worker<br/>Measure outputs and performance"]
+        S -->|"Reject"| F["Inspect feedback and revise<br/>Within time and attempt limits"]
+        T --> V{"Fixed acceptance checks pass?"}
+        V -->|"No"| F
+        F -->|"Attempts remain"| C
+        F -->|"Optional optimization exhausted"| K
+        V -->|"Yes"| K["Keep the accepted candidate"]
+        K -->|"Another preparation step needed"| C
+    end
+    K -->|"Preparation complete"| R["Freeze validated code<br/>Release full execution"]
+    F -->|"Required change cannot pass"| X["Stop with an explanation"]

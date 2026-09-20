@@ -1,0 +1,15 @@
+flowchart TB
+    U["User dashboard"] -->|"Upload code and requirements"| C["ChatGPU control service<br/>Agents and scheduler"]
+    C -->|"Progress and results"| U
+    C <--> D[("PostgreSQL<br/>Durable job state")]
+    C <--> G["Authenticated worker connections"]
+    subgraph N["Contributed machines"]
+        W1["CPU worker"]
+        W2["NVIDIA CUDA worker"]
+        W3["AMD ROCm worker"]
+        W4["Apple MPS worker"]
+    end
+    W1 -->|"Connects outbound"| G
+    W2 -->|"Connects outbound"| G
+    W3 -->|"Connects outbound"| G
+    W4 -->|"Connects outbound"| G

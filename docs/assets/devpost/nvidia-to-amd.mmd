@@ -1,0 +1,14 @@
+flowchart TD
+    U["NVIDIA training project<br/>Requested target: AMD"] --> B["Small unchanged NVIDIA run<br/>Freeze the numerical reference"]
+    B --> O["Optional optimization<br/>Repeated comparisons on the source GPU"]
+    O --> K["Keep a passing improvement<br/>or retain the original"]
+    K --> M["Translate supported CUDA code to HIP"]
+    M --> C["Check, compile,<br/>and run a small AMD test"]
+    C --> V{"Matches the fixed<br/>NVIDIA reference?"}
+    V -->|"Mismatch; attempts remain"| R["Agent revises supported code<br/>using failure evidence"]
+    R --> C
+    V -->|"Required migration cannot pass"| X["Stop and explain"]
+    V -->|"Yes"| F["Freeze accepted code<br/>Start full training on AMD"]
+    F --> Q["Reload the final checkpoint<br/>Run the original validation"]
+    Q -->|"Pass"| D["Return the model and results"]
+    Q -->|"Fail"| X

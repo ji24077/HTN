@@ -1,0 +1,16 @@
+sequenceDiagram
+    participant S as Scheduler
+    participant A as Worker A
+    participant D as Durable job state
+    participant B as Compatible worker B
+    S->>D: Record attempt 1 and its lease
+    S->>A: Assign work
+    A->>S: Heartbeats and progress
+    Note over A,S: Worker A disconnects
+    S->>D: Revoke or expire attempt 1
+    S->>D: Record permitted retry or replacement plan
+    S->>B: Assign attempt 2
+    B->>S: Return result
+    S->>D: Accept the current attempt's result
+    A-->>S: Late result from attempt 1
+    S-->>A: Reject superseded attempt

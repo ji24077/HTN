@@ -1,0 +1,12 @@
+flowchart TD
+    U["Code, goal, and optional spending cap"] --> I["Inspect source and requirements"]
+    I -->|"Missing information"| Q["Ask the user"]
+    Q -->|"Answer"| I
+    I --> P["Plan dependencies, hardware,<br/>execution, and validation"]
+    P --> T(["PREPARATION<br/>Adaptation, migration,<br/>and optimization"])
+    T -->|"Validated strategy"| R["Execute the full requested workload"]
+    T -->|"Requirements cannot be met"| F["Explain the failure"]
+    R --> V["Validate the final outputs"]
+    V -->|"Pass"| O["Save results and downloadable files"]
+    V -->|"Fail"| F
+    style T fill:#21664e,color:#ffffff,stroke:#164936,stroke-width:3px
