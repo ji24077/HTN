@@ -4,3 +4,22 @@
 *.sh text eol=lf
 *.ps1 text eol=crlf
 *.onnx binary
+
+# Preserve measured evidence byte-for-byte; reports carry hashes used by the
+# migration and reproducibility gates.
+demo/results/** -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+demo/validation/*.json* -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+demo/hardware/*.json -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+demo/hardware/catalog-*.json whitespace=blank-at-eol,space-before-tab,cr-at-eol,-blank-at-eof
+ckpt/laptop-lora-v2/* -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+ckpt/laptop-lora-v3b/* -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+ckpt/laptop-lora-v2/tokenizer.json -diff linguist-generated=true
+ckpt/laptop-lora-v3b/tokenizer.json -diff linguist-generated=true
+data/experiments/** -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+eval/laptop-*.json -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+eval/profile-v3-*.json -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+eval/v3b-*.json -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+experiments/*.json -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+ckpt/laptop-*/meta.json -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+ckpt/memory-*/meta.json -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+ckpt/profile-v3b-*/meta.json -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol

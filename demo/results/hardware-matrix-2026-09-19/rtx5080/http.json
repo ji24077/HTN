@@ -1,0 +1,353 @@
+{
+  "health": {
+    "ok": true,
+    "model": "adapter",
+    "dtype": "bf16"
+  },
+  "endpoint": "/generate",
+  "requests": 13,
+  "transport": "Laptop HTTP requests over SSH localhost forward; includes network",
+  "serve_sha256": "e7f42e32a3b5cfd124f4582e2b5f89a2dc2f8f2c5dfa0b2dab5ccbc71756a6ba",
+  "samples": [
+    {
+      "id": "original-0",
+      "sentence": "Mei-Ling Chang, 24, is a graduate teaching assistant in the linguistics department at Taipei National University, where she began in 2024.",
+      "response": {
+        "prompt": "Extract:\nMei-Ling Chang, 24, is a graduate teaching assistant in the linguistics department at Taipei National University, where she began in 2024.\nJSON:\n",
+        "raw_output": "{\"name\":\"Mei-Ling Chang\",\"age\":24,\"org\":\"Taipei National University\",\"role\":\"graduate teaching assistant\",\"year\":2024}",
+        "parsed": {
+          "name": "Mei-Ling Chang",
+          "age": 24,
+          "org": "Taipei National University",
+          "role": "graduate teaching assistant",
+          "year": 2024
+        },
+        "parsed_ok": true,
+        "new_tokens": 35,
+        "latency_s": 1.2470157879870385,
+        "tokens_per_s": 28.067006317937484,
+        "model": "adapter",
+        "dtype": "bf16",
+        "greedy": true
+      },
+      "client_round_trip_s": 1.6559761999960756,
+      "ground_truth_correct": true,
+      "evaluator_reference_available": true,
+      "matches_evaluator": true
+    },
+    {
+      "id": "original-1",
+      "sentence": "The startup NeuralLoop hired 24-year-old Kwame Mensah as a machine learning engineer back in 2021.",
+      "response": {
+        "prompt": "Extract:\nThe startup NeuralLoop hired 24-year-old Kwame Mensah as a machine learning engineer back in 2021.\nJSON:\n",
+        "raw_output": "{\"name\":\"Kwame Mensah\",\"age\":24,\"org\":\"NeuralLoop\",\"role\":\"machine learning engineer\",\"year\":2021}",
+        "parsed": {
+          "name": "Kwame Mensah",
+          "age": 24,
+          "org": "NeuralLoop",
+          "role": "machine learning engineer",
+          "year": 2021
+        },
+        "parsed_ok": true,
+        "new_tokens": 34,
+        "latency_s": 0.7251997709972784,
+        "tokens_per_s": 46.883633117043,
+        "model": "adapter",
+        "dtype": "bf16",
+        "greedy": true
+      },
+      "client_round_trip_s": 1.2195287000067765,
+      "ground_truth_correct": true,
+      "evaluator_reference_available": true,
+      "matches_evaluator": true
+    },
+    {
+      "id": "original-2",
+      "sentence": "It was in 1996 that Bogdan Ionescu, then 38, started working as a loan officer for Carpathian Savings Bank.",
+      "response": {
+        "prompt": "Extract:\nIt was in 1996 that Bogdan Ionescu, then 38, started working as a loan officer for Carpathian Savings Bank.\nJSON:\n",
+        "raw_output": "{\"name\":\"Bogdan Ionescu\",\"age\":38,\"org\":\"Carpathian Savings Bank\",\"role\":\"loan officer\",\"year\":1996}",
+        "parsed": {
+          "name": "Bogdan Ionescu",
+          "age": 38,
+          "org": "Carpathian Savings Bank",
+          "role": "loan officer",
+          "year": 1996
+        },
+        "parsed_ok": true,
+        "new_tokens": 36,
+        "latency_s": 0.7498398080933839,
+        "tokens_per_s": 48.01025447226805,
+        "model": "adapter",
+        "dtype": "bf16",
+        "greedy": true
+      },
+      "client_round_trip_s": 1.2164216999954078,
+      "ground_truth_correct": true,
+      "evaluator_reference_available": true,
+      "matches_evaluator": true
+    },
+    {
+      "id": "original-3",
+      "sentence": "Sanne de Vries, at 22, signed on as a junior archivist with the Rotterdam Maritime Museum in 2018.",
+      "response": {
+        "prompt": "Extract:\nSanne de Vries, at 22, signed on as a junior archivist with the Rotterdam Maritime Museum in 2018.\nJSON:\n",
+        "raw_output": "{\"name\":\"Sanne de Vries\",\"age\":22,\"org\":\"Rotterdam Maritime Museum\",\"role\":\"junior archivist\",\"year\":2018}",
+        "parsed": {
+          "name": "Sanne de Vries",
+          "age": 22,
+          "org": "Rotterdam Maritime Museum",
+          "role": "junior archivist",
+          "year": 2018
+        },
+        "parsed_ok": true,
+        "new_tokens": 36,
+        "latency_s": 0.7428704600315541,
+        "tokens_per_s": 48.460669708781886,
+        "model": "adapter",
+        "dtype": "bf16",
+        "greedy": true
+      },
+      "client_round_trip_s": 1.1623782999959076,
+      "ground_truth_correct": true,
+      "evaluator_reference_available": true,
+      "matches_evaluator": true
+    },
+    {
+      "id": "original-4",
+      "sentence": "The environmental NGO TerraVerde recruited 24-year-old Ingrid Halvorsen as a field coordinator back in 2015.",
+      "response": {
+        "prompt": "Extract:\nThe environmental NGO TerraVerde recruited 24-year-old Ingrid Halvorsen as a field coordinator back in 2015.\nJSON:\n",
+        "raw_output": "{\"name\":\"Ingrid Halvorsen\",\"age\":24,\"org\":\"TerraVerde\",\"role\":\"field coordinator\",\"year\":2015}",
+        "parsed": {
+          "name": "Ingrid Halvorsen",
+          "age": 24,
+          "org": "TerraVerde",
+          "role": "field coordinator",
+          "year": 2015
+        },
+        "parsed_ok": true,
+        "new_tokens": 35,
+        "latency_s": 0.7291805309941992,
+        "tokens_per_s": 47.99908734847781,
+        "model": "adapter",
+        "dtype": "bf16",
+        "greedy": true
+      },
+      "client_round_trip_s": 1.1056377000059001,
+      "ground_truth_correct": true,
+      "evaluator_reference_available": true,
+      "matches_evaluator": true
+    },
+    {
+      "id": "original-5",
+      "sentence": "At 25, Fatima Al-Zahra was already a junior researcher at Helios Biotech Lab, where she had worked since 2019.",
+      "response": {
+        "prompt": "Extract:\nAt 25, Fatima Al-Zahra was already a junior researcher at Helios Biotech Lab, where she had worked since 2019.\nJSON:\n",
+        "raw_output": "{\"name\":\"Fatima Al-Zahra\",\"age\":25,\"org\":\"Helios Biotech Lab\",\"role\":\"junior researcher\",\"year\":2019}",
+        "parsed": {
+          "name": "Fatima Al-Zahra",
+          "age": 25,
+          "org": "Helios Biotech Lab",
+          "role": "junior researcher",
+          "year": 2019
+        },
+        "parsed_ok": true,
+        "new_tokens": 37,
+        "latency_s": 0.7463380589615554,
+        "tokens_per_s": 49.575389537927755,
+        "model": "adapter",
+        "dtype": "bf16",
+        "greedy": true
+      },
+      "client_round_trip_s": 1.1494806999980938,
+      "ground_truth_correct": true,
+      "evaluator_reference_available": true,
+      "matches_evaluator": true
+    },
+    {
+      "id": "independent-0",
+      "sentence": "The observatory opened in 1964. Its annual report records that Helena Brooks became telescope maintenance supervisor at Ridgeline Observatory in 2017, when she was 36.",
+      "response": {
+        "prompt": "Extract:\nThe observatory opened in 1964. Its annual report records that Helena Brooks became telescope maintenance supervisor at Ridgeline Observatory in 2017, when she was 36.\nJSON:\n",
+        "raw_output": "{\"name\":\"Helena Brooks\",\"age\":36,\"org\":\"Ridgeline Observatory\",\"role\":\"telescope maintenance supervisor\",\"year\":2017}",
+        "parsed": {
+          "name": "Helena Brooks",
+          "age": 36,
+          "org": "Ridgeline Observatory",
+          "role": "telescope maintenance supervisor",
+          "year": 2017
+        },
+        "parsed_ok": true,
+        "new_tokens": 35,
+        "latency_s": 0.728289179969579,
+        "tokens_per_s": 48.0578332928988,
+        "model": "adapter",
+        "dtype": "bf16",
+        "greedy": true
+      },
+      "client_round_trip_s": 1.1955089999974007,
+      "ground_truth_correct": true,
+      "evaluator_reference_available": true,
+      "matches_evaluator": true
+    },
+    {
+      "id": "independent-1",
+      "sentence": "For the appointment record, use 2019: that was the year Felix Hart, aged 42, joined Marshwater Trust as wetland restoration adviser. The trust's 2022 newsletter described the appointment retrospectively.",
+      "response": {
+        "prompt": "Extract:\nFor the appointment record, use 2019: that was the year Felix Hart, aged 42, joined Marshwater Trust as wetland restoration adviser. The trust's 2022 newsletter described the appointment retrospectively.\nJSON:\n",
+        "raw_output": "{\"name\":\"Felix Hart\",\"age\":42,\"org\":\"Marshwater Trust\",\"role\":\"wetland restoration adviser\",\"year\":2019}",
+        "parsed": {
+          "name": "Felix Hart",
+          "age": 42,
+          "org": "Marshwater Trust",
+          "role": "wetland restoration adviser",
+          "year": 2019
+        },
+        "parsed_ok": true,
+        "new_tokens": 34,
+        "latency_s": 0.7814047869760543,
+        "tokens_per_s": 43.51137920664147,
+        "model": "adapter",
+        "dtype": "bf16",
+        "greedy": true
+      },
+      "client_round_trip_s": 1.2060592000052566,
+      "ground_truth_correct": true,
+      "evaluator_reference_available": true,
+      "matches_evaluator": true
+    },
+    {
+      "id": "independent-2",
+      "sentence": "In a 2025 interview, Priya Deshmukh recalled starting at Beacon Food Cooperative in 2014. She was 27 when she started there as cold-chain operations planner.",
+      "response": {
+        "prompt": "Extract:\nIn a 2025 interview, Priya Deshmukh recalled starting at Beacon Food Cooperative in 2014. She was 27 when she started there as cold-chain operations planner.\nJSON:\n",
+        "raw_output": "{\"name\":\"Priya Deshmukh\",\"age\":27,\"org\":\"Beacon Food Cooperative\",\"role\":\"cold-chain operations planner\",\"year\":2014}",
+        "parsed": {
+          "name": "Priya Deshmukh",
+          "age": 27,
+          "org": "Beacon Food Cooperative",
+          "role": "cold-chain operations planner",
+          "year": 2014
+        },
+        "parsed_ok": true,
+        "new_tokens": 37,
+        "latency_s": 0.9711927709868178,
+        "tokens_per_s": 38.09748291516289,
+        "model": "adapter",
+        "dtype": "bf16",
+        "greedy": true
+      },
+      "client_round_trip_s": 1.3769906000088667,
+      "ground_truth_correct": true,
+      "evaluator_reference_available": true,
+      "matches_evaluator": true
+    },
+    {
+      "id": "independent-3",
+      "sentence": "Northgate Dental Centre advertised the vacancy in 2016 and made the appointment in 2018. The person appointed in 2018 was Marcus Bell, then aged 31, and the post was dental equipment technician.",
+      "response": {
+        "prompt": "Extract:\nNorthgate Dental Centre advertised the vacancy in 2016 and made the appointment in 2018. The person appointed in 2018 was Marcus Bell, then aged 31, and the post was dental equipment technician.\nJSON:\n",
+        "raw_output": "{\"name\":\"Marcus Bell\",\"age\":31,\"org\":\"Northgate Dental Centre\",\"role\":\"dental equipment technician\",\"year\":2018}",
+        "parsed": {
+          "name": "Marcus Bell",
+          "age": 31,
+          "org": "Northgate Dental Centre",
+          "role": "dental equipment technician",
+          "year": 2018
+        },
+        "parsed_ok": true,
+        "new_tokens": 33,
+        "latency_s": 0.7333478900836781,
+        "tokens_per_s": 44.99910676259607,
+        "model": "adapter",
+        "dtype": "bf16",
+        "greedy": true
+      },
+      "client_round_trip_s": 1.130382200004533,
+      "ground_truth_correct": true,
+      "evaluator_reference_available": true,
+      "matches_evaluator": true
+    },
+    {
+      "id": "independent-4",
+      "sentence": "Evelyn Price was 48 at the time of her 2020 appointment as coastal erosion surveyor with Tidemark Field Office. The office had relocated in 2011.",
+      "response": {
+        "prompt": "Extract:\nEvelyn Price was 48 at the time of her 2020 appointment as coastal erosion surveyor with Tidemark Field Office. The office had relocated in 2011.\nJSON:\n",
+        "raw_output": "{\"name\":\"Evelyn Price\",\"age\":48,\"org\":\"Tidemark Field Office\",\"role\":\"coastal erosion surveyor\",\"year\":2020}",
+        "parsed": {
+          "name": "Evelyn Price",
+          "age": 48,
+          "org": "Tidemark Field Office",
+          "role": "coastal erosion surveyor",
+          "year": 2020
+        },
+        "parsed_ok": true,
+        "new_tokens": 38,
+        "latency_s": 0.8569483599858359,
+        "tokens_per_s": 44.3433954417371,
+        "model": "adapter",
+        "dtype": "bf16",
+        "greedy": true
+      },
+      "client_round_trip_s": 1.2700707000039984,
+      "ground_truth_correct": true,
+      "evaluator_reference_available": true,
+      "matches_evaluator": true
+    },
+    {
+      "id": "independent-5",
+      "sentence": "The building dates to 1892; the employment record concerns 2021. In that year, Wesley Grant, aged 25 at the start of employment, became stained-glass conservator at Foundry Heritage Centre.",
+      "response": {
+        "prompt": "Extract:\nThe building dates to 1892; the employment record concerns 2021. In that year, Wesley Grant, aged 25 at the start of employment, became stained-glass conservator at Foundry Heritage Centre.\nJSON:\n",
+        "raw_output": "{\"name\":\"Wesley Grant\",\"age\":25,\"org\":\"Foundry Heritage Centre\",\"role\":\"stained-glass conservator\",\"year\":2021}",
+        "parsed": {
+          "name": "Wesley Grant",
+          "age": 25,
+          "org": "Foundry Heritage Centre",
+          "role": "stained-glass conservator",
+          "year": 2021
+        },
+        "parsed_ok": true,
+        "new_tokens": 37,
+        "latency_s": 0.8334125420078635,
+        "tokens_per_s": 44.39578016291827,
+        "model": "adapter",
+        "dtype": "bf16",
+        "greedy": true
+      },
+      "client_round_trip_s": 1.2242325999977766,
+      "ground_truth_correct": true,
+      "evaluator_reference_available": true,
+      "matches_evaluator": true
+    },
+    {
+      "id": "finn-demo",
+      "sentence": "In 2026, Finn, 18, became a student at the University of Toronto.",
+      "response": {
+        "prompt": "Extract:\nIn 2026, Finn, 18, became a student at the University of Toronto.\nJSON:\n",
+        "raw_output": "{\"name\":\"Finn\",\"age\":18,\"org\":\"University of Toronto\",\"role\":\"student\",\"year\":2026}",
+        "parsed": {
+          "name": "Finn",
+          "age": 18,
+          "org": "University of Toronto",
+          "role": "student",
+          "year": 2026
+        },
+        "parsed_ok": true,
+        "new_tokens": 29,
+        "latency_s": 0.7032938030315563,
+        "tokens_per_s": 41.23454504361499,
+        "model": "adapter",
+        "dtype": "bf16",
+        "greedy": true
+      },
+      "client_round_trip_s": 1.1021382000035373,
+      "ground_truth_correct": true,
+      "evaluator_reference_available": false,
+      "matches_evaluator": null
+    }
+  ],
+  "all_reference_cases_match": true,
+  "all_parse": true
+}

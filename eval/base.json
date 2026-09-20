@@ -1,0 +1,395 @@
+{
+  "n": 100,
+  "json_parse_rate": 0.0,
+  "field_accuracy": {
+    "name": 0.0,
+    "age": 0.0,
+    "org": 0.0,
+    "role": 0.0,
+    "year": 0.0
+  },
+  "exact_match_rate": 0.0,
+  "held_out_loss": 1.2920212219107337,
+  "samples": [
+    {
+      "sentence": "Mei-Ling Chang, 24, is a graduate teaching assistant in the linguistics department at Taipei National University, where she began in 2024.",
+      "expected": {
+        "name": "Mei-Ling Chang",
+        "age": 24,
+        "org": "Taipei National University",
+        "role": "graduate teaching assistant",
+        "year": 2024
+      },
+      "raw_output": "{\n  \"author\": \"Mei-Ling Chang\",\n  \"title\": \"Graduate Teaching Assistant at Taipei National University\",\n  \"date\": \"2024-01-01\",\n  \"location\": \"Taipei, Taiwan\",\n  \"department\": \"Linguistics Department\",\n  \"",
+      "parsed_ok": false,
+      "wrong_fields": [
+        "name",
+        "age",
+        "org",
+        "role",
+        "year"
+      ]
+    },
+    {
+      "sentence": "The startup NeuralLoop hired 24-year-old Kwame Mensah as a machine learning engineer back in 2021.",
+      "expected": {
+        "name": "Kwame Mensah",
+        "age": 24,
+        "org": "NeuralLoop",
+        "role": "machine learning engineer",
+        "year": 2021
+      },
+      "raw_output": "```\n{\n  \"company\": \"NeuralLoop\",\n  \"location\": \"New York\",\n  \"industry\": \"AI\",\n  \"location\": \"New York\",\n  \"industry\": \"AI\",\n  \"location\": \"New York\",\n  \"industry\": \"AI\",\n  \"location\": \"New York",
+      "parsed_ok": false,
+      "wrong_fields": [
+        "name",
+        "age",
+        "org",
+        "role",
+        "year"
+      ]
+    },
+    {
+      "sentence": "It was in 1996 that Bogdan Ionescu, then 38, started working as a loan officer for Carpathian Savings Bank.",
+      "expected": {
+        "name": "Bogdan Ionescu",
+        "age": 38,
+        "org": "Carpathian Savings Bank",
+        "role": "loan officer",
+        "year": 1996
+      },
+      "raw_output": "JSON:\nIn 1996, Bogdan Ionescu, a 38-year-old loan officer for Carpathian Savings Bank, began his career as a loan officer. His journey in the banking industry began with a simple task: working as a loan officer for Carpathian Savings Bank. This position",
+      "parsed_ok": false,
+      "wrong_fields": [
+        "name",
+        "age",
+        "org",
+        "role",
+        "year"
+      ]
+    },
+    {
+      "sentence": "Sanne de Vries, at 22, signed on as a junior archivist with the Rotterdam Maritime Museum in 2018.",
+      "expected": {
+        "name": "Sanne de Vries",
+        "age": 22,
+        "org": "Rotterdam Maritime Museum",
+        "role": "junior archivist",
+        "year": 2018
+      },
+      "raw_output": "{\n  \"name\": \"Sanne de Vries\",\n  \"age\": 22,\n  \"occupation\": \"Junior Archivist\",\n  \"museum\": \"Rotterdam Maritime Museum\"\n}\nWhat is the relationship between the person and the museum?\nThe person is a junior archivist at the Rotterdam Maritime Museum",
+      "parsed_ok": false,
+      "wrong_fields": [
+        "name",
+        "age",
+        "org",
+        "role",
+        "year"
+      ]
+    },
+    {
+      "sentence": "The environmental NGO TerraVerde recruited 24-year-old Ingrid Halvorsen as a field coordinator back in 2015.",
+      "expected": {
+        "name": "Ingrid Halvorsen",
+        "age": 24,
+        "org": "TerraVerde",
+        "role": "field coordinator",
+        "year": 2015
+      },
+      "raw_output": "{\n  \"name\": \"Ingrid Halvorsen\",\n  \"age\": 24,\n  \"role\": \"Field Coordinator\",\n  \"organization\": \"TerraVerde\",\n  \"location\": \"Sweden\",\n  \"description\": \"Ingrid Halvorsen is a 24-year-old",
+      "parsed_ok": false,
+      "wrong_fields": [
+        "name",
+        "age",
+        "org",
+        "role",
+        "year"
+      ]
+    },
+    {
+      "sentence": "At 25, Fatima Al-Zahra was already a junior researcher at Helios Biotech Lab, where she had worked since 2019.",
+      "expected": {
+        "name": "Fatima Al-Zahra",
+        "age": 25,
+        "org": "Helios Biotech Lab",
+        "role": "junior researcher",
+        "year": 2019
+      },
+      "raw_output": "{\n  \"name\": \"Fatima Al-Zahra\",\n  \"age\": 25,\n  \"researcher\": true,\n  \"lab\": \"Helios Biotech Lab\",\n  \"position\": \"Junior researcher\",\n  \"start_date\": \"2019\"\n}\nWhat is the relationship between",
+      "parsed_ok": false,
+      "wrong_fields": [
+        "name",
+        "age",
+        "org",
+        "role",
+        "year"
+      ]
+    },
+    {
+      "sentence": "The position of lead auditor at Meridian Trust Bank went to 37-year-old Priya Raghunathan in 2016.",
+      "expected": {
+        "name": "Priya Raghunathan",
+        "age": 37,
+        "org": "Meridian Trust Bank",
+        "role": "lead auditor",
+        "year": 2016
+      },
+      "raw_output": "{\n  \"position\": \"Lead Auditor\",\n  \"date\": \"2016-01-01\",\n  \"bank\": \"Meridian Trust Bank\",\n  \"position_date\": \"2016-01-01\",\n  \"bank_date\": \"2016-0",
+      "parsed_ok": false,
+      "wrong_fields": [
+        "name",
+        "age",
+        "org",
+        "role",
+        "year"
+      ]
+    },
+    {
+      "sentence": "Milagros Quispe, who is 31, was named lead epidemiologist at the Lima Public Health Agency in 2021.",
+      "expected": {
+        "name": "Milagros Quispe",
+        "age": 31,
+        "org": "Lima Public Health Agency",
+        "role": "lead epidemiologist",
+        "year": 2021
+      },
+      "raw_output": "{\n  \"name\": \"Milagros Quispe\",\n  \"age\": 31,\n  \"position\": \"Lead Epidemiologist\",\n  \"organization\": \"Lima Public Health Agency\"\n}\nWhat is the name of the person who is the lead epidemiologist at the Lima Public Health Agency?\nThe name",
+      "parsed_ok": false,
+      "wrong_fields": [
+        "name",
+        "age",
+        "org",
+        "role",
+        "year"
+      ]
+    },
+    {
+      "sentence": "Marianne Little Feather, aged 71, was brought on as a cultural heritage consultant by the Smithsonian Institution in 2000.",
+      "expected": {
+        "name": "Marianne Little Feather",
+        "age": 71,
+        "org": "Smithsonian Institution",
+        "role": "cultural heritage consultant",
+        "year": 2000
+      },
+      "raw_output": "{\n  \"age\": 71,\n  \"occupation\": \"cultural heritage consultant\",\n  \"birthplace\": \"Smithsonian Institution\",\n  \"placeOfBirth\": \"Smithsonian Institution\",\n  \"placeOfDeath\": \"Smithsonian Institution\",\n  \"placeOfDeathCause\": \"died of cancer\",\n ",
+      "parsed_ok": false,
+      "wrong_fields": [
+        "name",
+        "age",
+        "org",
+        "role",
+        "year"
+      ]
+    },
+    {
+      "sentence": "The position of lead archivist at the Budapest Records Office was given to Erzsebet Nagy, then 54, in 2002.",
+      "expected": {
+        "name": "Erzsebet Nagy",
+        "age": 54,
+        "org": "Budapest Records Office",
+        "role": "lead archivist",
+        "year": 2002
+      },
+      "raw_output": "{\n  \"title\": \"Erzsebet Nagy, lead archivist at the Budapest Records Office\",\n  \"text\": \"Erzsebet Nagy, lead archivist at the Budapest Records Office, was given the position of lead archivist at the Budapest Records Office in 2002. She",
+      "parsed_ok": false,
+      "wrong_fields": [
+        "name",
+        "age",
+        "org",
+        "role",
+        "year"
+      ]
+    },
+    {
+      "sentence": "In the year 2026, the Sevastopol Botanical Garden brought on 71-year-old horticulturist Bogdan Ilyenko as its curator of rare species.",
+      "expected": {
+        "name": "Bogdan Ilyenko",
+        "age": 71,
+        "org": "Sevastopol Botanical Garden",
+        "role": "curator of rare species",
+        "year": 2026
+      },
+      "raw_output": "{\n  \"year\": 2026,\n  \"curator\": \"Bogdan Ilyenko\",\n  \"species\": \"Rare species\"\n}\nWhat is the relationship between Bogdan Ilyenko and the Sevastopol Botanical Garden?\nBogdan Ilyenko is the curator of rare",
+      "parsed_ok": false,
+      "wrong_fields": [
+        "name",
+        "age",
+        "org",
+        "role",
+        "year"
+      ]
+    },
+    {
+      "sentence": "The newspaper HaMizrachi hired 35-year-old Dawit Kebede as its Nairobi correspondent in 2009.",
+      "expected": {
+        "name": "Dawit Kebede",
+        "age": 35,
+        "org": "HaMizrachi",
+        "role": "Nairobi correspondent",
+        "year": 2009
+      },
+      "raw_output": "{\n  \"headline\": \"HaMizrachi hires 35-year-old Dawit Kebede as its Nairobi correspondent\",\n  \"author\": \"HaMizrachi\",\n  \"date\": \"2009-09-01\",\n  \"source\": \"HaMizrachi\"\n}\nWhat",
+      "parsed_ok": false,
+      "wrong_fields": [
+        "name",
+        "age",
+        "org",
+        "role",
+        "year"
+      ]
+    },
+    {
+      "sentence": "Having reached 71, Ibrahim El-Sayed retired from Cairo Metro Authority, where he had worked as a train dispatcher since 2005.",
+      "expected": {
+        "name": "Ibrahim El-Sayed",
+        "age": 71,
+        "org": "Cairo Metro Authority",
+        "role": "train dispatcher",
+        "year": 2005
+      },
+      "raw_output": "```\n{\n  \"retired\": \"Ibrahim El-Sayed retired from Cairo Metro Authority, where he had worked as a train dispatcher since 2005.\"\n}\n```\nWhat is the meaning of the phrase \"retired\" in this context?\nThe phrase \"retired\" in this context means that",
+      "parsed_ok": false,
+      "wrong_fields": [
+        "name",
+        "age",
+        "org",
+        "role",
+        "year"
+      ]
+    },
+    {
+      "sentence": "Jakub Zieliński was only 48 when he was appointed vice president of operations at Vistula Energy Partners in 2020.",
+      "expected": {
+        "name": "Jakub Zieliński",
+        "age": 48,
+        "org": "Vistula Energy Partners",
+        "role": "vice president of operations",
+        "year": 2020
+      },
+      "raw_output": "Jakub Zieliński was only 48 when he was appointed vice president of operations at Vistula Energy Partners in 2020. Zieliński was born in 1972 in Poland. He graduated from the University of Warsaw in 1994 with a degree in economics.",
+      "parsed_ok": false,
+      "wrong_fields": [
+        "name",
+        "age",
+        "org",
+        "role",
+        "year"
+      ]
+    },
+    {
+      "sentence": "The linguistics department at Corvinus University recruited Minh Thu Nguyen, then 30, as an associate professor in 1997.",
+      "expected": {
+        "name": "Minh Thu Nguyen",
+        "age": 30,
+        "org": "Corvinus University",
+        "role": "associate professor",
+        "year": 1997
+      },
+      "raw_output": "{\n  \"name\": \"Minh Thu Nguyen\",\n  \"position\": \"Associate Professor\",\n  \"department\": \"Linguistics\",\n  \"birthDate\": \"1964-01-01\",\n  \"birthPlace\": \"Hanoi\",\n  \"graduationYear\": \"199",
+      "parsed_ok": false,
+      "wrong_fields": [
+        "name",
+        "age",
+        "org",
+        "role",
+        "year"
+      ]
+    },
+    {
+      "sentence": "Oluseyi Adebanjo, 33, became head chef at the Lagos Meridian Hotel kitchen in 2018.",
+      "expected": {
+        "name": "Oluseyi Adebanjo",
+        "age": 33,
+        "org": "Lagos Meridian Hotel",
+        "role": "head chef",
+        "year": 2018
+      },
+      "raw_output": "Oluseyi Adebanjo, 33, became head chef at the Lagos Meridian Hotel kitchen in 2018. 1. What is the name of the person who became head chef at the Lagos Meridian Hotel kitchen in 2018?\n2. What was the role of the",
+      "parsed_ok": false,
+      "wrong_fields": [
+        "name",
+        "age",
+        "org",
+        "role",
+        "year"
+      ]
+    },
+    {
+      "sentence": "At 71, Babatunde Oyelaran finally retired from his role as senior agricultural adviser at the Sahel Growth Initiative in 2023.",
+      "expected": {
+        "name": "Babatunde Oyelaran",
+        "age": 71,
+        "org": "Sahel Growth Initiative",
+        "role": "senior agricultural adviser",
+        "year": 2023
+      },
+      "raw_output": "{\n  \"event\": \"baba_tunde_oyelaran_retires_from_sahel_growth_initiative\",\n  \"date\": \"2023-03-01\",\n  \"location\": \"Sahel Growth Initiative\",\n  \"description\": \"At 71, Babatunde",
+      "parsed_ok": false,
+      "wrong_fields": [
+        "name",
+        "age",
+        "org",
+        "role",
+        "year"
+      ]
+    },
+    {
+      "sentence": "A 22-year-old intern named Priya Raghunathan started in the research lab of Meridian Neurosciences during the summer of 2015.",
+      "expected": {
+        "name": "Priya Raghunathan",
+        "age": 22,
+        "org": "Meridian Neurosciences",
+        "role": "intern",
+        "year": 2015
+      },
+      "raw_output": "{\n  \"name\": \"Priya Raghunathan\",\n  \"age\": 22,\n  \"internship\": \"research lab of Meridian Neurosciences\",\n  \"location\": \"summer of 2015\",\n  \"status\": \"intern\"\n}\nWhat is the status of Priya",
+      "parsed_ok": false,
+      "wrong_fields": [
+        "name",
+        "age",
+        "org",
+        "role",
+        "year"
+      ]
+    },
+    {
+      "sentence": "In 1999 the Berlin robotics lab Fraunhofer IPA brought on 51-year-old Günter Zwiebel as a machinist.",
+      "expected": {
+        "name": "Günter Zwiebel",
+        "age": 51,
+        "org": "Fraunhofer IPA",
+        "role": "machinist",
+        "year": 1999
+      },
+      "raw_output": "Günter Zwiebel, 51, is a machinist at Fraunhofer IPA, a research institute in Berlin, Germany. He has been working on robotics for 51 years, and has been a machinist for 50 years. He has been working on robotics for",
+      "parsed_ok": false,
+      "wrong_fields": [
+        "name",
+        "age",
+        "org",
+        "role",
+        "year"
+      ]
+    },
+    {
+      "sentence": "Hired by the Copenhagen-based startup GreenGrid Analytics in 2025, Jakob Sandholdt, 19, works there as an junior data technician.",
+      "expected": {
+        "name": "Jakob Sandholdt",
+        "age": 19,
+        "org": "GreenGrid Analytics",
+        "role": "junior data technician",
+        "year": 2025
+      },
+      "raw_output": "Jakob Sandholdt, 19, is a junior data technician at the Copenhagen-based startup GreenGrid Analytics. He joined the company in 2025 and has been working there since then. His role involves analyzing and processing data to support the company's operations and initiatives. Jakob is a motivated and",
+      "parsed_ok": false,
+      "wrong_fields": [
+        "name",
+        "age",
+        "org",
+        "role",
+        "year"
+      ]
+    }
+  ]
+}

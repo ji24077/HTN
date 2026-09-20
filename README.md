@@ -89,6 +89,30 @@ Hosted entry points are `orchestrator-public` and
 `python -m orchestrator.server`, `python -m orchestrator.worker`, and
 `python -m orchestrator.client`.
 
+## GPUShare model optimization console
+
+The integrated `gpushare` console uses the fleet's rented GPU pods for a guided
+model workflow: choose a model and GPU, run an agent-off training baseline,
+type prompts against before/after models, then run three measured agents.
+
+- **Training Optimization Agent** measures LoRA/QLoRA, batch/accumulation,
+  checkpointing and GPU cost, and only publishes a candidate after the same
+  held-out evaluation passes.
+- **Inference Optimization Agent** measures eager/compiled runtimes, batching,
+  decode KV caching, BF16/INT8/NF4 and route cost with fixed generated work.
+- **Chip Migration Agent** transfers or resumes checkpoints across NVIDIA/AMD
+  pods and refuses to update the active route when parse or exact-match quality
+  regresses beyond the configured tolerance.
+
+Configure the optional GPUShare fields in `.env`, then run:
+
+```sh
+make ui
+```
+
+Open **http://127.0.0.1:8080**. The original authenticated fleet UI remains at
+**https://localhost:5174** when started with `./scripts/start-app.sh`.
+
 ## Guides
 
 - [The agent as a container](docs/docker-agent.md): one image instead of five binaries,

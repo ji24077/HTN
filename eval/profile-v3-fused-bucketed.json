@@ -1,0 +1,1030 @@
+{
+  "n": 64,
+  "json_parse_rate": 1.0,
+  "field_accuracy": {
+    "name": 0.984375,
+    "age": 1.0,
+    "org": 0.953125,
+    "role": 0.96875,
+    "year": 1.0
+  },
+  "exact_match_rate": 0.90625,
+  "held_out_loss": 0.026066976095934193,
+  "samples": [
+    {
+      "sentence": "Oluseyi Adebanjo, 33, became head chef at the Lagos Meridian Hotel kitchen in 2018.",
+      "expected": {
+        "name": "Oluseyi Adebanjo",
+        "age": 33,
+        "org": "Lagos Meridian Hotel",
+        "role": "head chef",
+        "year": 2018
+      },
+      "raw_output": "{\"name\":\"Oluseyi Adebanjo\",\"age\":33,\"org\":\"Lagos Meridian Hotel kitchen\",\"role\":\"head chef\",\"year\":2018}",
+      "parsed_ok": true,
+      "wrong_fields": [
+        "org"
+      ],
+      "category": "original",
+      "source_index": 15
+    },
+    {
+      "sentence": "Aged 52, Marisol Herrera Quintero accepted the deanship of the veterinary school at Universidad del Llano in 2010.",
+      "expected": {
+        "name": "Marisol Herrera Quintero",
+        "age": 52,
+        "org": "Universidad del Llano",
+        "role": "dean of the veterinary school",
+        "year": 2010
+      },
+      "raw_output": "{\"name\":\"Marisol Herrera Quintero\",\"age\":52,\"org\":\"Universidad del Llano\",\"role\":\"deanship of the veterinary school\",\"year\":2010}",
+      "parsed_ok": true,
+      "wrong_fields": [
+        "role"
+      ],
+      "category": "original",
+      "source_index": 22
+    },
+    {
+      "sentence": "When the cooperative hired Fatima Zahra El Amrani as an agricultural extension officer, she was 35; that was in 2012.",
+      "expected": {
+        "name": "Fatima Zahra El Amrani",
+        "age": 35,
+        "org": "the cooperative",
+        "role": "agricultural extension officer",
+        "year": 2012
+      },
+      "raw_output": "{\"name\":\"Fatima Zahra El Amrani\",\"age\":35,\"org\":\"cooperative\",\"role\":\"agricultural extension officer\",\"year\":2012}",
+      "parsed_ok": true,
+      "wrong_fields": [
+        "org"
+      ],
+      "category": "original",
+      "source_index": 38
+    },
+    {
+      "sentence": "Diedre Havlicek, who was 58 when she became ombudsman at the Bratislava Courier in 2004, had spent decades in journalism.",
+      "expected": {
+        "name": "Diedre Havlicek",
+        "age": 58,
+        "org": "Bratislava Courier",
+        "role": "ombudsman",
+        "year": 2004
+      },
+      "raw_output": "{\"name\":\"Dorel Havlicek\",\"age\":58,\"org\":\"Bratislava Courier\",\"role\":\"ombudsman\",\"year\":2004}",
+      "parsed_ok": true,
+      "wrong_fields": [
+        "name"
+      ],
+      "category": "original",
+      "source_index": 45
+    },
+    {
+      "sentence": "Sebastian Okonkwo, 25 years old in 1989, worked as a trainee machinist at the agency's metallurgy lab in Wolverhampton.",
+      "expected": {
+        "name": "Sebastian Okonkwo",
+        "age": 25,
+        "org": "metallurgy lab in Wolverhampton",
+        "role": "trainee machinist",
+        "year": 1989
+      },
+      "raw_output": "{\"name\":\"Sebastian Okonkwo\",\"age\":25,\"org\":\"agricultural development agency\",\"role\":\"trainee machinist\",\"year\":1989}",
+      "parsed_ok": true,
+      "wrong_fields": [
+        "org"
+      ],
+      "category": "original",
+      "source_index": 47
+    },
+    {
+      "sentence": "Theoretical physicist Dušan Králiček, 71, retired from the Brno Institute for Advanced Study in 2025 after a final year there.",
+      "expected": {
+        "name": "Dušan Králiček",
+        "age": 71,
+        "org": "Brno Institute for Advanced Study",
+        "role": "theoretical physicist",
+        "year": 2025
+      },
+      "raw_output": "{\"name\":\"Dušan Králiček\",\"age\":71,\"org\":\"Brno Institute for Advanced Study\",\"role\":\"retired\",\"year\":2025}",
+      "parsed_ok": true,
+      "wrong_fields": [
+        "role"
+      ],
+      "category": "original",
+      "source_index": 58
+    },
+    {
+      "sentence": "Mei-Ling Chang, 24, is a graduate teaching assistant in the linguistics department at Taipei National University, where she began in 2024.",
+      "expected": {
+        "name": "Mei-Ling Chang",
+        "age": 24,
+        "org": "Taipei National University",
+        "role": "graduate teaching assistant",
+        "year": 2024
+      },
+      "raw_output": "{\"name\":\"Mei-Ling Chang\",\"age\":24,\"org\":\"Taipei National University\",\"role\":\"graduate teaching assistant\",\"year\":2024}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 0
+    },
+    {
+      "sentence": "The startup NeuralLoop hired 24-year-old Kwame Mensah as a machine learning engineer back in 2021.",
+      "expected": {
+        "name": "Kwame Mensah",
+        "age": 24,
+        "org": "NeuralLoop",
+        "role": "machine learning engineer",
+        "year": 2021
+      },
+      "raw_output": "{\"name\":\"Kwame Mensah\",\"age\":24,\"org\":\"NeuralLoop\",\"role\":\"machine learning engineer\",\"year\":2021}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 1
+    },
+    {
+      "sentence": "It was in 1996 that Bogdan Ionescu, then 38, started working as a loan officer for Carpathian Savings Bank.",
+      "expected": {
+        "name": "Bogdan Ionescu",
+        "age": 38,
+        "org": "Carpathian Savings Bank",
+        "role": "loan officer",
+        "year": 1996
+      },
+      "raw_output": "{\"name\":\"Bogdan Ionescu\",\"age\":38,\"org\":\"Carpathian Savings Bank\",\"role\":\"loan officer\",\"year\":1996}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 2
+    },
+    {
+      "sentence": "Sanne de Vries, at 22, signed on as a junior archivist with the Rotterdam Maritime Museum in 2018.",
+      "expected": {
+        "name": "Sanne de Vries",
+        "age": 22,
+        "org": "Rotterdam Maritime Museum",
+        "role": "junior archivist",
+        "year": 2018
+      },
+      "raw_output": "{\"name\":\"Sanne de Vries\",\"age\":22,\"org\":\"Rotterdam Maritime Museum\",\"role\":\"junior archivist\",\"year\":2018}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 3
+    },
+    {
+      "sentence": "The environmental NGO TerraVerde recruited 24-year-old Ingrid Halvorsen as a field coordinator back in 2015.",
+      "expected": {
+        "name": "Ingrid Halvorsen",
+        "age": 24,
+        "org": "TerraVerde",
+        "role": "field coordinator",
+        "year": 2015
+      },
+      "raw_output": "{\"name\":\"Ingrid Halvorsen\",\"age\":24,\"org\":\"TerraVerde\",\"role\":\"field coordinator\",\"year\":2015}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 4
+    },
+    {
+      "sentence": "At 25, Fatima Al-Zahra was already a junior researcher at Helios Biotech Lab, where she had worked since 2019.",
+      "expected": {
+        "name": "Fatima Al-Zahra",
+        "age": 25,
+        "org": "Helios Biotech Lab",
+        "role": "junior researcher",
+        "year": 2019
+      },
+      "raw_output": "{\"name\":\"Fatima Al-Zahra\",\"age\":25,\"org\":\"Helios Biotech Lab\",\"role\":\"junior researcher\",\"year\":2019}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 5
+    },
+    {
+      "sentence": "The position of lead auditor at Meridian Trust Bank went to 37-year-old Priya Raghunathan in 2016.",
+      "expected": {
+        "name": "Priya Raghunathan",
+        "age": 37,
+        "org": "Meridian Trust Bank",
+        "role": "lead auditor",
+        "year": 2016
+      },
+      "raw_output": "{\"name\":\"Priya Raghunathan\",\"age\":37,\"org\":\"Meridian Trust Bank\",\"role\":\"lead auditor\",\"year\":2016}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 6
+    },
+    {
+      "sentence": "Milagros Quispe, who is 31, was named lead epidemiologist at the Lima Public Health Agency in 2021.",
+      "expected": {
+        "name": "Milagros Quispe",
+        "age": 31,
+        "org": "Lima Public Health Agency",
+        "role": "lead epidemiologist",
+        "year": 2021
+      },
+      "raw_output": "{\"name\":\"Milagros Quispe\",\"age\":31,\"org\":\"Lima Public Health Agency\",\"role\":\"lead epidemiologist\",\"year\":2021}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 7
+    },
+    {
+      "sentence": "Marianne Little Feather, aged 71, was brought on as a cultural heritage consultant by the Smithsonian Institution in 2000.",
+      "expected": {
+        "name": "Marianne Little Feather",
+        "age": 71,
+        "org": "Smithsonian Institution",
+        "role": "cultural heritage consultant",
+        "year": 2000
+      },
+      "raw_output": "{\"name\":\"Marianne Little Feather\",\"age\":71,\"org\":\"Smithsonian Institution\",\"role\":\"cultural heritage consultant\",\"year\":2000}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 8
+    },
+    {
+      "sentence": "The position of lead archivist at the Budapest Records Office was given to Erzsebet Nagy, then 54, in 2002.",
+      "expected": {
+        "name": "Erzsebet Nagy",
+        "age": 54,
+        "org": "Budapest Records Office",
+        "role": "lead archivist",
+        "year": 2002
+      },
+      "raw_output": "{\"name\":\"Erzsebet Nagy\",\"age\":54,\"org\":\"Budapest Records Office\",\"role\":\"lead archivist\",\"year\":2002}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 9
+    },
+    {
+      "sentence": "In the year 2026, the Sevastopol Botanical Garden brought on 71-year-old horticulturist Bogdan Ilyenko as its curator of rare species.",
+      "expected": {
+        "name": "Bogdan Ilyenko",
+        "age": 71,
+        "org": "Sevastopol Botanical Garden",
+        "role": "curator of rare species",
+        "year": 2026
+      },
+      "raw_output": "{\"name\":\"Bogdan Ilyenko\",\"age\":71,\"org\":\"Sevastopol Botanical Garden\",\"role\":\"curator of rare species\",\"year\":2026}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 10
+    },
+    {
+      "sentence": "The newspaper HaMizrachi hired 35-year-old Dawit Kebede as its Nairobi correspondent in 2009.",
+      "expected": {
+        "name": "Dawit Kebede",
+        "age": 35,
+        "org": "HaMizrachi",
+        "role": "Nairobi correspondent",
+        "year": 2009
+      },
+      "raw_output": "{\"name\":\"Dawit Kebede\",\"age\":35,\"org\":\"HaMizrachi\",\"role\":\"Nairobi correspondent\",\"year\":2009}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 11
+    },
+    {
+      "sentence": "Having reached 71, Ibrahim El-Sayed retired from Cairo Metro Authority, where he had worked as a train dispatcher since 2005.",
+      "expected": {
+        "name": "Ibrahim El-Sayed",
+        "age": 71,
+        "org": "Cairo Metro Authority",
+        "role": "train dispatcher",
+        "year": 2005
+      },
+      "raw_output": "{\"name\":\"Ibrahim El-Sayed\",\"age\":71,\"org\":\"Cairo Metro Authority\",\"role\":\"train dispatcher\",\"year\":2005}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 12
+    },
+    {
+      "sentence": "Jakub Zieliński was only 48 when he was appointed vice president of operations at Vistula Energy Partners in 2020.",
+      "expected": {
+        "name": "Jakub Zieliński",
+        "age": 48,
+        "org": "Vistula Energy Partners",
+        "role": "vice president of operations",
+        "year": 2020
+      },
+      "raw_output": "{\"name\":\"Jakub Zieliński\",\"age\":48,\"org\":\"Vistula Energy Partners\",\"role\":\"vice president of operations\",\"year\":2020}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 13
+    },
+    {
+      "sentence": "The linguistics department at Corvinus University recruited Minh Thu Nguyen, then 30, as an associate professor in 1997.",
+      "expected": {
+        "name": "Minh Thu Nguyen",
+        "age": 30,
+        "org": "Corvinus University",
+        "role": "associate professor",
+        "year": 1997
+      },
+      "raw_output": "{\"name\":\"Minh Thu Nguyen\",\"age\":30,\"org\":\"Corvinus University\",\"role\":\"associate professor\",\"year\":1997}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 14
+    },
+    {
+      "sentence": "At 71, Babatunde Oyelaran finally retired from his role as senior agricultural adviser at the Sahel Growth Initiative in 2023.",
+      "expected": {
+        "name": "Babatunde Oyelaran",
+        "age": 71,
+        "org": "Sahel Growth Initiative",
+        "role": "senior agricultural adviser",
+        "year": 2023
+      },
+      "raw_output": "{\"name\":\"Babatunde Oyelaran\",\"age\":71,\"org\":\"Sahel Growth Initiative\",\"role\":\"senior agricultural adviser\",\"year\":2023}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 16
+    },
+    {
+      "sentence": "A 22-year-old intern named Priya Raghunathan started in the research lab of Meridian Neurosciences during the summer of 2015.",
+      "expected": {
+        "name": "Priya Raghunathan",
+        "age": 22,
+        "org": "Meridian Neurosciences",
+        "role": "intern",
+        "year": 2015
+      },
+      "raw_output": "{\"name\":\"Priya Raghunathan\",\"age\":22,\"org\":\"Meridian Neurosciences\",\"role\":\"intern\",\"year\":2015}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 17
+    },
+    {
+      "sentence": "In 1999 the Berlin robotics lab Fraunhofer IPA brought on 51-year-old Günter Zwiebel as a machinist.",
+      "expected": {
+        "name": "Günter Zwiebel",
+        "age": 51,
+        "org": "Fraunhofer IPA",
+        "role": "machinist",
+        "year": 1999
+      },
+      "raw_output": "{\"name\":\"Günter Zwiebel\",\"age\":51,\"org\":\"Fraunhofer IPA\",\"role\":\"machinist\",\"year\":1999}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 18
+    },
+    {
+      "sentence": "Hired by the Copenhagen-based startup GreenGrid Analytics in 2025, Jakob Sandholdt, 19, works there as an junior data technician.",
+      "expected": {
+        "name": "Jakob Sandholdt",
+        "age": 19,
+        "org": "GreenGrid Analytics",
+        "role": "junior data technician",
+        "year": 2025
+      },
+      "raw_output": "{\"name\":\"Jakob Sandholdt\",\"age\":19,\"org\":\"GreenGrid Analytics\",\"role\":\"junior data technician\",\"year\":2025}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 19
+    },
+    {
+      "sentence": "Nikolai Ivanovitch, 71, retired in 2025 from his post as senior geologist at the Irkutsk Mineral Survey.",
+      "expected": {
+        "name": "Nikolai Ivanovitch",
+        "age": 71,
+        "org": "Irkutsk Mineral Survey",
+        "role": "senior geologist",
+        "year": 2025
+      },
+      "raw_output": "{\"name\":\"Nikolai Ivanovitch\",\"age\":71,\"org\":\"Irkutsk Mineral Survey\",\"role\":\"senior geologist\",\"year\":2025}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 20
+    },
+    {
+      "sentence": "Serving as head chef at the restaurant collective Bord de Mer, the 55-year-old Lebanese-born Elie Haddad earned critical acclaim in 2015.",
+      "expected": {
+        "name": "Elie Haddad",
+        "age": 55,
+        "org": "Bord de Mer",
+        "role": "head chef",
+        "year": 2015
+      },
+      "raw_output": "{\"name\":\"Elie Haddad\",\"age\":55,\"org\":\"Bord de Mer\",\"role\":\"head chef\",\"year\":2015}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 21
+    },
+    {
+      "sentence": "Aged just 22, the game designer Wen Qiang joined indie studio Peachpit Interactive in 2024.",
+      "expected": {
+        "name": "Wen Qiang",
+        "age": 22,
+        "org": "Peachpit Interactive",
+        "role": "game designer",
+        "year": 2024
+      },
+      "raw_output": "{\"name\":\"Wen Qiang\",\"age\":22,\"org\":\"Peachpit Interactive\",\"role\":\"game designer\",\"year\":2024}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 23
+    },
+    {
+      "sentence": "The 22-year-old Magnus Bergström was hired as a junior analyst at Nordvik Capital Partners in 2023.",
+      "expected": {
+        "name": "Magnus Bergström",
+        "age": 22,
+        "org": "Nordvik Capital Partners",
+        "role": "junior analyst",
+        "year": 2023
+      },
+      "raw_output": "{\"name\":\"Magnus Bergström\",\"age\":22,\"org\":\"Nordvik Capital Partners\",\"role\":\"junior analyst\",\"year\":2023}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 24
+    },
+    {
+      "sentence": "It was in 2014 that 26-year-old Yuki Tanabe first reported for duty as a lab assistant at the RIKEN Brain Science Laboratory.",
+      "expected": {
+        "name": "Yuki Tanabe",
+        "age": 26,
+        "org": "RIKEN Brain Science Laboratory",
+        "role": "lab assistant",
+        "year": 2014
+      },
+      "raw_output": "{\"name\":\"Yuki Tanabe\",\"age\":26,\"org\":\"RIKEN Brain Science Laboratory\",\"role\":\"lab assistant\",\"year\":2014}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 25
+    },
+    {
+      "sentence": "At 24, Yuri Bezrukov signed on as a junior software engineer with Tallinn-based startup Klarnet in 2019.",
+      "expected": {
+        "name": "Yuri Bezrukov",
+        "age": 24,
+        "org": "Klarnet",
+        "role": "junior software engineer",
+        "year": 2019
+      },
+      "raw_output": "{\"name\":\"Yuri Bezrukov\",\"age\":24,\"org\":\"Klarnet\",\"role\":\"junior software engineer\",\"year\":2019}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 26
+    },
+    {
+      "sentence": "Sofia Bianchi, a 33-year-old food scientist, joined Trento Agritech Startup in 2021 to serve as product safety lead.",
+      "expected": {
+        "name": "Sofia Bianchi",
+        "age": 33,
+        "org": "Trento Agritech Startup",
+        "role": "product safety lead",
+        "year": 2021
+      },
+      "raw_output": "{\"name\":\"Sofia Bianchi\",\"age\":33,\"org\":\"Trento Agritech Startup\",\"role\":\"product safety lead\",\"year\":2021}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 27
+    },
+    {
+      "sentence": "Priya Raghunathan, who is 29, became the youngest-ever editor at the Chennai Daily Mail in 2021.",
+      "expected": {
+        "name": "Priya Raghunathan",
+        "age": 29,
+        "org": "Chennai Daily Mail",
+        "role": "editor",
+        "year": 2021
+      },
+      "raw_output": "{\"name\":\"Priya Raghunathan\",\"age\":29,\"org\":\"Chennai Daily Mail\",\"role\":\"editor\",\"year\":2021}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 28
+    },
+    {
+      "sentence": "The position of head librarian at Bibliothèque Sainte-Geneviève was filled by Camille Bouchard, then 56, in 2004.",
+      "expected": {
+        "name": "Camille Bouchard",
+        "age": 56,
+        "org": "Bibliothèque Sainte-Geneviève",
+        "role": "head librarian",
+        "year": 2004
+      },
+      "raw_output": "{\"name\":\"Camille Bouchard\",\"age\":56,\"org\":\"Bibliothèque Sainte-Geneviève\",\"role\":\"head librarian\",\"year\":2004}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 29
+    },
+    {
+      "sentence": "It was 1988 when 45-year-old Nikolai Sorokin was named deputy director of the Leningrad Seismology Bureau.",
+      "expected": {
+        "name": "Nikolai Sorokin",
+        "age": 45,
+        "org": "Leningrad Seismology Bureau",
+        "role": "deputy director",
+        "year": 1988
+      },
+      "raw_output": "{\"name\":\"Nikolai Sorokin\",\"age\":45,\"org\":\"Leningrad Seismology Bureau\",\"role\":\"deputy director\",\"year\":1988}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 30
+    },
+    {
+      "sentence": "Sofia Iglesias was 64 when the Madrid daily El Correo Federal appointed her opinion editor in 2018.",
+      "expected": {
+        "name": "Sofia Iglesias",
+        "age": 64,
+        "org": "El Correo Federal",
+        "role": "opinion editor",
+        "year": 2018
+      },
+      "raw_output": "{\"name\":\"Sofia Iglesias\",\"age\":64,\"org\":\"El Correo Federal\",\"role\":\"opinion editor\",\"year\":2018}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 31
+    },
+    {
+      "sentence": "Agronomy researcher Isabel Ferreira da Costa, 46, accepted a position at the Brazilian Agricultural Research Institute as a soil scientist in 2010.",
+      "expected": {
+        "name": "Isabel Ferreira da Costa",
+        "age": 46,
+        "org": "Brazilian Agricultural Research Institute",
+        "role": "soil scientist",
+        "year": 2010
+      },
+      "raw_output": "{\"name\":\"Isabel Ferreira da Costa\",\"age\":46,\"org\":\"Brazilian Agricultural Research Institute\",\"role\":\"soil scientist\",\"year\":2010}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 32
+    },
+    {
+      "sentence": "Serving as head chef at Wildflower Bistro since 2019, 52-year-old Kenji Nakamura has transformed its menu.",
+      "expected": {
+        "name": "Kenji Nakamura",
+        "age": 52,
+        "org": "Wildflower Bistro",
+        "role": "head chef",
+        "year": 2019
+      },
+      "raw_output": "{\"name\":\"Kenji Nakamura\",\"age\":52,\"org\":\"Wildflower Bistro\",\"role\":\"head chef\",\"year\":2019}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 33
+    },
+    {
+      "sentence": "In 2020, Thabo Molefe left consulting to become operations manager at the fintech firm PayCircle; he was 38.",
+      "expected": {
+        "name": "Thabo Molefe",
+        "age": 38,
+        "org": "PayCircle",
+        "role": "operations manager",
+        "year": 2020
+      },
+      "raw_output": "{\"name\":\"Thabo Molefe\",\"age\":38,\"org\":\"PayCircle\",\"role\":\"operations manager\",\"year\":2020}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 34
+    },
+    {
+      "sentence": "Hannah Weiss, a 36-year-old statistician, joined the U.S. Census Bureau as a demographer in 2022.",
+      "expected": {
+        "name": "Hannah Weiss",
+        "age": 36,
+        "org": "U.S. Census Bureau",
+        "role": "demographer",
+        "year": 2022
+      },
+      "raw_output": "{\"name\":\"Hannah Weiss\",\"age\":36,\"org\":\"U.S. Census Bureau\",\"role\":\"demographer\",\"year\":2022}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 35
+    },
+    {
+      "sentence": "In 1994 the department chose 27-year-old Thierry Boulanger for the role of archivist at the Musée des Beaux-Arts.",
+      "expected": {
+        "name": "Thierry Boulanger",
+        "age": 27,
+        "org": "Musée des Beaux-Arts",
+        "role": "archivist",
+        "year": 1994
+      },
+      "raw_output": "{\"name\":\"Thierry Boulanger\",\"age\":27,\"org\":\"Musée des Beaux-Arts\",\"role\":\"archivist\",\"year\":1994}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 36
+    },
+    {
+      "sentence": "In her role as head librarian of the Biblioteca Nacional, the 63-year-old scholar Valentina Rojas oversaw a massive digitization effort starting in 2010.",
+      "expected": {
+        "name": "Valentina Rojas",
+        "age": 63,
+        "org": "Biblioteca Nacional",
+        "role": "head librarian",
+        "year": 2010
+      },
+      "raw_output": "{\"name\":\"Valentina Rojas\",\"age\":63,\"org\":\"Biblioteca Nacional\",\"role\":\"head librarian\",\"year\":2010}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 37
+    },
+    {
+      "sentence": "The lab's new cryogenics technician, Zoltán Bartos, was hired in 2016 at the age of 33 by the Szeged Photonics Laboratory.",
+      "expected": {
+        "name": "Zoltán Bartos",
+        "age": 33,
+        "org": "Szeged Photonics Laboratory",
+        "role": "cryogenics technician",
+        "year": 2016
+      },
+      "raw_output": "{\"name\":\"Zoltán Bartos\",\"age\":33,\"org\":\"Szeged Photonics Laboratory\",\"role\":\"cryogenics technician\",\"year\":2016}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 39
+    },
+    {
+      "sentence": "Oumar Diallo's appointment as supply chain manager at Sahel Freight Lines came in 2013, when he was 39.",
+      "expected": {
+        "name": "Oumar Diallo",
+        "age": 39,
+        "org": "Sahel Freight Lines",
+        "role": "supply chain manager",
+        "year": 2013
+      },
+      "raw_output": "{\"name\":\"Oumar Diallo\",\"age\":39,\"org\":\"Sahel Freight Lines\",\"role\":\"supply chain manager\",\"year\":2013}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 40
+    },
+    {
+      "sentence": "Bassem al-Haddad became treasury manager at the Damascus Merchants Bank in 1989, at the age of 38.",
+      "expected": {
+        "name": "Bassem al-Haddad",
+        "age": 38,
+        "org": "Damascus Merchants Bank",
+        "role": "treasury manager",
+        "year": 1989
+      },
+      "raw_output": "{\"name\":\"Bassem al-Haddad\",\"age\":38,\"org\":\"Damascus Merchants Bank\",\"role\":\"treasury manager\",\"year\":1989}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 41
+    },
+    {
+      "sentence": "The startup GreenLeaf Foods counts Alessandro Ricci among its founders; he launched the venture in 2023 at age 28.",
+      "expected": {
+        "name": "Alessandro Ricci",
+        "age": 28,
+        "org": "GreenLeaf Foods",
+        "role": "founder",
+        "year": 2023
+      },
+      "raw_output": "{\"name\":\"Alessandro Ricci\",\"age\":28,\"org\":\"GreenLeaf Foods\",\"role\":\"founder\",\"year\":2023}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 42
+    },
+    {
+      "sentence": "The role of field coordinator at Sahel Relief Partners was filled by Amadou Diallo, aged 41, during the restructuring of 2015.",
+      "expected": {
+        "name": "Amadou Diallo",
+        "age": 41,
+        "org": "Sahel Relief Partners",
+        "role": "field coordinator",
+        "year": 2015
+      },
+      "raw_output": "{\"name\":\"Amadou Diallo\",\"age\":41,\"org\":\"Sahel Relief Partners\",\"role\":\"field coordinator\",\"year\":2015}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 43
+    },
+    {
+      "sentence": "At just 19, Ravi Shankar Nair started as a junior researcher at the Bangalore Plasma Institute during the summer of 2016.",
+      "expected": {
+        "name": "Ravi Shankar Nair",
+        "age": 19,
+        "org": "Bangalore Plasma Institute",
+        "role": "junior researcher",
+        "year": 2016
+      },
+      "raw_output": "{\"name\":\"Ravi Shankar Nair\",\"age\":19,\"org\":\"Bangalore Plasma Institute\",\"role\":\"junior researcher\",\"year\":2016}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 44
+    },
+    {
+      "sentence": "In 1998 the university hired Elena Sorokina, then 41, as an associate professor of linguistics at Ural State University.",
+      "expected": {
+        "name": "Elena Sorokina",
+        "age": 41,
+        "org": "Ural State University",
+        "role": "associate professor of linguistics",
+        "year": 1998
+      },
+      "raw_output": "{\"name\":\"Elena Sorokina\",\"age\":41,\"org\":\"Ural State University\",\"role\":\"associate professor of linguistics\",\"year\":1998}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 46
+    },
+    {
+      "sentence": "In 1992, the Environmental Protection Inspectorate brought in Fatou Diarra, aged 36, as a compliance inspector.",
+      "expected": {
+        "name": "Fatou Diarra",
+        "age": 36,
+        "org": "Environmental Protection Inspectorate",
+        "role": "compliance inspector",
+        "year": 1992
+      },
+      "raw_output": "{\"name\":\"Fatou Diarra\",\"age\":36,\"org\":\"Environmental Protection Inspectorate\",\"role\":\"compliance inspector\",\"year\":1992}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 48
+    },
+    {
+      "sentence": "Marta Ferreira, a 29-year-old pharmacist at Hospital São João in Porto, was promoted in 2019.",
+      "expected": {
+        "name": "Marta Ferreira",
+        "age": 29,
+        "org": "Hospital São João",
+        "role": "pharmacist",
+        "year": 2019
+      },
+      "raw_output": "{\"name\":\"Marta Ferreira\",\"age\":29,\"org\":\"Hospital São João\",\"role\":\"pharmacist\",\"year\":2019}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 49
+    },
+    {
+      "sentence": "The logistics NGO TransAid named Béatrice Laurent, who is 48, its regional coordinator for 2018.",
+      "expected": {
+        "name": "Béatrice Laurent",
+        "age": 48,
+        "org": "TransAid",
+        "role": "regional coordinator",
+        "year": 2018
+      },
+      "raw_output": "{\"name\":\"Béatrice Laurent\",\"age\":48,\"org\":\"TransAid\",\"role\":\"regional coordinator\",\"year\":2018}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 50
+    },
+    {
+      "sentence": "Priya Raghunathan, who was 29 when she joined the Reserve Bank of India in 2011, works there as a currency analyst.",
+      "expected": {
+        "name": "Priya Raghunathan",
+        "age": 29,
+        "org": "Reserve Bank of India",
+        "role": "currency analyst",
+        "year": 2011
+      },
+      "raw_output": "{\"name\":\"Priya Raghunathan\",\"age\":29,\"org\":\"Reserve Bank of India\",\"role\":\"currency analyst\",\"year\":2011}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 51
+    },
+    {
+      "sentence": "Serving as an emergency nurse at St. Vincent's Medical Center, 50-year-old Bridget Callahan earned a commendation in 2008 for her storm response.",
+      "expected": {
+        "name": "Bridget Callahan",
+        "age": 50,
+        "org": "St. Vincent's Medical Center",
+        "role": "emergency nurse",
+        "year": 2008
+      },
+      "raw_output": "{\"name\":\"Bridget Callahan\",\"age\":50,\"org\":\"St. Vincent's Medical Center\",\"role\":\"emergency nurse\",\"year\":2008}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 52
+    },
+    {
+      "sentence": "After decades at sea, 71-year-old Nguyen Van Phuc settled into the role of port inspector for the Hai Phong Maritime Administration in 2009.",
+      "expected": {
+        "name": "Nguyen Van Phuc",
+        "age": 71,
+        "org": "Hai Phong Maritime Administration",
+        "role": "port inspector",
+        "year": 2009
+      },
+      "raw_output": "{\"name\":\"Nguyen Van Phuc\",\"age\":71,\"org\":\"Hai Phong Maritime Administration\",\"role\":\"port inspector\",\"year\":2009}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 53
+    },
+    {
+      "sentence": "Mikhail Ostrovsky, 61, was appointed chief counsel at the Eurasia Development Agency in 2018.",
+      "expected": {
+        "name": "Mikhail Ostrovsky",
+        "age": 61,
+        "org": "Eurasia Development Agency",
+        "role": "chief counsel",
+        "year": 2018
+      },
+      "raw_output": "{\"name\":\"Mikhail Ostrovsky\",\"age\":61,\"org\":\"Eurasia Development Agency\",\"role\":\"chief counsel\",\"year\":2018}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 54
+    },
+    {
+      "sentence": "Santiago Delgado Morales served as an urban planner for the Buenos Aires Municipal Council at age 52, starting in 2012.",
+      "expected": {
+        "name": "Santiago Delgado Morales",
+        "age": 52,
+        "org": "Buenos Aires Municipal Council",
+        "role": "urban planner",
+        "year": 2012
+      },
+      "raw_output": "{\"name\":\"Santiago Delgado Morales\",\"age\":52,\"org\":\"Buenos Aires Municipal Council\",\"role\":\"urban planner\",\"year\":2012}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 55
+    },
+    {
+      "sentence": "Yamamoto Kiyoko, who is 62, became chair of the Kyoto Institute of Linguistics' advisory board in 2019.",
+      "expected": {
+        "name": "Yamamoto Kiyoko",
+        "age": 62,
+        "org": "Kyoto Institute of Linguistics",
+        "role": "chair of the advisory board",
+        "year": 2019
+      },
+      "raw_output": "{\"name\":\"Yamamoto Kiyoko\",\"age\":62,\"org\":\"Kyoto Institute of Linguistics\",\"role\":\"chair of the advisory board\",\"year\":2019}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 56
+    },
+    {
+      "sentence": "The physics laboratory at Tsinghua-Heidelberg Joint Lab chose Ingrid Baumann as its principal investigator; she was 45 at the time, in 2013.",
+      "expected": {
+        "name": "Ingrid Baumann",
+        "age": 45,
+        "org": "Tsinghua-Heidelberg Joint Lab",
+        "role": "principal investigator",
+        "year": 2013
+      },
+      "raw_output": "{\"name\":\"Ingrid Baumann\",\"age\":45,\"org\":\"Tsinghua-Heidelberg Joint Lab\",\"role\":\"principal investigator\",\"year\":2013}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 57
+    },
+    {
+      "sentence": "In 2024, the position of head of cardiology at St. Brendan's University Hospital was awarded to 51-year-old Dr. Ifeoma Nwachukwu.",
+      "expected": {
+        "name": "Ifeoma Nwachukwu",
+        "age": 51,
+        "org": "St. Brendan's University Hospital",
+        "role": "head of cardiology",
+        "year": 2024
+      },
+      "raw_output": "{\"name\":\"Ifeoma Nwachukwu\",\"age\":51,\"org\":\"St. Brendan's University Hospital\",\"role\":\"head of cardiology\",\"year\":2024}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 59
+    },
+    {
+      "sentence": "Head nurse was the title given to Ingrid Sørensen, 51, upon her promotion at Nordland General Hospital in 1992.",
+      "expected": {
+        "name": "Ingrid Sørensen",
+        "age": 51,
+        "org": "Nordland General Hospital",
+        "role": "head nurse",
+        "year": 1992
+      },
+      "raw_output": "{\"name\":\"Ingrid Sørensen\",\"age\":51,\"org\":\"Nordland General Hospital\",\"role\":\"head nurse\",\"year\":1992}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 60
+    },
+    {
+      "sentence": "The 33-year-old Norwegian designer Astrid Halvorsen joined Fjordline Studios as creative lead back in 2014.",
+      "expected": {
+        "name": "Astrid Halvorsen",
+        "age": 33,
+        "org": "Fjordline Studios",
+        "role": "creative lead",
+        "year": 2014
+      },
+      "raw_output": "{\"name\":\"Astrid Halvorsen\",\"age\":33,\"org\":\"Fjordline Studios\",\"role\":\"creative lead\",\"year\":2014}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 61
+    },
+    {
+      "sentence": "Zainab El Amrani, who is 39, handles public relations for the Casablanca daily Al-Watan, a job she started in 2012.",
+      "expected": {
+        "name": "Zainab El Amrani",
+        "age": 39,
+        "org": "Al-Watan",
+        "role": "public relations manager",
+        "year": 2012
+      },
+      "raw_output": "{\"name\":\"Zainab El Amrani\",\"age\":39,\"org\":\"Al-Watan\",\"role\":\"public relations manager\",\"year\":2012}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 62
+    },
+    {
+      "sentence": "The role of chief archivist at the National Library of Malta went to Rita Borg, then 58, in 2010.",
+      "expected": {
+        "name": "Rita Borg",
+        "age": 58,
+        "org": "National Library of Malta",
+        "role": "chief archivist",
+        "year": 2010
+      },
+      "raw_output": "{\"name\":\"Rita Borg\",\"age\":58,\"org\":\"National Library of Malta\",\"role\":\"chief archivist\",\"year\":2010}",
+      "parsed_ok": true,
+      "wrong_fields": [],
+      "category": "original",
+      "source_index": 63
+    }
+  ],
+  "runtime": {
+    "gpu": "NVIDIA GeForce RTX 4060 Laptop GPU",
+    "batch": 32,
+    "dtype": "bf16",
+    "seconds": 2.8907841999971424,
+    "peak_allocated_gb": 1.107778048
+  },
+  "evaluation": {
+    "dataset_sha256": "a7e902b377ef009af5f5f843150779a2e02e7203e4714eec872aa0a6889a7e0b",
+    "n": 64,
+    "prompt": "Extract:\n{sentence}\nJSON:\n",
+    "max_new_tokens": 128,
+    "seq_len": 160,
+    "decoding": "greedy",
+    "scoring_version": 2
+  },
+  "inference": {
+    "batch": 32,
+    "dtype": "bf16",
+    "fuse_adapter": true,
+    "length_bucketing": true
+  },
+  "model": "ckpt/laptop-lora-v2",
+  "exact_match_95pct_interval": [
+    0.810171204003544,
+    0.9563217474148016
+  ],
+  "categories": {
+    "original": {
+      "n": 64,
+      "json_parse_rate": 1.0,
+      "field_accuracy": {
+        "name": 0.984375,
+        "age": 1.0,
+        "org": 0.953125,
+        "role": 0.96875,
+        "year": 1.0
+      },
+      "exact_match_rate": 0.90625,
+      "held_out_loss": null,
+      "samples": []
+    }
+  }
+}

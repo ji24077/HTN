@@ -1,0 +1,12 @@
+{
+  "status": "rejected",
+  "setup_seconds": 21.91379130000132,
+  "validation_exit_code": 2,
+  "latency_exit_code": 0,
+  "terminated": true,
+  "finished_at": 1789835124.612047,
+  "session_id": "hardware-a6000-2ca04f6b",
+  "profile": "hardware-a6000",
+  "cleanup_verified": true,
+  "estimate_usd": 0.205238350149658
+}

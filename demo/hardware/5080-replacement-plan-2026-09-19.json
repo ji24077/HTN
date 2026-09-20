@@ -1,0 +1,19 @@
+{
+  "budget": {
+    "total_budget_usd": 15.0,
+    "prior_reserve_usd": 12.15,
+    "new_reservations_usd": 0.41,
+    "unreserved_usd": 2.44,
+    "reservations": [
+      {
+        "key": "rtx5080",
+        "gpu_id": "NVIDIA GeForce RTX 5080",
+        "profile": "hardware-rtx5080",
+        "max_duration_seconds": 2700,
+        "hourly_gpu_limit_usd": 0.39,
+        "storage_allowance_per_hour": 0.15,
+        "budget_usd": 0.41
+      }
+    ]
+  }
+}

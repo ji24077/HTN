@@ -1,0 +1,39 @@
+{
+  "passed": true,
+  "gpu_verified": true,
+  "report_path": "demo/results/translation-20260919-c77df0eb48ba/reverse/translate-2/report.json",
+  "comparison": {
+    "status": "passed",
+    "atol": 1e-05,
+    "rtol": 0.0001,
+    "identity_mismatches": [],
+    "verification_scope": "Comparison of supplied reports, not a new GPU execution",
+    "warnings": [
+      "Timing is diagnostic, not a benchmark.",
+      "Cross-GPU comparison makes no optimization or speedup claim."
+    ],
+    "predictions": {
+      "passed": true,
+      "count": 128,
+      "mismatch_count": 0,
+      "max_abs_error": 2.980232238769531e-07,
+      "difference_overflow": false
+    },
+    "loss_history": {
+      "passed": true,
+      "count": 8,
+      "mismatch_count": 0,
+      "max_abs_error": 2.9802322387695312e-08,
+      "difference_overflow": false
+    },
+    "comparison_scope": "final predictions and loss history over the same step range",
+    "timing": {
+      "comparable": false,
+      "reasons": [
+        "different GPU or vendor"
+      ],
+      "speedup": null
+    }
+  },
+  "error": null
+}

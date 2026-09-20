@@ -1,0 +1,34 @@
+# Baseten deployment: Qwen2.5-0.5B, UNTRAINED.
+#
+# This is the control. It exists so "before / after training" can be shown as
+# two live endpoints rather than two numbers in a table, and our measured base
+# scores json_parse_rate 0.000 — which is the only reason the trained number
+# means anything.
+#
+# Deliberately NOT tuned. predict_concurrency is left at its default of 1,
+# which is what anyone deploying for the first time gets. Making it slower on
+# purpose would be a strawman; leaving the default is not.
+model_name: qwen-base
+python_version: py311
+
+resources:
+  # A 0.5B model in bf16 is ~1 GB of weights. Starting small is itself part of
+  # the right-sizing claim: if this serves fine on an L4, an H100 for the same
+  # model is the waste the agent is supposed to notice.
+  accelerator: L4
+
+runtime:
+  # Default. The redeploy lever raises this; the live lever (concurrency
+  # target, set through the API rather than here) cannot help while this is 1 —
+  # it only adds replicas that each still process one request at a time.
+  predict_concurrency: 1
+
+requirements:
+  - torch==2.5.1
+  - transformers>=4.45
+  - accelerate>=0.34
+
+model_metadata:
+  example_model_input:
+    prompt: "Extract:\nSarah Chen, 34, joined Anthropic in 2023 as a research engineer.\nJSON:\n"
+    max_new_tokens: 64

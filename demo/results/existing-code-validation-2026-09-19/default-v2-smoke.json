@@ -1,0 +1,139 @@
+{
+  "script_sha256": "f0001f349a905a500b23e37c2b0382771224f24efa10d64c170fe76824a2272c",
+  "model_identity": {
+    "sha256": "554630c2d938274fe3671995d31b32b752d2ae0f1872cbc68883f1802b6c2859",
+    "files": {
+      "base/config.json": "479dcf0c5286339e41ad3992cd08ae88a467c4187587936248e2b7c96283484b",
+      "base/generation_config.json": "8c970692323e3ea0e9b8b0a4dca79388d31226e41f83c9fd6014804280ebf6e8",
+      "base/merges.txt": "599bab54075088774b1733fde865d5bd747cbcc7a547c5bc12610e874e26f5e3",
+      "base/model.safetensors": "88c142557820ccad55bb59756bfcfcf891de9cc6202816bd346445188a0ed342",
+      "base/tokenizer.json": "c0382117ea329cdf097041132f6d735924b697924d6f6fc3945713e96ce87539",
+      "base/tokenizer_config.json": "c91efca15ceff6e9ee9424db58a6f59cd41294e550a86cbd07e3c1fb500b34f9",
+      "base/vocab.json": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+      "adapter/adapter_config.json": "728600bf6190bf793bad36975e2e5d1c00046ad9ca86d0075c60d7f1a2bea07d",
+      "adapter/adapter_model.safetensors": "7d0ad3145a518c3c61879c84a064ae8c9d27215e7b669e9dd9260c8a883b3ae0",
+      "adapter/tokenizer.json": "3fd169731d2cbde95e10bf356d66d5997fd885dd8dbb6fb4684da3f23b2585d8",
+      "adapter/tokenizer_config.json": "b271a1c91521384eb6d794eb27c9d55b3ff93ade6beb59e668d55411155ea16e"
+    }
+  },
+  "gpu": "NVIDIA GeForce RTX 4060 Laptop GPU",
+  "torch": "2.11.0+cu128",
+  "scope": "Two diagnostic requests using the unchanged extract.py default v2 and its optional grounding gate; not a speed or general accuracy test.",
+  "samples": [
+    {
+      "sentence": "In 2026, Finn, 18, became a student at the University of Toronto.",
+      "command": [
+        "scripts/extract.py",
+        "--text",
+        "In 2026, Finn, 18, became a student at the University of Toronto.",
+        "--evidence",
+        "--require-grounding"
+      ],
+      "exit_code": 0,
+      "response": {
+        "record": {
+          "name": "Finn",
+          "age": 18,
+          "org": "University of Toronto",
+          "role": "student",
+          "year": 2026
+        },
+        "evidence": {
+          "spans": {
+            "name": [
+              {
+                "start": 9,
+                "end": 13,
+                "text": "Finn"
+              }
+            ],
+            "age": [
+              {
+                "start": 15,
+                "end": 17,
+                "text": "18"
+              }
+            ],
+            "org": [
+              {
+                "start": 43,
+                "end": 64,
+                "text": "University of Toronto"
+              }
+            ],
+            "role": [
+              {
+                "start": 28,
+                "end": 35,
+                "text": "student"
+              }
+            ],
+            "year": [
+              {
+                "start": 3,
+                "end": 7,
+                "text": "2026"
+              }
+            ]
+          },
+          "missing_fields": [],
+          "scope": "literal presence only; semantic binding is not checked"
+        }
+      }
+    },
+    {
+      "sentence": "Finn is 18 and is going to the University of Toronto.",
+      "command": [
+        "scripts/extract.py",
+        "--text",
+        "Finn is 18 and is going to the University of Toronto.",
+        "--evidence",
+        "--require-grounding"
+      ],
+      "exit_code": 2,
+      "response": {
+        "status": "needs_review",
+        "candidate": {
+          "name": "Finn",
+          "age": 18,
+          "org": "University of Toronto",
+          "role": "student",
+          "year": 2023
+        },
+        "evidence": {
+          "spans": {
+            "name": [
+              {
+                "start": 0,
+                "end": 4,
+                "text": "Finn"
+              }
+            ],
+            "age": [
+              {
+                "start": 8,
+                "end": 10,
+                "text": "18"
+              }
+            ],
+            "org": [
+              {
+                "start": 31,
+                "end": 52,
+                "text": "University of Toronto"
+              }
+            ],
+            "role": [],
+            "year": []
+          },
+          "missing_fields": [
+            "role",
+            "year"
+          ],
+          "scope": "literal presence only; semantic binding is not checked"
+        }
+      }
+    }
+  ],
+  "script_unchanged": true
+}

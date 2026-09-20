@@ -1,0 +1,314 @@
+{
+  "n": 200,
+  "json_parse_rate": 1.0,
+  "field_accuracy": {
+    "name": 0.985,
+    "age": 1.0,
+    "org": 0.975,
+    "role": 0.935,
+    "year": 1.0
+  },
+  "exact_match_rate": 0.91,
+  "held_out_loss": 0.015161393255229383,
+  "samples": [
+    {
+      "sentence": "The newspaper HaMizrachi hired 35-year-old Dawit Kebede as its Nairobi correspondent in 2009.",
+      "expected": {
+        "name": "Dawit Kebede",
+        "age": 35,
+        "org": "HaMizrachi",
+        "role": "Nairobi correspondent",
+        "year": 2009
+      },
+      "raw_output": "{\"name\":\"Dawit Kebede\",\"age\":35,\"org\":\"HaMizrachi\",\"role\":\"newspaper correspondent\",\"year\":2009}",
+      "parsed_ok": true,
+      "wrong_fields": [
+        "role"
+      ]
+    },
+    {
+      "sentence": "Diedre Havlicek, who was 58 when she became ombudsman at the Bratislava Courier in 2004, had spent decades in journalism.",
+      "expected": {
+        "name": "Diedre Havlicek",
+        "age": 58,
+        "org": "Bratislava Courier",
+        "role": "ombudsman",
+        "year": 2004
+      },
+      "raw_output": "{\"name\":\"Dyre Havlicek\",\"age\":58,\"org\":\"Bratislava Courier\",\"role\":\"ombudsman\",\"year\":2004}",
+      "parsed_ok": true,
+      "wrong_fields": [
+        "name"
+      ]
+    },
+    {
+      "sentence": "Sebastian Okonkwo, 25 years old in 1989, worked as a trainee machinist at the agency's metallurgy lab in Wolverhampton.",
+      "expected": {
+        "name": "Sebastian Okonkwo",
+        "age": 25,
+        "org": "metallurgy lab in Wolverhampton",
+        "role": "trainee machinist",
+        "year": 1989
+      },
+      "raw_output": "{\"name\":\"Sebastian Okonkwo\",\"age\":25,\"org\":\"agricultural research and development\",\"role\":\"trainee machinist\",\"year\":1989}",
+      "parsed_ok": true,
+      "wrong_fields": [
+        "org"
+      ]
+    },
+    {
+      "sentence": "Yamamoto Kiyoko, who is 62, became chair of the Kyoto Institute of Linguistics' advisory board in 2019.",
+      "expected": {
+        "name": "Yamamoto Kiyoko",
+        "age": 62,
+        "org": "Kyoto Institute of Linguistics",
+        "role": "chair of the advisory board",
+        "year": 2019
+      },
+      "raw_output": "{\"name\":\"Yamamoto Kiyoko\",\"age\":62,\"org\":\"Kyoto Institute of Linguistics\",\"role\":\"chair of the Kyoto Institute of Linguistics' advisory board\",\"year\":2019}",
+      "parsed_ok": true,
+      "wrong_fields": [
+        "role"
+      ]
+    },
+    {
+      "sentence": "Zainab El Amrani, who is 39, handles public relations for the Casablanca daily Al-Watan, a job she started in 2012.",
+      "expected": {
+        "name": "Zainab El Amrani",
+        "age": 39,
+        "org": "Al-Watan",
+        "role": "public relations manager",
+        "year": 2012
+      },
+      "raw_output": "{\"name\":\"Zainab El Amrani\",\"age\":39,\"org\":\"Al-Watan\",\"role\":\"public relations\",\"year\":2012}",
+      "parsed_ok": true,
+      "wrong_fields": [
+        "role"
+      ]
+    },
+    {
+      "sentence": "At 45, Colonel Idris Nkemelu commands the logistics division of the National Emergency Management Agency, a post he assumed in 2011.",
+      "expected": {
+        "name": "Idris Nkemelu",
+        "age": 45,
+        "org": "National Emergency Management Agency",
+        "role": "commander of the logistics division",
+        "year": 2011
+      },
+      "raw_output": "{\"name\":\"Idriss Nkemelu\",\"age\":45,\"org\":\"National Emergency Management Agency\",\"role\":\"logistics division commander\",\"year\":2011}",
+      "parsed_ok": true,
+      "wrong_fields": [
+        "name",
+        "role"
+      ]
+    },
+    {
+      "sentence": "Dr. Amara Nwosu, a 41-year-old cardiologist, joined Lagos University Teaching Hospital in 2019 as a consultant.",
+      "expected": {
+        "name": "Amara Nwosu",
+        "age": 41,
+        "org": "Lagos University Teaching Hospital",
+        "role": "consultant cardiologist",
+        "year": 2019
+      },
+      "raw_output": "{\"name\":\"Amara Nwosu\",\"age\":41,\"org\":\"Lagos University Teaching Hospital\",\"role\":\"consultant\",\"year\":2019}",
+      "parsed_ok": true,
+      "wrong_fields": [
+        "role"
+      ]
+    },
+    {
+      "sentence": "During 1989, 41-year-old Viktor Petrenko accepted a professorship in Slavic linguistics at Charles University.",
+      "expected": {
+        "name": "Viktor Petrenko",
+        "age": 41,
+        "org": "Charles University",
+        "role": "professor",
+        "year": 1989
+      },
+      "raw_output": "{\"name\":\"Viktor Petrenko\",\"age\":41,\"org\":\"Charles University\",\"role\":\"professor of Slavic linguistics\",\"year\":1989}",
+      "parsed_ok": true,
+      "wrong_fields": [
+        "role"
+      ]
+    },
+    {
+      "sentence": "The 33-year-old Finn Tapio Virtanen became a sound engineer at Helsinki's state broadcasting company in 2004.",
+      "expected": {
+        "name": "Tapio Virtanen",
+        "age": 33,
+        "org": "Helsinki's state broadcasting company",
+        "role": "sound engineer",
+        "year": 2004
+      },
+      "raw_output": "{\"name\":\"Finn Tapio Virtanen\",\"age\":33,\"org\":\"Helsinki state broadcasting company\",\"role\":\"sound engineer\",\"year\":2004}",
+      "parsed_ok": true,
+      "wrong_fields": [
+        "name",
+        "org"
+      ]
+    },
+    {
+      "sentence": "It was in 1993 that 40-year-old Vasyl Bondarenko was made curator of Eastern European art at the Lviv City Museum.",
+      "expected": {
+        "name": "Vasyl Bondarenko",
+        "age": 40,
+        "org": "Lviv City Museum",
+        "role": "curator of Eastern European art",
+        "year": 1993
+      },
+      "raw_output": "{\"name\":\"Vasyl Bondarenko\",\"age\":40,\"org\":\"Lviv City Museum\",\"role\":\"curator\",\"year\":1993}",
+      "parsed_ok": true,
+      "wrong_fields": [
+        "role"
+      ]
+    },
+    {
+      "sentence": "Zeynep Aydın, 49, was sworn in as a municipal judge for the city of Izmir in 2009.",
+      "expected": {
+        "name": "Zeynep Aydın",
+        "age": 49,
+        "org": "city of Izmir",
+        "role": "municipal judge",
+        "year": 2009
+      },
+      "raw_output": "{\"name\":\"Zeynep Aydın\",\"age\":49,\"org\":\"Izmir Municipal Court\",\"role\":\"municipal judge\",\"year\":2009}",
+      "parsed_ok": true,
+      "wrong_fields": [
+        "org"
+      ]
+    },
+    {
+      "sentence": "Rakesh Malhotra, 52, runs the Delhi office of the climate NGO GreenGrid Foundation, a post he took up in 2019.",
+      "expected": {
+        "name": "Rakesh Malhotra",
+        "age": 52,
+        "org": "GreenGrid Foundation",
+        "role": "director of the Delhi office",
+        "year": 2019
+      },
+      "raw_output": "{\"name\":\"Rakesh Malhotra\",\"age\":52,\"org\":\"GreenGrid Foundation\",\"role\":\"head of the Delhi office\",\"year\":2019}",
+      "parsed_ok": true,
+      "wrong_fields": [
+        "role"
+      ]
+    },
+    {
+      "sentence": "Fresh out of veterinary school, 24-year-old Bronagh Doherty took a job as a zoo veterinarian at Cairn Wildlife Park in 2008.",
+      "expected": {
+        "name": "Bronagh Doherty",
+        "age": 24,
+        "org": "Cairn Wildlife Park",
+        "role": "zoo veterinarian",
+        "year": 2008
+      },
+      "raw_output": "{\"name\":\"Bronagh Doherty\",\"age\":24,\"org\":\"Cairn Wildlife Park\",\"role\":\"zooveteran\",\"year\":2008}",
+      "parsed_ok": true,
+      "wrong_fields": [
+        "role"
+      ]
+    },
+    {
+      "sentence": "Fresh out of law school, 23-year-old Beatriz Amorim landed a clerkship at the Federal Court of Bahia in 2020.",
+      "expected": {
+        "name": "Beatriz Amorim",
+        "age": 23,
+        "org": "Federal Court of Bahia",
+        "role": "law clerk",
+        "year": 2020
+      },
+      "raw_output": "{\"name\":\"Beatriz Amorim\",\"age\":23,\"org\":\"Federal Court of Bahia\",\"role\":\"clerk\",\"year\":2020}",
+      "parsed_ok": true,
+      "wrong_fields": [
+        "role"
+      ]
+    },
+    {
+      "sentence": "Hospice chaplain Mateo Villaseñor worked at San Rafael Regional Hospital; he was 58 in 2011.",
+      "expected": {
+        "name": "Mateo Villaseñor",
+        "age": 58,
+        "org": "San Rafael Regional Hospital",
+        "role": "hospice chaplain",
+        "year": 2011
+      },
+      "raw_output": "{\"name\":\"Mateo Villaseñor\",\"age\":58,\"org\":\"San Rafael Regional Hospital\",\"role\":\"chaplain\",\"year\":2011}",
+      "parsed_ok": true,
+      "wrong_fields": [
+        "role"
+      ]
+    },
+    {
+      "sentence": "Security researcher Olga Biryukova, 26, defected from a rival lab to join the Tallinn Cryptography Institute in 2020.",
+      "expected": {
+        "name": "Olga Biryukova",
+        "age": 26,
+        "org": "Tallinn Cryptography Institute",
+        "role": "security researcher",
+        "year": 2020
+      },
+      "raw_output": "{\"name\":\"Olga Biryukova\",\"age\":26,\"org\":\"Tallinn Cryptography Institute\",\"role\":\"defector from a rival lab\",\"year\":2020}",
+      "parsed_ok": true,
+      "wrong_fields": [
+        "role"
+      ]
+    },
+    {
+      "sentence": "Tsering Wangchuk, who was 38 at the time, was appointed field program manager for the World Wildlife Fund's Himalayan division in 2010.",
+      "expected": {
+        "name": "Tsering Wangchuk",
+        "age": 38,
+        "org": "World Wildlife Fund's Himalayan division",
+        "role": "field program manager",
+        "year": 2010
+      },
+      "raw_output": "{\"name\":\"Tsering Wangchuk\",\"age\":38,\"org\":\"World Wildlife Fund\",\"role\":\"field program manager for the Himalayan division\",\"year\":2010}",
+      "parsed_ok": true,
+      "wrong_fields": [
+        "org",
+        "role"
+      ]
+    },
+    {
+      "sentence": "It was 2010 when the hospital São Lucas appointed 52-year-old Renato Camargo as head surgeon.",
+      "expected": {
+        "name": "Renato Camargo",
+        "age": 52,
+        "org": "São Lucas Hospital",
+        "role": "head surgeon",
+        "year": 2010
+      },
+      "raw_output": "{\"name\":\"Renato Camargo\",\"age\":52,\"org\":\"São Lucas\",\"role\":\"head surgeon\",\"year\":2010}",
+      "parsed_ok": true,
+      "wrong_fields": [
+        "org"
+      ]
+    },
+    {
+      "sentence": "Mei-Ling Chang, 24, is a graduate teaching assistant in the linguistics department at Taipei National University, where she began in 2024.",
+      "expected": {
+        "name": "Mei-Ling Chang",
+        "age": 24,
+        "org": "Taipei National University",
+        "role": "graduate teaching assistant",
+        "year": 2024
+      },
+      "raw_output": "{\"name\":\"Mei-Ling Chang\",\"age\":24,\"org\":\"Taipei National University\",\"role\":\"graduate teaching assistant\",\"year\":2024}",
+      "parsed_ok": true,
+      "wrong_fields": []
+    },
+    {
+      "sentence": "The startup NeuralLoop hired 24-year-old Kwame Mensah as a machine learning engineer back in 2021.",
+      "expected": {
+        "name": "Kwame Mensah",
+        "age": 24,
+        "org": "NeuralLoop",
+        "role": "machine learning engineer",
+        "year": 2021
+      },
+      "raw_output": "{\"name\":\"Kwame Mensah\",\"age\":24,\"org\":\"NeuralLoop\",\"role\":\"machine learning engineer\",\"year\":2021}",
+      "parsed_ok": true,
+      "wrong_fields": []
+    }
+  ]
+}

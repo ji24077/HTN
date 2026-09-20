@@ -1,0 +1,145 @@
+[
+  {
+    "id": "original-0",
+    "sentence": "Mei-Ling Chang, 24, is a graduate teaching assistant in the linguistics department at Taipei National University, where she began in 2024.",
+    "record": {
+      "name": "Mei-Ling Chang",
+      "age": 24,
+      "org": "Taipei National University",
+      "role": "graduate teaching assistant",
+      "year": 2024
+    }
+  },
+  {
+    "id": "original-1",
+    "sentence": "The startup NeuralLoop hired 24-year-old Kwame Mensah as a machine learning engineer back in 2021.",
+    "record": {
+      "name": "Kwame Mensah",
+      "age": 24,
+      "org": "NeuralLoop",
+      "role": "machine learning engineer",
+      "year": 2021
+    }
+  },
+  {
+    "id": "original-2",
+    "sentence": "It was in 1996 that Bogdan Ionescu, then 38, started working as a loan officer for Carpathian Savings Bank.",
+    "record": {
+      "name": "Bogdan Ionescu",
+      "age": 38,
+      "org": "Carpathian Savings Bank",
+      "role": "loan officer",
+      "year": 1996
+    }
+  },
+  {
+    "id": "original-3",
+    "sentence": "Sanne de Vries, at 22, signed on as a junior archivist with the Rotterdam Maritime Museum in 2018.",
+    "record": {
+      "name": "Sanne de Vries",
+      "age": 22,
+      "org": "Rotterdam Maritime Museum",
+      "role": "junior archivist",
+      "year": 2018
+    }
+  },
+  {
+    "id": "original-4",
+    "sentence": "The environmental NGO TerraVerde recruited 24-year-old Ingrid Halvorsen as a field coordinator back in 2015.",
+    "record": {
+      "name": "Ingrid Halvorsen",
+      "age": 24,
+      "org": "TerraVerde",
+      "role": "field coordinator",
+      "year": 2015
+    }
+  },
+  {
+    "id": "original-5",
+    "sentence": "At 25, Fatima Al-Zahra was already a junior researcher at Helios Biotech Lab, where she had worked since 2019.",
+    "record": {
+      "name": "Fatima Al-Zahra",
+      "age": 25,
+      "org": "Helios Biotech Lab",
+      "role": "junior researcher",
+      "year": 2019
+    }
+  },
+  {
+    "id": "independent-0",
+    "sentence": "The observatory opened in 1964. Its annual report records that Helena Brooks became telescope maintenance supervisor at Ridgeline Observatory in 2017, when she was 36.",
+    "record": {
+      "name": "Helena Brooks",
+      "age": 36,
+      "org": "Ridgeline Observatory",
+      "role": "telescope maintenance supervisor",
+      "year": 2017
+    }
+  },
+  {
+    "id": "independent-1",
+    "sentence": "For the appointment record, use 2019: that was the year Felix Hart, aged 42, joined Marshwater Trust as wetland restoration adviser. The trust's 2022 newsletter described the appointment retrospectively.",
+    "record": {
+      "name": "Felix Hart",
+      "age": 42,
+      "org": "Marshwater Trust",
+      "role": "wetland restoration adviser",
+      "year": 2019
+    }
+  },
+  {
+    "id": "independent-2",
+    "sentence": "In a 2025 interview, Priya Deshmukh recalled starting at Beacon Food Cooperative in 2014. She was 27 when she started there as cold-chain operations planner.",
+    "record": {
+      "name": "Priya Deshmukh",
+      "age": 27,
+      "org": "Beacon Food Cooperative",
+      "role": "cold-chain operations planner",
+      "year": 2014
+    }
+  },
+  {
+    "id": "independent-3",
+    "sentence": "Northgate Dental Centre advertised the vacancy in 2016 and made the appointment in 2018. The person appointed in 2018 was Marcus Bell, then aged 31, and the post was dental equipment technician.",
+    "record": {
+      "name": "Marcus Bell",
+      "age": 31,
+      "org": "Northgate Dental Centre",
+      "role": "dental equipment technician",
+      "year": 2018
+    }
+  },
+  {
+    "id": "independent-4",
+    "sentence": "Evelyn Price was 48 at the time of her 2020 appointment as coastal erosion surveyor with Tidemark Field Office. The office had relocated in 2011.",
+    "record": {
+      "name": "Evelyn Price",
+      "age": 48,
+      "org": "Tidemark Field Office",
+      "role": "coastal erosion surveyor",
+      "year": 2020
+    }
+  },
+  {
+    "id": "independent-5",
+    "sentence": "The building dates to 1892; the employment record concerns 2021. In that year, Wesley Grant, aged 25 at the start of employment, became stained-glass conservator at Foundry Heritage Centre.",
+    "record": {
+      "name": "Wesley Grant",
+      "age": 25,
+      "org": "Foundry Heritage Centre",
+      "role": "stained-glass conservator",
+      "year": 2021
+    }
+  },
+  {
+    "id": "finn-demo",
+    "sentence": "In 2026, Finn, 18, became a student at the University of Toronto.",
+    "record": {
+      "name": "Finn",
+      "age": 18,
+      "org": "University of Toronto",
+      "role": "student",
+      "year": 2026
+    }
+  }
+]

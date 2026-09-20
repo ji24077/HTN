@@ -1,0 +1,12 @@
+{
+  "status": "rejected",
+  "setup_seconds": 25.099530300009064,
+  "validation_exit_code": 2,
+  "latency_exit_code": 0,
+  "terminated": true,
+  "finished_at": 1789835286.3508787,
+  "session_id": "hardware-a40-db12f200",
+  "profile": "hardware-a40",
+  "cleanup_verified": true,
+  "estimate_usd": 0.22191253610385792
+}

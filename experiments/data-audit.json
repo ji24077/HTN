@@ -1,0 +1,480 @@
+{
+  "train": {
+    "rows": 1768,
+    "duplicate_sentences": 0,
+    "fields_not_verbatim": {
+      "org": 11,
+      "role": 91,
+      "name": 3,
+      "age": 1
+    },
+    "rows_to_review": 106,
+    "review_examples": [
+      {
+        "line": 7,
+        "fields": [
+          "org"
+        ],
+        "sentence": "It was in 2004 that Esteban Villarreal, then 62, was appointed presiding judge of the regional court in the city of Guadalajara's judicial district.",
+        "record": {
+          "name": "Esteban Villarreal",
+          "age": 62,
+          "org": "Guadalajara Regional Court",
+          "role": "presiding judge",
+          "year": 2004
+        }
+      },
+      {
+        "line": 24,
+        "fields": [
+          "role"
+        ],
+        "sentence": "Aged 58, the distinguished linguist Professor Hélio Vasconcelos took up the deanship of the faculty of letters at Universidade Federal do Pará in 2010.",
+        "record": {
+          "name": "Hélio Vasconcelos",
+          "age": 58,
+          "org": "Universidade Federal do Pará",
+          "role": "dean of the faculty of letters",
+          "year": 2010
+        }
+      },
+      {
+        "line": 37,
+        "fields": [
+          "org"
+        ],
+        "sentence": "The robotics laboratory at Zurich Polytechnic promoted 36-year-old Amara Diallo to lead research engineer in 2021.",
+        "record": {
+          "name": "Amara Diallo",
+          "age": 36,
+          "org": "Zurich Polytechnic robotics laboratory",
+          "role": "lead research engineer",
+          "year": 2021
+        }
+      },
+      {
+        "line": 39,
+        "fields": [
+          "role"
+        ],
+        "sentence": "Mei-Ling Chen, 55, chairs the oncology department at Taipei General Hospital, where she arrived in 2012.",
+        "record": {
+          "name": "Mei-Ling Chen",
+          "age": 55,
+          "org": "Taipei General Hospital",
+          "role": "chair of the oncology department",
+          "year": 2012
+        }
+      },
+      {
+        "line": 62,
+        "fields": [
+          "role"
+        ],
+        "sentence": "Mei-Ling Chow, who turned 62 that spring, chaired the Singapore Monetary Review Board's compliance division in 2018.",
+        "record": {
+          "name": "Mei-Ling Chow",
+          "age": 62,
+          "org": "Singapore Monetary Review Board",
+          "role": "compliance division chair",
+          "year": 2018
+        }
+      },
+      {
+        "line": 74,
+        "fields": [
+          "role"
+        ],
+        "sentence": "Dr. Iolanda Ferreira, aged 58, has chaired the cardiology department at Santa Rita Municipal Hospital since 2010.",
+        "record": {
+          "name": "Iolanda Ferreira",
+          "age": 58,
+          "org": "Santa Rita Municipal Hospital",
+          "role": "chair of cardiology",
+          "year": 2010
+        }
+      },
+      {
+        "line": 83,
+        "fields": [
+          "role"
+        ],
+        "sentence": "When she turned 29 in 2014, Chiara Bellini accepted a lectureship in classics at the University of Bologna.",
+        "record": {
+          "name": "Chiara Bellini",
+          "age": 29,
+          "org": "University of Bologna",
+          "role": "lecturer in classics",
+          "year": 2014
+        }
+      },
+      {
+        "line": 88,
+        "fields": [
+          "role"
+        ],
+        "sentence": "In 2026, the robotics startup NeuraForge appointed Yosef Abramowitz, aged 35, to lead its product management team.",
+        "record": {
+          "name": "Yosef Abramowitz",
+          "age": 35,
+          "org": "NeuraForge",
+          "role": "head of product management",
+          "year": 2026
+        }
+      },
+      {
+        "line": 121,
+        "fields": [
+          "role"
+        ],
+        "sentence": "Hertha Lindqvist, 58, runs the Nordic fisheries regulatory agency, which she took over in 2015.",
+        "record": {
+          "name": "Hertha Lindqvist",
+          "age": 58,
+          "org": "Nordic fisheries regulatory agency",
+          "role": "director",
+          "year": 2015
+        }
+      },
+      {
+        "line": 124,
+        "fields": [
+          "role"
+        ],
+        "sentence": "Olga Petrenko, by then 39, had been persuaded to lead the toxicology unit at Novi Sad General Hospital, which she did from 2005 onward.",
+        "record": {
+          "name": "Olga Petrenko",
+          "age": 39,
+          "org": "Novi Sad General Hospital",
+          "role": "head of the toxicology unit",
+          "year": 2005
+        }
+      },
+      {
+        "line": 131,
+        "fields": [
+          "role"
+        ],
+        "sentence": "In 2022, the fintech firm Lumen Pay recruited Sofia Marchetti, 31, to lead product management.",
+        "record": {
+          "name": "Sofia Marchetti",
+          "age": 31,
+          "org": "Lumen Pay",
+          "role": "product management lead",
+          "year": 2022
+        }
+      },
+      {
+        "line": 146,
+        "fields": [
+          "role"
+        ],
+        "sentence": "Mei-Ling Chen, who is 39, has run the genomic sequencing unit at Pacific Ridge Laboratory since 2019.",
+        "record": {
+          "name": "Mei-Ling Chen",
+          "age": 39,
+          "org": "Pacific Ridge Laboratory",
+          "role": "genomic sequencing unit head",
+          "year": 2019
+        }
+      },
+      {
+        "line": 196,
+        "fields": [
+          "role"
+        ],
+        "sentence": "Sven Åkesson, 71, still chaired the maritime safety board of the Roslagen Shipping Agency as of 1985.",
+        "record": {
+          "name": "Sven Åkesson",
+          "age": 71,
+          "org": "Roslagen Shipping Agency",
+          "role": "chairman of the maritime safety board",
+          "year": 1985
+        }
+      },
+      {
+        "line": 205,
+        "fields": [
+          "role"
+        ],
+        "sentence": "The pediatric cardiology unit at Children's Mercy Hospital was led, as of 2011, by Dr. Han Xiuying, who was 39.",
+        "record": {
+          "name": "Han Xiuying",
+          "age": 39,
+          "org": "Children's Mercy Hospital",
+          "role": "pediatric cardiology unit lead",
+          "year": 2011
+        }
+      },
+      {
+        "line": 225,
+        "fields": [
+          "role"
+        ],
+        "sentence": "It was in 1988 that 58-year-old Émile Bouchard accepted the deanship of the Faculty of Medicine at Université Laval.",
+        "record": {
+          "name": "Émile Bouchard",
+          "age": 58,
+          "org": "Université Laval",
+          "role": "dean of the Faculty of Medicine",
+          "year": 1988
+        }
+      },
+      {
+        "line": 264,
+        "fields": [
+          "role"
+        ],
+        "sentence": "Running the Copenhagen office of Médecins Sans Frontières was assigned to Freja Lindqvist, who was 47, in 2016.",
+        "record": {
+          "name": "Freja Lindqvist",
+          "age": 47,
+          "org": "Médecins Sans Frontières",
+          "role": "head of the Copenhagen office",
+          "year": 2016
+        }
+      },
+      {
+        "line": 265,
+        "fields": [
+          "role"
+        ],
+        "sentence": "Dawit Tesfaye, aged 31, led the immunology research group at the Addis Biomedical Institute beginning in 2017.",
+        "record": {
+          "name": "Dawit Tesfaye",
+          "age": 31,
+          "org": "Addis Biomedical Institute",
+          "role": "immunology research group leader",
+          "year": 2017
+        }
+      },
+      {
+        "line": 291,
+        "fields": [
+          "role"
+        ],
+        "sentence": "At 19, Piotr Kowalczyk was already coding for the Warsaw fintech startup PayLane, where he started in 2019.",
+        "record": {
+          "name": "Piotr Kowalczyk",
+          "age": 19,
+          "org": "PayLane",
+          "role": "coder",
+          "year": 2019
+        }
+      },
+      {
+        "line": 295,
+        "fields": [
+          "role"
+        ],
+        "sentence": "Chiara Bellandi, 55, was brought in as head curator of the Uffizi's sculpture collection in 2018.",
+        "record": {
+          "name": "Chiara Bellandi",
+          "age": 55,
+          "org": "Uffizi",
+          "role": "head curator of the sculpture collection",
+          "year": 2018
+        }
+      },
+      {
+        "line": 305,
+        "fields": [
+          "role"
+        ],
+        "sentence": "Sitting on the board of GreenFields Alliance since 2022 is 66-year-old environmental lawyer Tariq Al-Mansouri.",
+        "record": {
+          "name": "Tariq Al-Mansouri",
+          "age": 66,
+          "org": "GreenFields Alliance",
+          "role": "board member",
+          "year": 2022
+        }
+      }
+    ]
+  },
+  "heldout": {
+    "rows": 200,
+    "duplicate_sentences": 0,
+    "fields_not_verbatim": {
+      "role": 11,
+      "org": 1
+    },
+    "rows_to_review": 12,
+    "review_examples": [
+      {
+        "line": 23,
+        "fields": [
+          "role"
+        ],
+        "sentence": "Aged 52, Marisol Herrera Quintero accepted the deanship of the veterinary school at Universidad del Llano in 2010.",
+        "record": {
+          "name": "Marisol Herrera Quintero",
+          "age": 52,
+          "org": "Universidad del Llano",
+          "role": "dean of the veterinary school",
+          "year": 2010
+        }
+      },
+      {
+        "line": 57,
+        "fields": [
+          "role"
+        ],
+        "sentence": "Yamamoto Kiyoko, who is 62, became chair of the Kyoto Institute of Linguistics' advisory board in 2019.",
+        "record": {
+          "name": "Yamamoto Kiyoko",
+          "age": 62,
+          "org": "Kyoto Institute of Linguistics",
+          "role": "chair of the advisory board",
+          "year": 2019
+        }
+      },
+      {
+        "line": 63,
+        "fields": [
+          "role"
+        ],
+        "sentence": "Zainab El Amrani, who is 39, handles public relations for the Casablanca daily Al-Watan, a job she started in 2012.",
+        "record": {
+          "name": "Zainab El Amrani",
+          "age": 39,
+          "org": "Al-Watan",
+          "role": "public relations manager",
+          "year": 2012
+        }
+      },
+      {
+        "line": 70,
+        "fields": [
+          "role"
+        ],
+        "sentence": "At 45, Colonel Idris Nkemelu commands the logistics division of the National Emergency Management Agency, a post he assumed in 2011.",
+        "record": {
+          "name": "Idris Nkemelu",
+          "age": 45,
+          "org": "National Emergency Management Agency",
+          "role": "commander of the logistics division",
+          "year": 2011
+        }
+      },
+      {
+        "line": 79,
+        "fields": [
+          "role"
+        ],
+        "sentence": "Dr. Amara Nwosu, a 41-year-old cardiologist, joined Lagos University Teaching Hospital in 2019 as a consultant.",
+        "record": {
+          "name": "Amara Nwosu",
+          "age": 41,
+          "org": "Lagos University Teaching Hospital",
+          "role": "consultant cardiologist",
+          "year": 2019
+        }
+      },
+      {
+        "line": 101,
+        "fields": [
+          "role"
+        ],
+        "sentence": "It was in 2004 that Mei-Lin Chao, then 47, accepted the vice presidency for supply chains at Kaohsiung Steelworks.",
+        "record": {
+          "name": "Mei-Lin Chao",
+          "age": 47,
+          "org": "Kaohsiung Steelworks",
+          "role": "vice president for supply chains",
+          "year": 2004
+        }
+      },
+      {
+        "line": 123,
+        "fields": [
+          "role"
+        ],
+        "sentence": "It was in 1988 that 52-year-old Stanisław Kowalczyk took over as director of the Gdańsk shipyard's safety division.",
+        "record": {
+          "name": "Stanisław Kowalczyk",
+          "age": 52,
+          "org": "Gdańsk shipyard",
+          "role": "director of the safety division",
+          "year": 1988
+        }
+      },
+      {
+        "line": 128,
+        "fields": [
+          "role"
+        ],
+        "sentence": "Rakesh Malhotra, 52, runs the Delhi office of the climate NGO GreenGrid Foundation, a post he took up in 2019.",
+        "record": {
+          "name": "Rakesh Malhotra",
+          "age": 52,
+          "org": "GreenGrid Foundation",
+          "role": "director of the Delhi office",
+          "year": 2019
+        }
+      },
+      {
+        "line": 129,
+        "fields": [
+          "role"
+        ],
+        "sentence": "A professorship in Byzantine history was awarded to 57-year-old Aikaterini Papadakis by the University of Thessaloniki in 2010.",
+        "record": {
+          "name": "Aikaterini Papadakis",
+          "age": 57,
+          "org": "University of Thessaloniki",
+          "role": "professor of Byzantine history",
+          "year": 2010
+        }
+      },
+      {
+        "line": 135,
+        "fields": [
+          "role"
+        ],
+        "sentence": "Fresh out of law school, 23-year-old Beatriz Amorim landed a clerkship at the Federal Court of Bahia in 2020.",
+        "record": {
+          "name": "Beatriz Amorim",
+          "age": 23,
+          "org": "Federal Court of Bahia",
+          "role": "law clerk",
+          "year": 2020
+        }
+      },
+      {
+        "line": 164,
+        "fields": [
+          "org"
+        ],
+        "sentence": "It was 2010 when the hospital São Lucas appointed 52-year-old Renato Camargo as head surgeon.",
+        "record": {
+          "name": "Renato Camargo",
+          "age": 52,
+          "org": "São Lucas Hospital",
+          "role": "head surgeon",
+          "year": 2010
+        }
+      },
+      {
+        "line": 192,
+        "fields": [
+          "role"
+        ],
+        "sentence": "Björn Håkansson, who is 36, captains research vessels for the Baltic Marine Institute, a post he has held since 2022.",
+        "record": {
+          "name": "Björn Håkansson",
+          "age": 36,
+          "org": "Baltic Marine Institute",
+          "role": "research vessel captain",
+          "year": 2022
+        }
+      }
+    ]
+  },
+  "overlap": {
+    "sentences": 0,
+    "records": 0,
+    "names": 55
+  },
+  "note": "Non-verbatim labels require review, not automatic rejection: paraphrases can be valid. Shared names alone are not leakage."
+}

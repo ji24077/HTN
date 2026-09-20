@@ -1,0 +1,8 @@
+{
+  "torch": "2.10.0+cu128",
+  "gpu": "NVIDIA RTX A5000",
+  "hip": null,
+  "cuda": "12.8",
+  "device_count": 1,
+  "matrix_sum": 1073741824.0
+}

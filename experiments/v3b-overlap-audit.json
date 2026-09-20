@@ -1,0 +1,20 @@
+{
+  "data\\heldout.jsonl": {
+    "sha256": "4b978b0aaa4d3e149d1030b491f6db1ed13c0c70880e033f1094360d8090f760",
+    "rows": 200,
+    "exact_sentence_overlap": 0,
+    "exact_record_overlap": 0
+  },
+  "data\\experiments\\extraction-v2\\challenge.jsonl": {
+    "sha256": "30b771ef33b268295dc40d46e7f9f6d20d5380abd3f2f2464c85c4909ccc17e7",
+    "rows": 800,
+    "exact_sentence_overlap": 0,
+    "exact_record_overlap": 0
+  },
+  "data\\experiments\\independent-review\\heldout.jsonl": {
+    "sha256": "f80445ab9b3d6f0f93bd1281654c29846ed53b7072bc347112a064321a9b67be",
+    "rows": 50,
+    "exact_sentence_overlap": 0,
+    "exact_record_overlap": 0
+  }
+}

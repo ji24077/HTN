@@ -1,0 +1,7 @@
+evaluating adapter on 1 held-out examples...
+Loading weights:   0%|          | 0/290 [00:00<?, ?it/s]Loading weights: 100%|██████████| 290/290 [00:00<00:00, 5899.88it/s]
+  1/1
+wrote preflight.json
+
+n=1  json_parse_rate 1.000  exact_match 1.000  held_out_loss 0.0293
+  per-field: name 1.00  age 1.00  org 1.00  role 1.00  year 1.00

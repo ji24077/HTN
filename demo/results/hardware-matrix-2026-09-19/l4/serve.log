@@ -1,0 +1,4 @@
+loading adapter (bf16)...
+Loading weights:   0%|          | 0/290 [00:00<?, ?it/s]Loading weights: 100%|██████████| 290/290 [00:00<00:00, 3731.78it/s]
+Loading weights:   0%|          | 0/336 [00:00<?, ?it/s]Loading weights: 100%|██████████| 336/336 [00:00<00:00, 4524.92it/s]
+READY on 127.0.0.1:8100

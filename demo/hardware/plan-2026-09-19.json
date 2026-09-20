@@ -1,0 +1,300 @@
+{
+  "inventory": {
+    "distinct_catalog_models": {
+      "nvidia": 46,
+      "amd": 1,
+      "unknown": 1
+    },
+    "requested_distinct_models_per_vendor": 10,
+    "amd_models_missing_from_provider_catalog": 9,
+    "targets": [
+      {
+        "key": "rtx3090",
+        "gpu_id": "NVIDIA GeForce RTX 3090",
+        "vendor": "nvidia",
+        "cloud": "COMMUNITY",
+        "regions": [],
+        "memory_gb": 24,
+        "catalog_checked_at": "2026-09-19T15:59:25.598Z",
+        "catalog_listed": true,
+        "cloud_supported": true,
+        "stock_at_snapshot": true,
+        "availability": "LOW",
+        "quoted_compute_per_hour_usd": 0.22,
+        "minimum_cuda_version": "12.8",
+        "runtime_stock_recheck_required": true,
+        "performance": null
+      },
+      {
+        "key": "rtx4090",
+        "gpu_id": "NVIDIA GeForce RTX 4090",
+        "vendor": "nvidia",
+        "cloud": "SECURE",
+        "regions": [
+          "EU-RO-1"
+        ],
+        "memory_gb": 24,
+        "catalog_checked_at": "2026-09-19T15:59:22.530Z",
+        "catalog_listed": true,
+        "cloud_supported": true,
+        "stock_at_snapshot": true,
+        "availability": "HIGH",
+        "quoted_compute_per_hour_usd": 0.74,
+        "minimum_cuda_version": "12.8",
+        "runtime_stock_recheck_required": true,
+        "performance": null
+      },
+      {
+        "key": "rtx5090",
+        "gpu_id": "NVIDIA GeForce RTX 5090",
+        "vendor": "nvidia",
+        "cloud": "SECURE",
+        "regions": [
+          "EU-RO-1"
+        ],
+        "memory_gb": 32,
+        "catalog_checked_at": "2026-09-19T15:59:22.530Z",
+        "catalog_listed": true,
+        "cloud_supported": true,
+        "stock_at_snapshot": true,
+        "availability": "LOW",
+        "quoted_compute_per_hour_usd": 0.99,
+        "minimum_cuda_version": "12.8",
+        "runtime_stock_recheck_required": true,
+        "performance": null
+      },
+      {
+        "key": "a5000",
+        "gpu_id": "NVIDIA RTX A5000",
+        "vendor": "nvidia",
+        "cloud": "SECURE",
+        "regions": [
+          "CA-MTL-1"
+        ],
+        "memory_gb": 24,
+        "catalog_checked_at": "2026-09-19T15:59:22.530Z",
+        "catalog_listed": true,
+        "cloud_supported": true,
+        "stock_at_snapshot": true,
+        "availability": "LOW",
+        "quoted_compute_per_hour_usd": 0.27,
+        "minimum_cuda_version": "12.8",
+        "runtime_stock_recheck_required": true,
+        "performance": null
+      },
+      {
+        "key": "a6000",
+        "gpu_id": "NVIDIA RTX A6000",
+        "vendor": "nvidia",
+        "cloud": "SECURE",
+        "regions": [
+          "EU-SE-1"
+        ],
+        "memory_gb": 48,
+        "catalog_checked_at": "2026-09-19T15:59:22.530Z",
+        "catalog_listed": true,
+        "cloud_supported": true,
+        "stock_at_snapshot": true,
+        "availability": "LOW",
+        "quoted_compute_per_hour_usd": 0.53,
+        "minimum_cuda_version": "12.8",
+        "runtime_stock_recheck_required": true,
+        "performance": null
+      },
+      {
+        "key": "a40",
+        "gpu_id": "NVIDIA A40",
+        "vendor": "nvidia",
+        "cloud": "SECURE",
+        "regions": [
+          "CA-MTL-1"
+        ],
+        "memory_gb": 48,
+        "catalog_checked_at": "2026-09-19T15:59:22.530Z",
+        "catalog_listed": true,
+        "cloud_supported": true,
+        "stock_at_snapshot": true,
+        "availability": "LOW",
+        "quoted_compute_per_hour_usd": 0.49,
+        "minimum_cuda_version": "12.8",
+        "runtime_stock_recheck_required": true,
+        "performance": null
+      },
+      {
+        "key": "l4",
+        "gpu_id": "NVIDIA L4",
+        "vendor": "nvidia",
+        "cloud": "SECURE",
+        "regions": [
+          "US-MO-2"
+        ],
+        "memory_gb": 24,
+        "catalog_checked_at": "2026-09-19T15:59:22.530Z",
+        "catalog_listed": true,
+        "cloud_supported": true,
+        "stock_at_snapshot": true,
+        "availability": "LOW",
+        "quoted_compute_per_hour_usd": 0.49,
+        "minimum_cuda_version": "12.8",
+        "runtime_stock_recheck_required": true,
+        "performance": null
+      },
+      {
+        "key": "l40s",
+        "gpu_id": "NVIDIA L40S",
+        "vendor": "nvidia",
+        "cloud": "SECURE",
+        "regions": [
+          "EU-NL-1"
+        ],
+        "memory_gb": 48,
+        "catalog_checked_at": "2026-09-19T15:59:22.530Z",
+        "catalog_listed": true,
+        "cloud_supported": true,
+        "stock_at_snapshot": true,
+        "availability": "LOW",
+        "quoted_compute_per_hour_usd": 1.09,
+        "minimum_cuda_version": "12.8",
+        "runtime_stock_recheck_required": true,
+        "performance": null
+      },
+      {
+        "key": "a100",
+        "gpu_id": "NVIDIA A100-SXM4-80GB",
+        "vendor": "nvidia",
+        "cloud": "SECURE",
+        "regions": [
+          "US-MD-1"
+        ],
+        "memory_gb": 80,
+        "catalog_checked_at": "2026-09-19T15:59:22.530Z",
+        "catalog_listed": true,
+        "cloud_supported": true,
+        "stock_at_snapshot": true,
+        "availability": "MEDIUM",
+        "quoted_compute_per_hour_usd": 1.59,
+        "minimum_cuda_version": "12.8",
+        "runtime_stock_recheck_required": true,
+        "performance": null
+      },
+      {
+        "key": "h100",
+        "gpu_id": "NVIDIA H100 80GB HBM3",
+        "vendor": "nvidia",
+        "cloud": "SECURE",
+        "regions": [
+          "AP-IN-1"
+        ],
+        "memory_gb": 80,
+        "catalog_checked_at": "2026-09-19T15:59:22.530Z",
+        "catalog_listed": true,
+        "cloud_supported": true,
+        "stock_at_snapshot": true,
+        "availability": "HIGH",
+        "quoted_compute_per_hour_usd": 3.49,
+        "minimum_cuda_version": "12.8",
+        "runtime_stock_recheck_required": true,
+        "performance": null
+      },
+      {
+        "key": "mi300x",
+        "gpu_id": "AMD Instinct MI300X OAM",
+        "vendor": "amd",
+        "cloud": "SECURE",
+        "regions": [
+          "EU-RO-1"
+        ],
+        "memory_gb": 192,
+        "catalog_checked_at": "2026-09-19T15:59:22.530Z",
+        "catalog_listed": true,
+        "cloud_supported": true,
+        "stock_at_snapshot": false,
+        "availability": "NONE",
+        "quoted_compute_per_hour_usd": 2.39,
+        "minimum_cuda_version": null,
+        "runtime_stock_recheck_required": true,
+        "performance": null
+      }
+    ]
+  },
+  "budget": {
+    "total_budget_usd": 15.0,
+    "prior_reserve_usd": 4.25,
+    "new_reservations_usd": 7.62,
+    "unreserved_usd": 3.13,
+    "reservations": [
+      {
+        "key": "rtx5090",
+        "gpu_id": "NVIDIA GeForce RTX 5090",
+        "profile": "hardware-rtx5090",
+        "max_duration_seconds": 2700,
+        "hourly_gpu_limit_usd": 0.99,
+        "storage_allowance_per_hour": 0.15,
+        "budget_usd": 0.86
+      },
+      {
+        "key": "a5000",
+        "gpu_id": "NVIDIA RTX A5000",
+        "profile": "hardware-a5000",
+        "max_duration_seconds": 2700,
+        "hourly_gpu_limit_usd": 0.27,
+        "storage_allowance_per_hour": 0.15,
+        "budget_usd": 0.32
+      },
+      {
+        "key": "a6000",
+        "gpu_id": "NVIDIA RTX A6000",
+        "profile": "hardware-a6000",
+        "max_duration_seconds": 2700,
+        "hourly_gpu_limit_usd": 0.53,
+        "storage_allowance_per_hour": 0.15,
+        "budget_usd": 0.51
+      },
+      {
+        "key": "a40",
+        "gpu_id": "NVIDIA A40",
+        "profile": "hardware-a40",
+        "max_duration_seconds": 2700,
+        "hourly_gpu_limit_usd": 0.49,
+        "storage_allowance_per_hour": 0.15,
+        "budget_usd": 0.48
+      },
+      {
+        "key": "l4",
+        "gpu_id": "NVIDIA L4",
+        "profile": "hardware-l4",
+        "max_duration_seconds": 2700,
+        "hourly_gpu_limit_usd": 0.49,
+        "storage_allowance_per_hour": 0.15,
+        "budget_usd": 0.48
+      },
+      {
+        "key": "l40s",
+        "gpu_id": "NVIDIA L40S",
+        "profile": "hardware-l40s",
+        "max_duration_seconds": 2700,
+        "hourly_gpu_limit_usd": 1.09,
+        "storage_allowance_per_hour": 0.15,
+        "budget_usd": 0.93
+      },
+      {
+        "key": "a100",
+        "gpu_id": "NVIDIA A100-SXM4-80GB",
+        "profile": "hardware-a100",
+        "max_duration_seconds": 2700,
+        "hourly_gpu_limit_usd": 1.59,
+        "storage_allowance_per_hour": 0.15,
+        "budget_usd": 1.31
+      },
+      {
+        "key": "h100",
+        "gpu_id": "NVIDIA H100 80GB HBM3",
+        "profile": "hardware-h100",
+        "max_duration_seconds": 2700,
+        "hourly_gpu_limit_usd": 3.49,
+        "storage_allowance_per_hour": 0.15,
+        "budget_usd": 2.73
+      }
+    ]
+  }
+}

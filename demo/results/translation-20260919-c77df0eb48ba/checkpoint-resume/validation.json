@@ -1,0 +1,47 @@
+{
+  "passed": true,
+  "gpu_verified": true,
+  "report_path": "demo/results/translation-20260919-c77df0eb48ba/checkpoint-resume/target-report.json",
+  "comparison": {
+    "status": "passed",
+    "atol": 1e-05,
+    "rtol": 0.0001,
+    "identity_mismatches": [],
+    "verification_scope": "Comparison of supplied reports, not a new GPU execution",
+    "warnings": [
+      "Timing is diagnostic, not a benchmark.",
+      "Cross-GPU comparison makes no optimization or speedup claim."
+    ],
+    "predictions": {
+      "passed": true,
+      "count": 128,
+      "mismatch_count": 0,
+      "max_abs_error": 3.5762786865234375e-07,
+      "difference_overflow": false
+    },
+    "loss_history": {
+      "passed": true,
+      "count": 4,
+      "mismatch_count": 0,
+      "max_abs_error": 0.0,
+      "difference_overflow": false
+    },
+    "comparison_scope": "final predictions and loss history over the same step range",
+    "timing": {
+      "comparable": false,
+      "reasons": [
+        "different GPU or vendor"
+      ],
+      "speedup": null
+    }
+  },
+  "error": null,
+  "reports": {
+    "target": "demo/results/translation-20260919-c77df0eb48ba/checkpoint-resume/target-report.json",
+    "source": "demo/results/translation-20260919-c77df0eb48ba/checkpoint-resume/source-report.json"
+  },
+  "checkpoint_input_sha256": "6161e9ded76a3598286e744ed839fa949a7d81fc463b5aafe7569b8ed8c019ca",
+  "start_step": 8,
+  "global_step": 12,
+  "steps_executed": 4
+}

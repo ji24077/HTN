@@ -1,0 +1,39 @@
+{
+  "base": {
+    "repo_id": "Qwen/Qwen2.5-0.5B",
+    "revision": "060db6499f32faf8b98477b0a26969ef7d8b9987",
+    "files": {
+      "config.json": "479dcf0c5286339e41ad3992cd08ae88a467c4187587936248e2b7c96283484b",
+      "generation_config.json": "8c970692323e3ea0e9b8b0a4dca79388d31226e41f83c9fd6014804280ebf6e8",
+      "merges.txt": "599bab54075088774b1733fde865d5bd747cbcc7a547c5bc12610e874e26f5e3",
+      "model.safetensors": "88c142557820ccad55bb59756bfcfcf891de9cc6202816bd346445188a0ed342",
+      "tokenizer.json": "c0382117ea329cdf097041132f6d735924b697924d6f6fc3945713e96ce87539",
+      "tokenizer_config.json": "c91efca15ceff6e9ee9424db58a6f59cd41294e550a86cbd07e3c1fb500b34f9",
+      "vocab.json": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910"
+    }
+  },
+  "adapters": {
+    "laptop-lora-v2": {
+      "path": "ckpt/laptop-lora-v2",
+      "model_sha256": "554630c2d938274fe3671995d31b32b752d2ae0f1872cbc68883f1802b6c2859",
+      "files": {
+        "adapter_config.json": "728600bf6190bf793bad36975e2e5d1c00046ad9ca86d0075c60d7f1a2bea07d",
+        "adapter_model.safetensors": "7d0ad3145a518c3c61879c84a064ae8c9d27215e7b669e9dd9260c8a883b3ae0",
+        "tokenizer.json": "3fd169731d2cbde95e10bf356d66d5997fd885dd8dbb6fb4684da3f23b2585d8",
+        "tokenizer_config.json": "b271a1c91521384eb6d794eb27c9d55b3ff93ade6beb59e668d55411155ea16e",
+        "chat_template.jinja": "7215110d1460d6dfdb8ed5bbc3f18b1772cc270404795c331bc0adc266a75008"
+      }
+    },
+    "laptop-lora-v3b": {
+      "path": "ckpt/laptop-lora-v3b",
+      "model_sha256": "02b0532346e314750330c6301670c2d6af40b874faf952f76f5fa326160ffbfb",
+      "files": {
+        "adapter_config.json": "07d36e13b0d75ea18d9f0dde9fda49b13553639b337956b76030b3b645341dd1",
+        "adapter_model.safetensors": "600691de70c80f28743563212ef26b4dac61a1014effaafde5fec1a48020992d",
+        "tokenizer.json": "3fd169731d2cbde95e10bf356d66d5997fd885dd8dbb6fb4684da3f23b2585d8",
+        "tokenizer_config.json": "b271a1c91521384eb6d794eb27c9d55b3ff93ade6beb59e668d55411155ea16e",
+        "chat_template.jinja": "7215110d1460d6dfdb8ed5bbc3f18b1772cc270404795c331bc0adc266a75008"
+      }
+    }
+  }
+}
