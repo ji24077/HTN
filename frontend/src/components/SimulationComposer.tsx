@@ -12,12 +12,6 @@ export function SimulationComposer({
   const [maxSpend, setMaxSpend] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [description, setDescription] = useState("");
-  const [mode, setMode] = useState<"job" | "service">("job");
-  const [entrypoint, setEntrypoint] = useState("");
-  const [health, setHealth] = useState("/health");
-  const [runtime, setRuntime] = useState<"cpu" | "cuda" | "mps">("cpu");
-  const [vram, setVram] = useState(0);
-  const [lifetime, setLifetime] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const requestId = useRef(crypto.randomUUID());
@@ -28,9 +22,9 @@ export function SimulationComposer({
     const merged = [...files, ...next];
     if (
       merged.length > 100 ||
-      merged.reduce((sum, file) => sum + file.size, 0) > 8 * 1024 * 1024
+      merged.reduce((sum, file) => sum + file.size, 0) > 128 * 1024 * 1024
     ) {
-      setError("Choose at most 100 files totaling 8 MiB or less.");
+      setError("Choose at most 100 files totaling 128 MiB or less.");
       return;
     }
     if (
@@ -59,8 +53,6 @@ export function SimulationComposer({
         description.trim(),
         requestId.current,
         usageCap,
-        ...(mode === "service" ? [{ entrypoint: entrypoint.trim() || undefined, readiness_path: health,
-          requirements: { runtime, vram_mib: vram }, lifetime_seconds: lifetime ? Number(lifetime) * 3600 : undefined }] : []),
       );
       setFiles([]);
       setDescription("");
@@ -80,23 +72,10 @@ export function SimulationComposer({
   }
   return (
     <form className="composer simulation-form" onSubmit={submit}>
-      <label className="field-label" htmlFor="execution-mode">Run as</label>
-      <select id="execution-mode" value={mode} disabled={busy} onChange={event => { setMode(event.target.value as "job" | "service"); requestId.current = crypto.randomUUID(); }}>
-        <option value="job">Job</option><option value="service">Service</option>
-      </select>
-      {mode === "service" && <fieldset disabled={busy} onChange={() => { requestId.current = crypto.randomUUID(); }}>
-        <legend>Service settings</legend>
-        <p>Upload an HTTP server that listens on DISPATCH_SERVICE_PORT. It stays running and returns an endpoint.</p>
-        <label>Entrypoint (optional for a single Python file)<input value={entrypoint} onChange={event => setEntrypoint(event.target.value)} placeholder="server.py" /></label>
-        <label>Readiness path<input value={health} onChange={event => setHealth(event.target.value)} /></label>
-        <label>Runtime<select value={runtime} onChange={event => setRuntime(event.target.value as typeof runtime)}><option value="cpu">CPU</option><option value="cuda">CUDA</option><option value="mps">MPS</option></select></label>
-        <label>Required VRAM (MiB)<input type="number" min="0" value={vram} onChange={event => setVram(Number(event.target.value))} /></label>
-        <label>Run for hours (blank means until stopped)<input type="number" min="1" max="8760" value={lifetime} onChange={event => setLifetime(event.target.value)} /></label>
-      </fieldset>}
-      {mode === "job" && <p>
-        Upload your Python simulation and describe the run. The agent will
-        inspect, adapt, validate, and launch it.
-      </p>}
+      <p>
+        Tell us what you want to make. Your agent chooses the machine, plans the
+        run, and checks the result.
+      </p>
       <div
         className="upload-zone"
         onDragOver={(event) => event.preventDefault()}
@@ -107,7 +86,7 @@ export function SimulationComposer({
       >
         <Icon name="jobs" size={26} />
         <strong>Drop your files here</strong>
-        <span>{mode === "service" ? "Serving code and supporting files, or a ZIP project" : "Python script, ZIP project, and supporting inputs"}</span>
+        <span>Code, inputs, or a ZIP project</span>
         <button
           className="outline-btn"
           type="button"
@@ -118,7 +97,7 @@ export function SimulationComposer({
         </button>
         <input
           ref={input}
-          aria-label={mode === "service" ? "Service files" : "Simulation files"}
+          aria-label="Project files"
           type="file"
           multiple
           hidden
@@ -127,7 +106,7 @@ export function SimulationComposer({
             event.target.value = "";
           }}
         />
-        <small>8 MiB total · up to 128 KiB of Python source</small>
+        <small>128 MiB total · up to 128 KiB of Python source</small>
       </div>
       {files.length > 0 && (
         <ul className="upload-files">
@@ -154,7 +133,7 @@ export function SimulationComposer({
         </ul>
       )}
       <label className="field-label" htmlFor="simulation-description">
-        Describe your run
+        What would you like to do?
       </label>
       <textarea
         id="simulation-description"
@@ -166,7 +145,7 @@ export function SimulationComposer({
           setDescription(event.target.value);
           requestId.current = crypto.randomUUID();
         }}
-        placeholder={mode === "service" ? "Describe the service and what its API should do." : "Run 1,000 trials using the attached inputs and return the outcome distribution."}
+        placeholder="What should this project do? Describe the result you want, or ask to host it as a service."
       />
       <MaxSpendField
         value={maxSpend}
@@ -176,24 +155,19 @@ export function SimulationComposer({
           requestId.current = crypto.randomUUID();
         }}
       />
-      <p className="simulation-limits">
-        {mode === "service" ? <>
-          Runs on one compatible Python worker until stopped or its configured
-          lifetime ends. Dependencies must already be installed. The endpoint
-          accepts requests once the readiness check passes.
-        </> : <>
-          Up to 3 adaptation attempts, 4 workers, and 30 minutes. Successful
-          validation starts the full run automatically.
-        </>}
-      </p>
       {error && <p role="alert">{error}</p>}
-      <button
-        className="submit"
-        disabled={busy || !files.length || !description.trim()}
-      >
-        {busy ? "Uploading…" : mode === "service" ? "Submit service" : "Submit simulation"}
-        <Icon name="arrow" size={16} />
-      </button>
+      <div className="compose-submit">
+        <p className="muted">
+          Python and PyTorch on CPU — the agent handles dependencies and setup.
+        </p>
+        <button
+          className="submit"
+          disabled={busy || !files.length || !description.trim()}
+        >
+          {busy ? "Uploading…" : "Submit project"}
+          <Icon name="arrow" size={16} />
+        </button>
+      </div>
     </form>
   );
 }

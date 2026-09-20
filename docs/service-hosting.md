@@ -1,19 +1,29 @@
 # Hosting uploaded services
 
-Choose **Service** in the existing project upload form. Upload a Python HTTP
-server, select its runtime/VRAM requirements, and optionally set an expiry.
+Upload a Python HTTP server and describe the API you want to host. Add an optional
+spending cap and describe any desired expiry in the request. The agent identifies
+the hosting intent and infers the entrypoint, runtime, readiness and other settings
+from the original source and available workers. It asks only for missing information.
 The result is a stable authenticated endpoint at `/serve/{job_id}/`.
+
+The agent also selects Python packages from the source. Workers install those
+requirements alongside uploaded dependency manifests in a private environment
+before starting the service. Setup counts toward the startup timeout; its logs
+appear in execution history. Explicit API configurations can supply a `dependencies`
+list. See [automatic dependencies](uploaded-projects.md#automatic-python-dependencies).
 
 The program reads `DISPATCH_SERVICE_PORT`, binds to `127.0.0.1`, and returns 2xx
 from `/health` only when ready. A custom readiness path is supported. One Python
-file is selected automatically; multi-file projects can specify an entrypoint
-or answer the existing clarification form. The original uploaded code is never
+file or a multi-file project can be submitted; the agent identifies the entrypoint
+or asks through the existing clarification form. The original uploaded code is never
 rewritten. The service uses one worker slot and starts again on a compatible
-worker after failure. There is no result-file validator for Service mode.
+worker after failure. There is no result-file validator for services. Explicit
+`execution_mode: "service"` API submissions can still provide settings directly.
 
 Upload [the standard-library example](../examples/projects/service/server.py)
-to exercise `/health`, `/stream`, and a binary POST echo without GPUs or model
-calls. The detail panel shows the URL, readiness, worker, expiry, restarts, logs,
+to exercise `/health`, `/stream`, and a binary POST echo without GPUs. Automatic
+submission uses the model to plan hosting; explicit service API submissions do not.
+The detail panel shows the URL, readiness, worker, expiry, restarts, logs,
 execution history, and Stop/Restart controls. Logs reuse the bounded worker journal:
 roughly 1,000 events or 1 MiB per attempt, then a truncation marker. Continuous log
 rotation/export is not implemented; a long-lived service can exhaust that log budget
@@ -82,25 +92,15 @@ the upstream request; the model server must honor cancellation to stop computati
 
 This endpoint supports HTTP APIs and streaming responses, not hosted interactive
 websites: cookies and platform credentials are stripped and responses carry a
-sandbox CSP. Dependencies and model files must already be available to the worker
-or be fetched by the uploaded code. Temporary workspaces are not persistent disks.
+sandbox CSP. Python dependencies are installed automatically; model files must already
+be available to the worker or be fetched by the uploaded code. Temporary workspaces are not persistent disks.
 
-## Fine-tuned model serving
+## Model serving scope
 
-[The vLLM launcher template](../examples/projects/model_service/server.py) starts
-`vllm serve` with the assigned port. Change `MODEL_PATH` to your pinned model
-location and install a compatible vLLM runtime in each eligible worker's Python
-environment. Set the correct CUDA/VRAM requirements when uploading. The inference
-client base URL becomes `/serve/{job_id}/v1`. The template follows vLLM's documented
-[HTTP serving interface](https://docs.vllm.ai/en/latest/serving/online_serving/openai_compatible_server/).
-This template has not been validated on a physical GPU in this change.
-
-For an adapter-only fine-tune, the uploaded serving code also needs the matching
-base weights and adapter configuration. Check that every replacement worker can
-load the same model version; the orchestrator does not yet distribute or cache
-large model files automatically. Python workers verify CUDA/MPS access with a bounded
-PyTorch probe before advertising it. This checks access, not whether a particular
-model fits or meets its performance target.
+This version supports Python and PyTorch serving on CPU. CUDA, MPS, vLLM GPU
+hosting and automatic distribution of model weights are deferred. Uploaded service
+code must run on CPU and have access to its model files. Services use the same
+agent-selected Python dependency setup as finite jobs.
 
 ## API and validation
 
@@ -134,24 +134,13 @@ a service shows **Busy · serving** and **Slot reserved**, including while the
 service is idle between requests. Stop withdraws the endpoint and releases the
 worker; Restart brings the service back at the same URL.
 
-Python workers now probe the serving interpreter at startup and report a reason
-when no usable device is found. GPU availability requires a successful PyTorch
-tensor operation. To start the demo worker with the GPU runtime installed:
-
-```sh
-WORKER_EXECUTOR=python_project WORKER_RUNTIME=auto uv run --project backend --python 3.12 --extra demo --with torch==2.14.0 --with numpy orchestrator-demo worker-b --port 8080
-```
-
-`WORKER_RUNTIME=cpu` keeps CPU scheduling while still reporting detected hardware.
-`auto` selects a verified CUDA or MPS runtime. Python workers select their runtime
-at startup; the remote CPU/GPU control belongs to paired desktop agents. Upload
-with MPS requirements and zero dedicated VRAM for the Apple GPU; unified memory
-is not reported as a separate VRAM pool. Multiple local workers share one machine.
-The tensor check follows the [PyTorch MPS interface](https://docs.pytorch.org/docs/2.14/notes/mps.html).
+Run Python workers with `WORKER_RUNTIME=cpu` for this release. GPU hardware
+telemetry may still be reported, but uploaded project and service plans accept
+CPU requirements only. The default Docker agent includes CPU PyTorch.
 
 `POST /v1/jobs` accepts `execution_mode: "service"` and optional `service` settings:
 `entrypoint`, `args` (argument array supporting `{port}`), `working_directory`,
-`readiness_path`, `requirements`, `startup_timeout_seconds`,
+`readiness_path`, `requirements` (CPU only), `dependencies`, `startup_timeout_seconds`,
 `request_timeout_seconds`, `concurrency`, and `lifetime_seconds`.
 
 `GET /v1/jobs/{id}` includes service state and endpoint. Service controls use

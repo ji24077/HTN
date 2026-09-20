@@ -234,6 +234,11 @@ export function WorkerGrid({
                 </div>
               )}
               <div className="worker-specs">
+                {worker?.capabilities.python && (
+                  <span className="tag" title={`Python ${worker.capabilities.python.version}`}>
+                    PyTorch {worker.capabilities.python.pytorch}
+                  </span>
+                )}
                 <span className="tag">
                   {worker?.capabilities.runtime === "cuda"
                     ? "CUDA"

@@ -1,6 +1,7 @@
 import { arch, cpus, hostname, platform } from 'node:os'
 import type { CapabilityRecord, RuntimePreference } from '@dwp/protocol'
 import { detectAccelerator } from './accelerator.ts'
+import { pythonCapability } from './adapters/program.ts'
 import { AGENT_VERSION } from './paths.ts'
 import { freeRamMb, imageReference, isContainer, logicalCores, totalRamMb } from './runtime.ts'
 
@@ -40,6 +41,7 @@ export function probe(
     // install would go on claiming none until someone noticed.
     accelerator: detectAccelerator(preference),
     runtimePreference: preference,
+    ...(adapters.includes('python_project') ? { python: pythonCapability() } : {}),
   }
 }
 

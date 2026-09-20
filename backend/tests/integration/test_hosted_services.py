@@ -135,6 +135,35 @@ class HostedServicesTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0.1)
         self.fail(str((response.status_code, response.text, await self.services.status(job))))
 
+    async def test_service_retains_billing_account_and_cannot_restart_past_spending_cap(self):
+        from orchestrator.preprocessing.models import Upload
+        from orchestrator.server.db.store import Conflict
+        from orchestrator.shared.services import ServiceAction
+
+        owner = uuid4()
+        content = encoded(SOURCE.read_text())
+        upload = Upload(
+            request_id=uuid4(),
+            description="Capped service",
+            execution_mode="service",
+            usage_cap="0",
+            files=[{"name": "server.py", "content": content}],
+        )
+        task = await self.services.create(upload, {"server.py": content}, account_id=owner)
+        job = task.spec.job_id
+        self.jobs.append(job)
+        self.assertEqual(task.state, "cancelled")
+        self.assertEqual(
+            await self.store.pool.fetchval(
+                "SELECT billing_account_id FROM supervised_jobs WHERE id=$1", job
+            ),
+            owner,
+        )
+        await self.services.reconcile()
+        self.assertEqual((await self.services.status(job))["phase"], "stopped")
+        with self.assertRaisesRegex(Conflict, "usage cap"):
+            await self.services.action(job, ServiceAction(action_id=uuid4(), operation="restart"))
+
     async def test_split_gateway_streaming_restart_and_stop(self):
         worker = await self.worker("worker-a")
         job, body = await self.upload()

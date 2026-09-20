@@ -214,6 +214,38 @@ end-to-end suite checks exactly this by killing a container mid-task and restart
 
 ## Several agents on one host
 
+### Python and PyTorch on CPU
+
+The standard image includes Python 3.12, CPU PyTorch 2.13.0, and the uploaded-project
+executor. It reports Python/PyTorch versions after a real CPU tensor check. Blender
+and CUDA are outside the current scope; no separate rendering image is required.
+The PyTorch wheel comes from the [official CPU index](https://download.pytorch.org/whl/cpu).
+
+```sh
+docker build -f deploy/Dockerfile.agent -t dwp-agent:python-cpu .
+```
+
+Upload the two scripts in [the PyTorch example](../examples/projects/pytorch/README.md)
+and request 200 training steps, a 2-step probe, and checkpoint validation. The agent
+selects dependencies from source and uploaded manifests. The worker installs extra
+Python libraries in a private environment, preserving the image's CPU PyTorch
+version. Incompatible version pins fail setup instead of downloading a CUDA build.
+
+The paired agent retains identity, leases, cancellation, execution logs and signed
+results. Artifacts use authenticated HTTP transfers rather than the result socket.
+One task runs per device; multiple containers require separate identity volumes.
+
+The opt-in integration test starts a temporary paired Docker container and database,
+trains and validates a real model, and verifies signed results and output downloads:
+
+```sh
+RUN_PYTHON_AGENT_E2E=1 PYTHONPATH=backend/tests \
+  uv run --project backend --python 3.12 --extra demo \
+  python -m unittest integration.test_python_agent -v
+```
+
+### Ordinary fleet containers
+
 ```sh
 DWP_INVITE_1=… DWP_INVITE_2=… docker compose -f deploy/compose.fleet.yaml up -d --build
 ```
@@ -330,8 +362,8 @@ fractionally limited machine look like the smallest possible worker.
 
 ## Optional workloads
 
-The default image runs `echo` and `walker_evolution`, which are pure JavaScript and need
-nothing. ONNX inference is a separate build target, because it is ~85 MB that most
+The default image runs Python/PyTorch CPU projects as well as the existing
+`echo` and `walker_evolution` JavaScript workloads. ONNX inference is a separate build target, because it is ~85 MB that most
 machines have no use for:
 
 ```sh

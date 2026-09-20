@@ -1,6 +1,7 @@
 """Shared models and the two boundaries for future planners and executors."""
 
 import json
+import os
 from datetime import datetime
 from typing import Annotated, Literal, Protocol
 
@@ -10,7 +11,11 @@ VERSION = 1
 HEARTBEAT_INTERVAL = 5
 UNHEALTHY_AFTER = 15
 LEASE_SECONDS = 45
-ACK_SECONDS = 10
+# Remote databases can delay assignment delivery and acknowledgement transactions.
+# Keep the existing default, with a bounded deployment override for those fleets.
+ACK_SECONDS = int(os.getenv("WORKER_ACK_SECONDS", "10"))
+if not 1 <= ACK_SECONDS <= LEASE_SECONDS:
+    raise ValueError(f"WORKER_ACK_SECONDS must be between 1 and {LEASE_SECONDS}")
 MESSAGE_LIMIT = 128 * 1024
 JSON_LIMIT = 64 * 1024
 
@@ -127,6 +132,11 @@ class Accelerator(Model):
     providers: list[str] = Field(default_factory=list, max_length=8)
 
 
+class PythonCapability(Model):
+    version: str = Field(min_length=1, max_length=32)
+    pytorch: str = Field(min_length=1, max_length=64)
+
+
 class Capabilities(Requirements):
     kinds: list[Identifier] = Field(min_length=1, max_length=32)
     #: Optional because rows written before this field existed must still load, and
@@ -134,6 +144,7 @@ class Capabilities(Requirements):
     machine: Machine | None = None
     accelerator: Accelerator | None = None
     runtime_preference: Literal["auto", "cpu"] = "auto"
+    python: PythonCapability | None = None
 
 
 class Task(Model):

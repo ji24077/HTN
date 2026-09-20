@@ -236,6 +236,9 @@ CREATE TABLE IF NOT EXISTS hosted_services (
     ready_at timestamptz,
     health_at timestamptz
 );
+-- Keep the agent's service decision available after the upload becomes a service.
+ALTER TABLE hosted_services ADD COLUMN IF NOT EXISTS planning jsonb NOT NULL DEFAULT '{}'::jsonb;
+
 -- Recreate derived objects transactionally: prototype return/column layouts may
 -- differ. Do not CASCADE; unknown external dependencies should stop the upgrade.
 DROP VIEW IF EXISTS usage_record_totals;
@@ -477,3 +480,30 @@ ALTER TABLE account_credits ENABLE ROW LEVEL SECURITY;
 CREATE OR REPLACE TRIGGER account_credits_changed
 AFTER INSERT OR UPDATE OR DELETE ON account_credits
 FOR EACH ROW EXECUTE FUNCTION notify_orchestrator_change();
+-- Outputs survive worker cleanup. Only the accepted current attempt is downloadable.
+CREATE TABLE IF NOT EXISTS job_outputs (
+    id uuid PRIMARY KEY,
+    job_id text NOT NULL REFERENCES supervised_jobs(id),
+    task_id text NOT NULL REFERENCES tasks(id),
+    attempt integer NOT NULL,
+    name text NOT NULL,
+    digest text NOT NULL,
+    size bigint NOT NULL CHECK (size >= 0),
+    content bytea,
+    ready boolean NOT NULL DEFAULT true,
+    created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+    UNIQUE(task_id,attempt,name)
+);
+CREATE INDEX IF NOT EXISTS job_outputs_job ON job_outputs(job_id);
+-- Preserve existing inline files while new outputs use bounded chunks.
+ALTER TABLE job_outputs ALTER COLUMN content DROP NOT NULL;
+ALTER TABLE job_outputs ADD COLUMN IF NOT EXISTS ready boolean NOT NULL DEFAULT true;
+ALTER TABLE job_outputs DROP CONSTRAINT IF EXISTS job_outputs_size_check;
+ALTER TABLE job_outputs ADD CONSTRAINT job_outputs_size_check
+    CHECK (size >= 0);
+CREATE TABLE IF NOT EXISTS job_output_chunks (
+    output_id uuid NOT NULL REFERENCES job_outputs(id) ON DELETE CASCADE,
+    part integer NOT NULL CHECK (part >= 0),
+    content bytea NOT NULL CHECK (octet_length(content) <= 1048576),
+    PRIMARY KEY(output_id,part)
+);

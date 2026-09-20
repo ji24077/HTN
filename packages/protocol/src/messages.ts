@@ -65,6 +65,12 @@ export type AcceleratorReport = z.infer<typeof AcceleratorReport>
 export const RuntimePreference = z.enum(['auto', 'cpu'])
 export type RuntimePreference = z.infer<typeof RuntimePreference>
 
+export const PythonCapability = z.object({
+  version: z.string().min(1).max(32),
+  pytorch: z.string().min(1).max(64),
+})
+export type PythonCapability = z.infer<typeof PythonCapability>
+
 export const CapabilityRecord = z.object({
   agentVersion: z.string(),
   os: z.enum(['darwin', 'win32', 'linux', 'ios', 'android']),
@@ -84,6 +90,7 @@ export const CapabilityRecord = z.object({
   accelerator: AcceleratorReport.optional(),
   /** What this machine is currently set to. Absent from agents that cannot be set. */
   runtimePreference: RuntimePreference.optional(),
+  python: PythonCapability.optional(),
 })
 export type CapabilityRecord = z.infer<typeof CapabilityRecord>
 

@@ -454,7 +454,27 @@ export const readSupervisor = (jobId: string, signal?: AbortSignal) =>
 
 export interface SimulationStatus {
   execution_mode?: "job" | "service";
-  service?: { task_id?: string | null; endpoint: string; desired: "running" | "stopped"; ready_at: string | null; health_at: string | null; restarts: number; config: unknown };
+  service?: {
+    task_id?: string | null;
+    endpoint: string;
+    desired: "running" | "stopped";
+    ready_at: string | null;
+    health_at: string | null;
+    restarts: number;
+    config: unknown;
+    plan_summary?: string;
+  };
+  workload?: "auto" | "simulation" | "rendering" | "training" | "python";
+  program_plan?: {
+    summary: string;
+    dependencies?: string[];
+    worker_id: string;
+    requirements: { runtime: string; vram_mib: number };
+    entrypoint: string;
+    validator: string;
+    outputs: { path: string; kind: string }[];
+    metrics: { name: string; minimum: number | null; maximum: number | null }[];
+  };
   trial_counts?: Record<string, number>;
   cleanup?: { required: number; confirmed: number; pending_workers: string[] };
   job_id: string;
@@ -542,7 +562,14 @@ export async function uploadSimulation(
   description: string,
   requestId: string,
   usageCap?: string,
-  service?: { entrypoint?: string; readiness_path: string; requirements: { runtime: "cpu" | "cuda" | "mps"; vram_mib: number }; lifetime_seconds?: number },
+  workload:
+    "auto" | "simulation" | "rendering" | "training" | "python" = "auto",
+  service?: {
+    entrypoint?: string;
+    readiness_path: string;
+    requirements: { runtime: "cpu" | "cuda" | "mps"; vram_mib: number };
+    lifetime_seconds?: number;
+  },
 ) {
   const encoded = await Promise.all(
     files.map(async (file) => {
@@ -553,19 +580,102 @@ export async function uploadSimulation(
       return { name: file.name, content: btoa(text) };
     }),
   );
-  return request<Task>("/v1/simulations", {
+  return request<Task>("/v1/jobs", {
     method: "POST",
     body: JSON.stringify({
       request_id: requestId,
-      ...(service ? { execution_mode: "service", service } : {}),
+      ...(service
+        ? { execution_mode: "service", service }
+        : { execution_mode: "auto" }),
       ...(usageCap !== undefined ? { usage_cap: usageCap } : {}),
+      workload,
+
       description,
       files: encoded,
     }),
   });
 }
 
+export interface JobOutput {
+  id: string;
+  name: string;
+  size: number;
+  sha256: string;
+  task_id: string;
+  attempt: number;
+}
+export const jobOutputs = (jobId: string, signal?: AbortSignal) =>
+  request<{ files: JobOutput[] }>(
+    `/v1/jobs/${encodeURIComponent(jobId)}/outputs`,
+    { signal },
+  );
+
+export async function downloadJobOutput(
+  jobId: string,
+  name: string,
+  outputId?: string,
+) {
+  const path = `/v1/jobs/${encodeURIComponent(jobId)}/${outputId ? `outputs/${encodeURIComponent(outputId)}` : "result"}`;
+  let response = await fetch(path, {
+    method: "HEAD",
+    credentials: "same-origin",
+  });
+  if (response.status === 401) {
+    await renewSession();
+    response = await fetch(path, {
+      method: "HEAD",
+      credentials: "same-origin",
+    });
+  }
+  if (!response.ok)
+    throw new ApiError("Could not download the output file.", response.status);
+  const anchor = document.createElement("a");
+  // Let the browser stream directly to its download manager, without a JS blob.
+  anchor.href = path;
+  anchor.download = name.split("/").pop() || "output";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+}
+
 export const serviceAction = (jobId: string, operation: "stop" | "restart") =>
   request(`/v1/jobs/${encodeURIComponent(jobId)}/service-actions`, {
-    method: "POST", body: JSON.stringify({ action_id: crypto.randomUUID(), operation }),
+    method: "POST",
+    body: JSON.stringify({ action_id: crypto.randomUUID(), operation }),
   });
+
+/** Bounded previews only. Large artifacts continue through browser downloads. */
+export async function previewJobOutput(
+  jobId: string,
+  outputId: string,
+  signal?: AbortSignal,
+): Promise<Blob> {
+  const path = `/v1/jobs/${encodeURIComponent(jobId)}/outputs/${encodeURIComponent(outputId)}`;
+  let response = await fetch(path, { credentials: "same-origin", signal });
+  if (response.status === 401) {
+    await renewSession();
+    response = await fetch(path, { credentials: "same-origin", signal });
+  }
+  if (!response.ok)
+    throw new ApiError("Could not preview this file.", response.status);
+  const reader = response.body?.getReader();
+  if (!reader)
+    throw new Error("Preview unavailable. Download the file instead.");
+  const chunks: Uint8Array<ArrayBuffer>[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > 2 * 1024 * 1024)
+        throw new Error(
+          "This file is too large to preview. Download it instead.",
+        );
+      chunks.push(new Uint8Array(value));
+    }
+  } finally {
+    await reader.cancel();
+  }
+  return new Blob(chunks);
+}

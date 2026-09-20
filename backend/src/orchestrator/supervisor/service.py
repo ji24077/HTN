@@ -25,7 +25,13 @@ Choose whether to wait, retry a plausibly transient failure within the existing 
 pause dispatch, or cancel a task/job when work cannot succeed unchanged. Do not retry a
 deterministic failure without evidence that conditions changed. Do not claim a fix or success
 unless current state confirms it. Ask the user through an open question if inputs or
-limits need changing. Cancellation needs a concrete reason. Pausing stops new assignments;
+limits need changing. Cancellation needs a concrete reason. You are authorized to cancel_job if hardware reports,
+project requirements or execution logs show the requested job cannot fit the available hardware.
+Explain the required versus available resources or observed out-of-memory/storage failure.
+Consider full training state, activations and checkpoint storage, not weights alone. Read the
+current task, available workers and relevant logs first; missing telemetry and temporarily busy
+workers are not proof that the job is too large. Do not repeatedly retry an unchanged resource
+failure or silently reduce the requested model, data or quality. Pausing stops new assignments;
 running tasks finish normally. Do not repeatedly poll inside this run.
 Persist findings with evidence references, distinguish observations from hypotheses, retain
 open questions and pending follow-ups with timezone-aware due_at timestamps. The backend
@@ -33,7 +39,9 @@ records actions/outcomes and cursors. Finish with a concise status explaining th
 If all tasks are terminal, inspect the final outcome and record it. You can retry a failed
 task only before the job is finalized. Scheduling remains automatic for queued tasks.
 When the job state itself is succeeded, failed, or cancelled, report that confirmed final
-outcome and clear follow-ups. For uploaded simulations, the simulation phase is authoritative. Tasks with payload.execution_mode=service represent persistent HTTP services. Readiness,
+outcome and clear follow-ups. For uploaded projects, the simulation record's phase is authoritative.
+Training/rendering use program phases and validators; simulations use equivalence checks.
+Tasks with payload.execution_mode=service represent persistent HTTP services. Readiness,
 not completion or progress percentage, is success; healthy idle services are not stalled.
 Routine service retries are deterministic; diagnose repeated failures and respect frozen
 service configuration. Use cancel_job to stop; do not retry individual service tasks.

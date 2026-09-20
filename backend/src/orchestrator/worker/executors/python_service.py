@@ -17,7 +17,7 @@ from websockets.exceptions import WebSocketException
 
 from ...shared.protocol import json_loads, json_text
 from ...shared.services import BODY_LIMIT, CHUNK_SIZE, ServiceConfig, safe_headers
-from .python_project import LAUNCHER, execution_workspace
+from .python_project import execution_workspace, write_launcher
 
 
 @asynccontextmanager
@@ -75,7 +75,7 @@ async def execute_service(executor, spec, report):
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(base64.b64decode(content, validate=True))
         # Reuse the trusted launcher/owner watchdog and unchanged Python entrypoint.
-        (root / "__dispatch_launcher__.py").write_text(LAUNCHER)
+        write_launcher(root)
         with socket.socket() as probe:
             probe.bind(("127.0.0.1", 0))
             port = probe.getsockname()[1]
@@ -117,6 +117,7 @@ async def execute_service(executor, spec, report):
                         "entrypoint": config.entrypoint,
                         "working_directory": config.working_directory,
                         "args": [a.replace("{port}", str(port)) for a in config.args],
+                        "dependencies": config.dependencies,
                     }
                 ).encode()
             )

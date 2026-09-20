@@ -6,6 +6,7 @@ const api = vi.hoisted(() => ({
   cancelTask: vi.fn(),
   answerSimulation: vi.fn(),
   executionEvents: vi.fn(),
+  jobOutputs: vi.fn(),
 }));
 vi.mock("../api/client", () => ({ ...api, ApiError: class extends Error {} }));
 afterEach(() => vi.useRealTimers());
@@ -105,4 +106,30 @@ it("shows the measured agent schedule without legacy batch defaults", async () =
   expect(screen.getByText("Startup dominates compute.")).toBeInTheDocument();
   expect(screen.getByText("Measured execution costs")).toBeInTheDocument();
   expect(screen.queryByText(/batches of 32/)).not.toBeInTheDocument();
+});
+
+it("shows Python dependencies and downloadable outputs", async () => {
+  api.readSimulation.mockReset().mockResolvedValue({
+    ...status,
+    phase: "completed",
+    plan: null,
+    program_plan: {
+      summary: "Train a CPU model",
+      entrypoint: "train.py",
+      validator: "validate.py",
+      dependencies: ["torch", "numpy"],
+    },
+  });
+  api.jobOutputs.mockResolvedValue({
+    files: [{ id: "checkpoint-1", name: "model.pt", size: 2048, attempt: 1 }],
+  });
+  render(<SimulationDetails jobId="python-1" cancelled={false} />);
+  expect(
+    await screen.findByText("Python dependencies: torch, numpy"),
+  ).toBeInTheDocument();
+  expect(
+    await screen.findByRole("button", { name: "Download model.pt" }),
+  ).toBeInTheDocument();
+  expect(screen.getByText("3. Validate outputs")).toHaveClass("current");
+  expect(screen.queryByLabelText("Trial progress")).not.toBeInTheDocument();
 });

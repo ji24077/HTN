@@ -129,6 +129,54 @@ class ServiceStore:
             )
         return {"saved": True}
 
+    async def adopt(self, job, config, summary):
+        """Atomically turn an agent-planned upload into a persistent service."""
+        job_id = job["job_id"]
+        async with self.store.change() as (conn, now):
+            current = await conn.fetchrow(
+                """SELECT p.revision,j.state,t.state AS task_state FROM simulation_jobs p
+                JOIN supervised_jobs j ON j.id=p.job_id JOIN tasks t ON t.id=p.job_id
+                WHERE p.job_id=$1""",
+                job_id,
+            )
+            if (
+                current is None
+                or current["revision"] != job["revision"]
+                or current["state"] != "active"
+                or current["task_state"] == "cancelled"
+            ):
+                raise Conflict("Service plan was superseded")
+            await conn.execute(
+                """INSERT INTO hosted_services(job_id,submission_hash,bundle_hash,description,config,
+                    phase,message,expires_at,planning) VALUES($1,$2,$3,$4,$5,'pending',$6,$7,$8)""",
+                job_id,
+                job["submission_hash"],
+                job["original_hash"],
+                job["data"]["description"],
+                config.model_dump(mode="json"),
+                summary,
+                now + timedelta(seconds=config.lifetime_seconds)
+                if config.lifetime_seconds
+                else None,
+                {"decisions": job["data"].get("decisions", []), "summary": summary},
+            )
+            await conn.execute(
+                """UPDATE tasks SET state='running',spec=jsonb_set(jsonb_set(spec,'{payload}',
+                    (spec->'payload') || '{"execution_mode":"service","phase":"pending"}'::jsonb),
+                    '{requirements}',$2::jsonb) WHERE id=$1""",
+                job_id,
+                config.requirements.model_dump(mode="json"),
+            )
+            await conn.execute("DELETE FROM job_reservations WHERE job_id=$1", job_id)
+            # The service now owns its lifetime; finite-job deadlines must no longer
+            # prevent service tasks from being assigned or restart planning.
+            await conn.execute("DELETE FROM simulation_jobs WHERE job_id=$1", job_id)
+            await event(
+                conn, "task", job_id, "running", "running",
+                execution_mode="service", phase="pending",
+            )
+            await enforce_usage_caps(conn, job_id=job_id)
+
     async def status(self, job_id):
         row = await self.pool.fetchrow("SELECT * FROM hosted_services WHERE job_id=$1", job_id)
         if row is None:
@@ -156,12 +204,14 @@ class ServiceStore:
             workers=[t["worker_id"] for t in tasks if t["id"] == row["task_id"] and t["worker_id"]],
             checks=[],
             versions=[],
+            decisions=row["planning"].get("decisions", []),
             question=row["message"] if row["phase"] == "needs_input" else None,
             service={
                 "endpoint": f"/serve/{job_id}",
                 "task_id": row["task_id"],
                 "desired": row["desired"],
                 "config": row["config"],
+                "plan_summary": row["planning"].get("summary"),
                 "ready_at": row["ready_at"],
                 "health_at": row["health_at"],
                 "restarts": max(0, row["attempts"] - 1),

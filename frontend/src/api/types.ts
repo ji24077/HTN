@@ -39,6 +39,7 @@ export interface Worker {
     kinds: string[];
     machine?: Machine | null;
     accelerator?: Accelerator | null;
+    python?: { version: string; pytorch: string } | null;
     runtime_preference?: RuntimePreference;
   };
   state: "alive" | "unhealthy" | "offline";

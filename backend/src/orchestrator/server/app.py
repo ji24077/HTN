@@ -17,6 +17,8 @@ from redis.backoff import NoBackoff
 
 from ..agent import AgentLoop
 from ..llm import OpenAIClient
+from ..preprocessing.outputs import router as output_router
+from ..preprocessing.outputs import worker_router as output_worker_router
 from ..preprocessing.routes import project_router
 from ..preprocessing.routes import router as preprocessing_router
 from ..preprocessing.routes import worker_router as artifact_router
@@ -223,6 +225,7 @@ def create_app(surface: str = "combined") -> FastAPI:
     if surface in {"combined", "worker"}:
         app.add_api_websocket_route("/v1/worker", worker)
         app.include_router(artifact_router)
+        app.include_router(output_worker_router)
         app.include_router(service_worker_router)
     if surface in {"combined", "public"}:
         app.include_router(api_router)
@@ -231,9 +234,14 @@ def create_app(surface: str = "combined") -> FastAPI:
         app.include_router(supervisor_router)
         app.include_router(preprocessing_router)
         app.include_router(project_router)
+        app.include_router(output_router)
         app.include_router(dashboard_router)
         app.include_router(dwp_router)
         app.include_router(dwp_assets_router)
+        # Paired devices use the public origin. These routes retain the existing
+        # task token, worker, lease, deadline, and upload-attempt checks.
+        app.include_router(artifact_router, prefix="/agent")
+        app.include_router(output_worker_router, prefix="/agent")
     if surface == "public":
         app.include_router(enrollment_router)
     return app

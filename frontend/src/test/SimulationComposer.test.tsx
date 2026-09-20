@@ -16,13 +16,16 @@ it("uploads the original files and run description, retaining the submission ide
   const file = new File(["print('hello')"], "simulation.py", {
     type: "text/x-python",
   });
-  await user.upload(screen.getByLabelText("Simulation files"), file);
-  await user.type(screen.getByLabelText("Describe your run"), "Run 24 trials");
-  await user.click(screen.getByRole("button", { name: "Submit simulation" }));
+  await user.upload(screen.getByLabelText("Project files"), file);
+  await user.type(
+    screen.getByLabelText("What would you like to do?"),
+    "Run 24 trials",
+  );
+  await user.click(screen.getByRole("button", { name: "Submit project" }));
   expect(await screen.findByRole("alert")).toHaveTextContent(
     "Connection interrupted",
   );
-  await user.click(screen.getByRole("button", { name: "Submit simulation" }));
+  await user.click(screen.getByRole("button", { name: "Submit project" }));
   await waitFor(() => expect(created).toHaveBeenCalledOnce());
   expect(upload.mock.calls[0][0][0]).toBe(file);
   expect(upload.mock.calls[0][1]).toBe("Run 24 trials");
@@ -35,12 +38,15 @@ it("retains a CAD cap on retry and uses a new submission when the cap changes", 
   upload.mockReset().mockRejectedValue(new Error("Connection interrupted"));
   render(<SimulationComposer onCreated={vi.fn()} />);
   await user.upload(
-    screen.getByLabelText("Simulation files"),
+    screen.getByLabelText("Project files"),
     new File(["pass"], "main.py"),
   );
-  await user.type(screen.getByLabelText("Describe your run"), "Example");
+  await user.type(
+    screen.getByLabelText("What would you like to do?"),
+    "Example",
+  );
   await user.type(screen.getByLabelText(/Max spend \(CAD\)/), "2.50");
-  const send = screen.getByRole("button", { name: "Submit simulation" });
+  const send = screen.getByRole("button", { name: "Submit project" });
   await user.click(send);
   await screen.findByRole("alert");
   await user.click(send);
@@ -59,30 +65,34 @@ it("retains a CAD cap on retry and uses a new submission when the cap changes", 
 it("rejects colliding filenames before submission", async () => {
   const user = userEvent.setup();
   render(<SimulationComposer onCreated={vi.fn()} />);
-  await user.upload(screen.getByLabelText("Simulation files"), [
+  await user.upload(screen.getByLabelText("Project files"), [
     new File(["a"], "main.py"),
     new File(["b"], "main.py"),
   ]);
   expect(screen.getByRole("alert")).toHaveTextContent("unique names");
-  expect(
-    screen.getByRole("button", { name: "Submit simulation" }),
-  ).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Submit project" })).toBeDisabled();
 });
 
-it("submits service settings with the same project upload", async () => {
+it("lets the agent choose hosting and hardware from the request", async () => {
   const user = userEvent.setup();
-  upload.mockReset().mockResolvedValue({ spec: { id: "svc-1" } });
+  upload.mockReset().mockResolvedValue({ spec: { id: "sim-1" } });
   render(<SimulationComposer onCreated={vi.fn()} />);
-  await user.selectOptions(screen.getByLabelText("Run as"), "service");
-  await user.upload(screen.getByLabelText("Service files"), new File(["serve()"], "server.py"));
-  await user.type(screen.getByLabelText("Describe your run"), "Host my model");
-  await user.selectOptions(screen.getByLabelText("Runtime"), "cuda");
-  await user.clear(screen.getByLabelText("Required VRAM (MiB)"));
-  await user.type(screen.getByLabelText("Required VRAM (MiB)"), "8192");
-  await user.type(screen.getByLabelText("Run for hours (blank means until stopped)"), "24");
+  expect(screen.queryByLabelText("Run as")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("Runtime")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("Workload")).not.toBeInTheDocument();
+  expect(screen.queryByText("Service settings")).not.toBeInTheDocument();
+  await user.upload(
+    screen.getByLabelText("Project files"),
+    new File(["serve()"], "server.py"),
+  );
+  await user.type(
+    screen.getByLabelText("What would you like to do?"),
+    "Host my model for one hour",
+  );
   await user.type(screen.getByLabelText(/Max spend \(CAD\)/), "2.50");
-  await user.click(screen.getByRole("button", { name: "Submit service" }));
+  await user.click(screen.getByRole("button", { name: "Submit project" }));
   await waitFor(() => expect(upload).toHaveBeenCalledOnce());
+  expect(upload.mock.calls[0]).toHaveLength(4);
+  expect(upload.mock.calls[0][1]).toBe("Host my model for one hour");
   expect(upload.mock.calls[0][3]).toBe("2.50");
-  expect(upload.mock.calls[0][4]).toMatchObject({ readiness_path: "/health", requirements: { runtime: "cuda", vram_mib: 8192 }, lifetime_seconds: 86400 });
 });

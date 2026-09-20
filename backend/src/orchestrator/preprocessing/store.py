@@ -15,14 +15,21 @@ class SimulationStore:
     async def create(self, upload, files, *, account_id=None):
         job_id = "sim-" + upload.request_id.hex
         digest, content = bundle(files)
-        # Preserve hashes for uploads predating service mode or optional spending caps.
+        # Omit optional defaults introduced after existing submissions were hashed.
         excluded = {"execution_mode", "service"}
+        if upload.execution_mode == "auto":
+            excluded.remove("execution_mode")
         if upload.usage_cap is None:
             excluded.add("usage_cap")
         signature_data = upload.model_dump(mode="json", exclude=excluded)
         signature = hashlib.sha256(json_text(signature_data).encode()).hexdigest()
+
         data = {
-            "planning_version": 2,
+            "planning_version": 2
+            if upload.workload == "simulation" and upload.execution_mode != "auto"
+            else 3,
+            "execution_mode": upload.execution_mode,
+            "workload": upload.workload,
             "description": upload.description,
             "limits": {
                 "adaptations": upload.max_adaptations,
@@ -47,6 +54,13 @@ class SimulationStore:
             timeout_seconds=upload.max_runtime_seconds,
         )
         async with self.store.change() as (conn, now):
+            hosted = await conn.fetchval(
+                "SELECT submission_hash FROM hosted_services WHERE job_id=$1", job_id
+            )
+            if hosted:
+                if hosted != signature:
+                    raise Conflict("Submission ID already used for another upload")
+                return await self.store.task(job_id)
             old = await conn.fetchrow(
                 "SELECT submission_hash FROM simulation_jobs WHERE job_id=$1", job_id
             )
@@ -107,7 +121,11 @@ class SimulationStore:
             for row in await (conn or self.pool).fetch(
                 """SELECT w.id,w.capabilities,w.last_seen FROM workers w
             WHERE w.state='alive' AND NOT w.paused AND w.last_seen>clock_timestamp()-interval '15 seconds'
-            AND w.capabilities->'kinds' ? $2 AND w.capabilities->>'runtime'='cpu'
+            AND w.capabilities->'kinds' ? $2
+            AND w.capabilities->>'runtime'='cpu'
+            AND (w.capabilities->'kinds' ? 'python_program' OR NOT EXISTS(
+                SELECT 1 FROM simulation_jobs p WHERE p.job_id=$1
+                AND p.data->>'planning_version'='3' AND p.data->>'workload'!='auto'))
             AND NOT EXISTS(SELECT 1 FROM job_reservations r WHERE r.worker_id=w.id AND r.job_id!=$1 AND r.expires_at>clock_timestamp())
             AND NOT EXISTS(SELECT 1 FROM tasks t WHERE t.worker_id=w.id AND t.state IN ('assigned','running') AND t.spec->>'job_id'!=$1)
             ORDER BY w.id""",
@@ -233,6 +251,12 @@ class SimulationStore:
                 "running": 60,
                 "aggregating": 95,
                 "completed": 100,
+                "program_planning": 5,
+                "program_preparing": 10,
+                "program_probe": 20,
+                "program_placement": 35,
+                "program_ready": 40,
+                "program_running": 60,
             }.get(phase, 0)
             await conn.execute(
                 """UPDATE tasks SET state=$2,progress=$3,result=$4,failure=$5,
@@ -297,6 +321,8 @@ class SimulationStore:
             "deadline": job["deadline"],
             "original_hash": job["original_hash"],
             "description": data["description"],
+            "workload": data.get("workload", "simulation"),
+            "program_plan": data.get("program_plan"),
             "message": data["message"],
             "round": data["round"],
             "limits": data["limits"],

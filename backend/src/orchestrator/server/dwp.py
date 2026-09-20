@@ -38,6 +38,7 @@ from ..shared.protocol import (
     Capabilities,
     JsonTooLarge,
     Machine,
+    PythonCapability,
     Ref,
     bounded_json,
     task_ref,
@@ -57,7 +58,9 @@ from .dwp_assets import release_info
 
 log = logging.getLogger(__name__)
 router = APIRouter()
-ADAPTERS = frozenset({"echo", "walker_evolution", "cpu_inference_batch"})
+ADAPTERS = frozenset(
+    {"echo", "walker_evolution", "cpu_inference_batch", "python_project", "python_program"}
+)
 
 
 class PairRequest(BaseModel):
@@ -103,6 +106,7 @@ class Capability(BaseModel):
     freeRamMb: int | None = Field(default=None, ge=0)
     accelerator: "AcceleratorReport | None" = None
     runtimePreference: Literal["auto", "cpu"] | None = None
+    python: PythonCapability | None = None
 
 
 class AcceleratorReport(BaseModel):
@@ -466,7 +470,11 @@ class Connection:
                         "jobId": task.spec.job_id,
                         "adapter": task.spec.kind,
                         "attempt": task.generation,
-                        "input": task.spec.payload,
+                        "input": (
+                            {"spec": task.spec.model_dump(mode="json")}
+                            if task.spec.kind == "python_project"
+                            else task.spec.payload
+                        ),
                         "leaseId": self.active.lease,
                         "leaseSeconds": LEASE_SECONDS,
                         "wallClockMs": task.spec.timeout_seconds * 1000,
@@ -513,6 +521,7 @@ class Connection:
                 accelerator=accelerator,
                 runtime_preference=preference,
                 kinds=kinds,
+                python=hello.capability.python,
                 machine=Machine(
                     os=hello.capability.os,
                     arch=hello.capability.arch,
@@ -636,6 +645,12 @@ class Connection:
                         # too big, and the connection is doing exactly what it was told.
                         await self.reject_result(active)
                     else:
+                        task = await self.store.task(active.ref.task_id)
+                        program_failed = (
+                            task.spec.kind == "python_project"
+                            and isinstance(result, dict)
+                            and result.get("ok") is False
+                        )
                         with sentry_sdk.start_span(
                             op="device.result", name="Accept signed device result"
                         ):
@@ -643,8 +658,13 @@ class Connection:
                                 self.worker_id,
                                 self.session,
                                 active.ref,
-                                result,
-                                "",
+                                None if program_failed else result,
+                                (
+                                    "project_code: "
+                                    + str(result.get("error", "Project execution failed"))[:1900]
+                                )
+                                if program_failed
+                                else "",
                                 False,
                                 attestation=evidence,
                             )
