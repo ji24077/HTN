@@ -33,6 +33,7 @@ from orchestrator.shared.protocol import Capabilities, TaskSpec, task_ref
 class PrivateDatabaseTests(unittest.IsolatedAsyncioTestCase):
     async def test_declined_offers_preserve_durable_retry_budget_and_fence_old_generations(self):
         import pgserver
+
         from orchestrator.supervisor.models import Action
         from orchestrator.supervisor.store import SupervisorStore
 
@@ -157,6 +158,51 @@ class PrivateDatabaseTests(unittest.IsolatedAsyncioTestCase):
                 )
                 with self.assertRaises(StaleSession):
                     await store.append_execution_events("worker-a", "session-1", batch)
+            finally:
+                await store.close()
+                database.cleanup()
+
+
+    async def test_worker_snapshot_carries_the_name_its_owner_gave_the_machine(self):
+        """A dashboard that shows UUIDs is a dashboard nobody can read.
+
+        The name lives on `dwp_devices`, so every query that feeds the fleet view has to
+        join it. The join must be LEFT: a token worker has no device row, and an inner
+        join would quietly delete it from the fleet rather than leave it unnamed.
+        """
+        import pgserver
+
+        with tempfile.TemporaryDirectory(prefix="worker-name-test-") as directory:
+            database = pgserver.get_server(Path(directory) / "postgres", cleanup_mode="stop")
+            store = await Store.open(database.get_uri(), schema="worker_name_test")
+            try:
+                capabilities = Capabilities(runtime="cpu", vram_mib=0, kinds=["stub"])
+
+                private_key = Ed25519PrivateKey.generate()
+                public_key = base64.b64encode(
+                    private_key.public_key().public_bytes(
+                        serialization.Encoding.DER,
+                        serialization.PublicFormat.SubjectPublicKeyInfo,
+                    )
+                ).decode()
+                owner = str(uuid4())
+                code = await store.create_pair_code(owner)
+                device_id = await store.pair_device(code, public_key, "Mac Air")
+                await store.register(device_id, "session-device", capabilities)
+
+                # No device row at all: joined with a shared token, not a device key.
+                await store.register("token-worker", "session-token", capabilities)
+
+                by_id = {worker.id: worker for worker in await store.workers()}
+                self.assertEqual(sorted(by_id), sorted([device_id, "token-worker"]))
+                self.assertEqual(by_id[device_id].name, "Mac Air")
+                self.assertIsNone(by_id["token-worker"].name)
+
+                # The name survives the machine going offline and coming back on a new
+                # session, because it belongs to the device rather than the connection.
+                await store.register(device_id, "session-device-2", capabilities)
+                again = {worker.id: worker for worker in await store.workers()}
+                self.assertEqual(again[device_id].name, "Mac Air")
             finally:
                 await store.close()
                 database.cleanup()

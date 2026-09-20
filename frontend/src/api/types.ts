@@ -31,6 +31,9 @@ export interface Machine {
 }
 export interface Worker {
   id: string;
+  /** What the owner called this machine when they paired it. Absent for a worker that
+   *  joined with a shared token rather than a device key, which has no name to show. */
+  name?: string | null;
   session_id: string;
   capabilities: Requirements & {
     kinds: string[];

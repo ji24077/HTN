@@ -15,6 +15,13 @@
 #           -v dwp-agent-data:/data -p 43117:43117 \
 #           -e DWP_INVITE='https://your-server/join?code=CODE' dwp-agent:latest
 
+# Declared before the first FROM on purpose: an ARG used in a FROM has to be in the
+# global scope, and one declared inside a stage is invisible to the next stage's FROM --
+# which fails as `nvidia/cuda:--runtime-ubuntu24.04`, an error that names neither the
+# argument nor the scope. Only the `cuda` target reads these.
+ARG CUDA=13.0.1
+ARG CUDNN=cudnn
+
 # ---------------------------------------------------------------- dependencies
 FROM node:24-bookworm-slim AS deps
 ENV PNPM_HOME=/pnpm CI=1
@@ -97,6 +104,97 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
  && node -e "import('/app/packages/agent/src/workloads.ts').then(m=>console.log(m.pruneForeignBinaries()))" \
  && chown -R node:node /app/packages/agent/node_modules /app/node_modules
 USER node
+
+# ------------------------------------------------- optional CUDA workload
+# Built only when asked for: `--build-arg CUDA=12.4.1 --target cuda`.
+#
+# Separate from `ml` because the cost is not comparable. `ml` adds ~85 MB of ONNX Runtime
+# to a Debian base; this replaces the base entirely with NVIDIA's CUDA runtime image and
+# lands at two to three gigabytes. Nobody without an NVIDIA card should pay that, and the
+# overwhelming majority of machines joining a network do not have one.
+#
+# Why the base image rather than just the provider library: onnxruntime-node already
+# ships `libonnxruntime_providers_cuda.so`, so the provider is present -- what is missing
+# is what it links against. Measured in a plain linux/amd64 container:
+#
+#   Failed to load libonnxruntime_providers_cuda.so
+#     -> libcublasLt.so.13: cannot open shared object file
+#
+# `nvidia-container-toolkit` injects the *driver* (libcuda.so) at `--gpus all`, not the
+# CUDA runtime libraries (cuBLAS, cuDART). Those have to be in the image, which is what
+# the nvidia/cuda runtime base provides.
+#
+# CUDA is a build argument because it has to match what the host's driver supports. A
+# driver capped at 12.x cannot run a 13.x image, and the failure is the same missing-
+# library error above -- which reads as a broken build rather than a version mismatch.
+# The default is 13 because that is what the error names: onnxruntime-node 1.30 links its
+# CUDA provider against CUDA 13, so an image built on 12 would fail identically.
+#
+# Ubuntu 24.04 rather than 22.04, and not for taste: the `ml` stage this copies from is
+# Debian bookworm (glibc 2.36), and 22.04 ships 2.35. Native modules built against the
+# newer glibc do not load on the older one, so the copy would produce an image that
+# builds cleanly and dies at require() -- the worst kind of failure to debug remotely.
+FROM nvidia/cuda:${CUDA}-${CUDNN}-runtime-ubuntu24.04 AS cuda
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Node is not in the CUDA image, so it comes from NodeSource rather than Ubuntu's
+# archive, which carries a version far too old for this agent.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates curl gnupg tini \
+ && curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
+ && apt-get install -y --no-install-recommends nodejs \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY --from=ml /app /app
+
+# Fetch the CUDA provider libraries, which the `ml` stage deliberately does not have.
+#
+# `ml` installs with `--ignore-scripts`, and onnxruntime-node's postinstall is what
+# downloads its binaries -- so that stage ends up with only what the npm tarball carries,
+# which is the CPU subset: `libonnxruntime.so.1` and the binding, and nothing else.
+# Measured on Ethan's RTX 4070 SUPER, the agent reported `runtime=cuda` from nvidia-smi,
+# accepted CUDA-routed work, and then:
+#
+#   Failed to load libonnxruntime_providers_shared.so: No such file or directory
+#   inference.backend  using=cpu requested=["cuda","cpu"]
+#
+# It ran every task on the CPU while the scheduler believed it was a GPU machine. The
+# missing file is ONNX Runtime's own, not CUDA's -- the prune in `ml` never touched it,
+# because it was never downloaded.
+#
+# Running one named script from one pinned package is a deliberate, narrow exception to
+# the no-scripts rule that `ml` keeps: it is invoked by path rather than by letting the
+# installer run whatever it likes, and it is the only way to obtain these files.
+ARG CUDA
+RUN ONNXRUNTIME_NODE_INSTALL_CUDA=true \
+    node /app/node_modules/.pnpm/onnxruntime-node@1.30.0/node_modules/onnxruntime-node/script/install.js \
+ && ls /app/node_modules/.pnpm/onnxruntime-node@1.30.0/node_modules/onnxruntime-node/bin/napi-v6/linux/x64/ \
+ && test -f /app/node_modules/.pnpm/onnxruntime-node@1.30.0/node_modules/onnxruntime-node/bin/napi-v6/linux/x64/libonnxruntime_providers_shared.so
+# Ubuntu 24.04 ships a `ubuntu` account already holding uid 1000, so creating the
+# agent's user fails and the chown that follows reports `invalid user: node:node` -- a
+# message that points at the chown rather than at the collision causing it. Removing the
+# stock account first keeps the uid the same as every other image, which is what makes a
+# volume written by one readable by the next.
+RUN userdel -r ubuntu 2>/dev/null || true \
+ && useradd -u 1000 -m node \
+ && mkdir -p /data && chown -R node:node /data /app && chmod 700 /data
+VOLUME ["/data"]
+
+ENV DWP_HOME=/data \
+    DWP_CONTAINER=1 \
+    DWP_GUI_HOST=0.0.0.0 \
+    DWP_GUI_PORT=43117 \
+    NODE_ENV=production \
+    NODE_OPTIONS=--enable-source-maps
+EXPOSE 43117
+USER node
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD node -e "require('net').connect(43117,'127.0.0.1').on('connect',()=>process.exit(0)).on('error',()=>process.exit(1))"
+
+ENTRYPOINT ["/usr/bin/tini", "--", "node", "packages/agent/src/index.ts"]
+CMD ["gui", "--hidden"]
 
 # ------------------------------------------------------------------ the default
 # Last stage wins when no --target is given, and the default must be the small image.
