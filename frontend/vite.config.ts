@@ -33,6 +33,7 @@ export default defineConfig(({ mode }) => {
       strictPort: true,
       proxy: {
         "/v1": proxy,
+        "/serve": proxy,
         "/demo/session": proxy,
         "/auth": proxy,
         "/telemetry": proxy,

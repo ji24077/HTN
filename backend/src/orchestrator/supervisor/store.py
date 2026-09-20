@@ -225,7 +225,7 @@ class SupervisorStore:
                     raise Conflict("action ID already used with different arguments")
                 return old["result"]
             job = await conn.fetchrow(
-                "SELECT j.*,EXISTS(SELECT 1 FROM simulation_jobs WHERE job_id=j.id) AS managed FROM supervised_jobs j WHERE id=$1",
+                "SELECT j.*,(EXISTS(SELECT 1 FROM simulation_jobs WHERE job_id=j.id) OR EXISTS(SELECT 1 FROM hosted_services WHERE job_id=j.id)) AS managed,EXISTS(SELECT 1 FROM hosted_services WHERE job_id=j.id) AS service_managed FROM supervised_jobs j WHERE id=$1",
                 job_id,
             )
             if job is None:
@@ -240,6 +240,8 @@ class SupervisorStore:
                     job_id,
                 )
             operation = action.operation
+            if job["service_managed"] and operation in {"pause_job", "resume_job"}:
+                raise Conflict("Services use Stop/Restart controls; pause/resume is not supported")
             managed = job["managed"]
             if managed and operation not in {"pause_job", "resume_job", "cancel_job"}:
                 raise Conflict(

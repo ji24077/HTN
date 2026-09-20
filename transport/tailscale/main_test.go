@@ -104,3 +104,32 @@ func TestForwardBytesAndCancel(t *testing.T) {
 		t.Fatal("active tunnel did not shut down")
 	}
 }
+
+func TestServiceChannelsAreNarrowlyRouted(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Worker-Session") != "session-one" {
+			t.Error("service identity not preserved")
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer upstream.Close()
+	handler, err := gatewayHandler(upstream.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"/v1/service-control/svc-one", "/v1/service-data/svc-one", "/v1/service-bundle/svc-one", "/internal/serve/svc-one/health", "/serve/svc-one/health", "/v1/service-data/", "/v1/service-data/../tasks", "/v1/service-data/%73vc-one", "/v1/service-data/svc-one/extra"} {
+		for _, method := range []string{"GET", "POST"} {
+			req := httptest.NewRequest(method, path, nil)
+			req.Header.Set("X-Worker-Session", "session-one")
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, req)
+			want := http.StatusNotFound
+			if method == "GET" && (path == "/v1/service-control/svc-one" || path == "/v1/service-data/svc-one" || path == "/v1/service-bundle/svc-one") {
+				want = http.StatusNoContent
+			}
+			if response.Code != want {
+				t.Errorf("%s %s: got %d, want %d", method, path, response.Code, want)
+			}
+		}
+	}
+}

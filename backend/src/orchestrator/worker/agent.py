@@ -130,6 +130,8 @@ class Agent:
     ):
         self.config = config
         self.executor = executor
+        if hasattr(executor, "tunnel"):
+            executor.tunnel = tunnel
         self.tunnel = tunnel
         self.journal = ExecutionJournal(config.url, config.worker_id)
 
@@ -204,7 +206,7 @@ class Agent:
 
         async def clear() -> None:
             nonlocal current, work, result_sent, progress
-            if work is None and current is not None and current.spec.kind == "python_project":
+            if work is None and current is not None and current.spec.kind in {"python_project", "python_service"}:
                 # Revoked before execution started: there are no project files to remove.
                 self.journal.emit(
                     current.spec.id,

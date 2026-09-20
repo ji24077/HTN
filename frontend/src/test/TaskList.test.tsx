@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { expect, it, vi } from "vitest";
 import { TaskList } from "../components/TaskList";
 import type { Task } from "../api/types";
+import { groupJobs } from "../lib/jobs";
 
 function task(
   id: string,
@@ -75,4 +76,26 @@ it("groups tasks into jobs, opens the active task, and filters by state and work
   expect(
     screen.queryByRole("button", { name: "View Broken render details" }),
   ).not.toBeInTheDocument();
+});
+
+it("opens the service root after refresh regardless of attempt ordering", async () => {
+  const user = userEvent.setup();
+  const open = vi.fn();
+  const cancel = vi.fn();
+  const root = task("service", "service", "running", "");
+  root.spec.kind = "simulation_job";
+  root.spec.payload = { execution_mode: "service", phase: "ready", description: "Hosted model" };
+  const attempt = task("attempt", "service", "running");
+  attempt.spec.kind = "python_service";
+  render(<TaskList tasks={[attempt, root]} cancelling={new Set()} onCancel={cancel} onDetail={open} />);
+  expect(screen.getByText("Persistent service")).toBeInTheDocument();
+  expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: /View .* details/ }));
+  expect(open).toHaveBeenCalledWith(root);
+  await user.click(screen.getByRole("button", { name: /Stop / }));
+  expect(cancel).toHaveBeenCalledWith(root.spec.id);
+  // A historical failure must not make a deliberately stopped service look failed.
+  attempt.state = "failed";
+  root.state = "cancelled";
+  expect(groupJobs([attempt, root])[0].state).toBe("cancelled");
 });

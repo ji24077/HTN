@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, it, vi } from "vitest";
 import { WorkerGrid } from "../components/WorkerGrid";
-import type { Accelerator, Worker } from "../api/types";
+import type { Accelerator, Task, Worker } from "../api/types";
 
 const setRuntimePreference = vi.fn();
 vi.mock("../api/client", () => ({
@@ -10,6 +10,31 @@ vi.mock("../api/client", () => ({
 }));
 
 beforeEach(() => setRuntimePreference.mockReset().mockResolvedValue({}));
+
+it("reserves a worker for an idle service and marks it ready after stop", () => {
+  const w = worker("metal", { available: true, reason: "", device: "Apple GPU" });
+  const attempt = { spec: { id: "attempt", job_id: "model", kind: "python_service", payload: {} },
+    state: "running", worker_id: w.id, progress: 0 } as Task;
+  const root = { ...attempt, worker_id: null, spec: { ...attempt.spec, id: "model", kind: "simulation_job", payload: { value: { label: "Hosted model" } } } } as Task;
+  const view = render(<WorkerGrid workers={[w]} tasks={[root, attempt]} selected="" onSelect={() => {}} />);
+  expect(screen.getByText("Busy · serving")).toBeInTheDocument();
+  expect(screen.getByText("Hosted model")).toBeInTheDocument();
+  expect(screen.getByText("Slot reserved")).toBeInTheDocument();
+  expect(screen.queryByText("0%")).not.toBeInTheDocument();
+  view.rerender(<WorkerGrid workers={[w]} tasks={[{ ...attempt, state: "cancelled" }]} selected="" onSelect={() => {}} />);
+  expect(screen.getByText("Ready")).toBeInTheDocument();
+  expect(screen.queryByText("Busy · serving")).not.toBeInTheDocument();
+});
+
+it("reports local Python devices without offering unsupported remote settings", () => {
+  const w = worker("python", { available: true, reason: "", device: "Apple GPU" });
+  w.capabilities.machine = { runtime_control: "startup" };
+  show(w);
+  expect(screen.getByText("Apple GPU")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "CPU" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "GPU" })).not.toBeInTheDocument();
+  expect(screen.queryByText(/predates/)).not.toBeInTheDocument();
+});
 
 function worker(
   id: string,

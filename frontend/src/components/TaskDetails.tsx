@@ -73,6 +73,8 @@ export function TaskDetails({
   const logRef = useRef<HTMLDivElement>(null);
   const cursorRef = useRef({ taskId, value: 0 });
   const settled = task ? SETTLED.has(task.state) : false;
+  const isService = task?.spec.kind === "python_service" ||
+    record(task?.spec.payload).execution_mode === "service";
   useEffect(() => {
     setEvents([]);
     setError("");
@@ -217,12 +219,12 @@ export function TaskDetails({
             </div>
             <div>
               <span>
-                {task.spec.kind === "simulation_job"
+                {isService ? "Execution" : task.spec.kind === "simulation_job"
                   ? "Pipeline progress"
                   : "Progress"}
               </span>
               <strong>
-                {task.state === "succeeded" ? 100 : Math.round(task.progress)}%
+                {isService ? "Persistent" : `${task.state === "succeeded" ? 100 : Math.round(task.progress)}%`}
               </strong>
             </div>
             <div>
@@ -234,7 +236,7 @@ export function TaskDetails({
                     : "Current worker"}
               </span>
               <strong>
-                {task.spec.kind === "simulation_job"
+                {isService && task.spec.kind === "simulation_job" ? "One worker" : task.spec.kind === "simulation_job"
                   ? "Managed by phase"
                   : task.worker_id
                     ? workerName(task.worker_id)
@@ -246,7 +248,7 @@ export function TaskDetails({
                 {task.spec.kind === "simulation_job" ? "Launch" : "Attempts"}
               </span>
               <strong>
-                {task.spec.kind === "simulation_job" ? (
+                {isService && task.spec.kind === "simulation_job" ? "Automatic recovery" : task.spec.kind === "simulation_job" ? (
                   "After validation"
                 ) : (
                   <>

@@ -111,9 +111,9 @@ export function TaskList({
                         {job.tasks.length > 1
                           ? `${job.tasks.length} tasks · `
                           : ""}
-                        {job.primary.spec.kind.replaceAll("_", " ")}
+                        {record(job.primary.spec.payload).execution_mode === "service" ? "Service" : job.primary.spec.kind.replaceAll("_", " ")}
                         <span className="mobile-progress">
-                          {["running", "queued"].includes(job.state)
+                          {record(job.primary.spec.payload).execution_mode !== "service" && ["running", "queued"].includes(job.state)
                             ? ` · ${job.progress}%`
                             : ""}
                         </span>
@@ -139,7 +139,7 @@ export function TaskList({
                   </span>
                 </td>
                 <td>
-                  <div className="table-progress">
+                  {record(job.primary.spec.payload).execution_mode === "service" ? <span>Persistent service</span> : <div className="table-progress">
                     <div
                       className="progress"
                       role="progressbar"
@@ -151,10 +151,10 @@ export function TaskList({
                       <i style={{ width: `${job.progress}%` }} />
                     </div>
                     <span>{job.progress}%</span>
-                  </div>
+                  </div>}
                   <small className="muted">
                     {job.primary.spec.kind === "simulation_job"
-                      ? "Simulation pipeline"
+                      ? (record(job.primary.spec.payload).execution_mode === "service" ? "Hosted service" : "Simulation pipeline")
                       : job.tasks.length > 1
                         ? `${job.tasks.filter((t) => t.state === "succeeded").length} / ${job.tasks.length} tasks`
                         : job.primary.generation > 1
@@ -184,7 +184,14 @@ export function TaskList({
                   </time>
                 </td>
                 <td>
-                  {job.tasks.length === 1 &&
+                  {record(job.primary.spec.payload).execution_mode === "service" &&
+                  (active(job.primary) || job.primary.state === "queued") ? (
+                    <button className="text-btn danger" aria-label={`Stop ${job.title}`}
+                      disabled={cancelling.has(job.primary.spec.id)}
+                      onClick={() => onCancel(job.primary.spec.id)}>
+                      Stop service
+                    </button>
+                  ) : job.tasks.length === 1 &&
                   (active(job.primary) || job.primary.state === "queued") ? (
                     <button
                       className="text-btn danger"

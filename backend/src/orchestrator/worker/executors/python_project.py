@@ -122,9 +122,11 @@ def execution_workspace(report):
 
 class PythonProjectExecutor:
     kind = "python_project"
-    kinds = ("python_project", "stub")
+    kinds = ("python_project", "python_service", "stub")
 
     def __init__(self, server_url, worker_id, *, fetch=None):
+        self.server_url = server_url
+        self.tunnel = None
         parsed = urlsplit(server_url)
         self.origin = urlunsplit(
             ("https" if parsed.scheme == "wss" else "http", parsed.netloc, "", "", "")
@@ -156,6 +158,9 @@ class PythonProjectExecutor:
         return json_loads(bytes(raw))["files"]
 
     async def execute(self, spec, report):
+        if spec.kind == "python_service":
+            from .python_service import execute_service
+            return await execute_service(self, spec, report)
         if spec.kind == "stub":
             from .stub import StubExecutor
 

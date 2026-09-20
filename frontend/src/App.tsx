@@ -20,7 +20,7 @@ import { TaskDetails } from "./components/TaskDetails";
 import { TaskList } from "./components/TaskList";
 import { WorkerGrid } from "./components/WorkerGrid";
 import { useFleet } from "./hooks/useFleet";
-import { healthy, time, workerName } from "./lib/format";
+import { healthy, record, time, workerName } from "./lib/format";
 import { groupJobs } from "./lib/jobs";
 import { Icon } from "./components/Icon";
 
@@ -179,7 +179,10 @@ function FleetApp({
     setCancelling(new Set(pendingCancellations.current));
     try {
       await cancelTask(id);
-      notify("Task cancelled. Worker will stop on its next heartbeat.");
+      const task = snapshot.tasks.find(item => item.spec.id === id);
+      notify(task && (task.spec.kind === "python_service" || record(task.spec.payload).execution_mode === "service")
+        ? "Service stopped. Its worker slot is being released."
+        : "Task cancelled. Worker will stop on its next heartbeat.");
     } catch (error) {
       notify(error instanceof Error ? error.message : "Could not cancel task");
     } finally {

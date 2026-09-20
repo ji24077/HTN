@@ -14,7 +14,9 @@ class SimulationStore:
     async def create(self, upload, files):
         job_id = "sim-" + upload.request_id.hex
         digest, content = bundle(files)
-        signature = hashlib.sha256(json_text(upload.model_dump(mode="json")).encode()).hexdigest()
+        # Preserve idempotency hashes for uploads created before service mode existed.
+        signature_data = upload.model_dump(mode="json", exclude={"execution_mode", "service"})
+        signature = hashlib.sha256(json_text(signature_data).encode()).hexdigest()
         data = {
             "planning_version": 2,
             "description": upload.description,

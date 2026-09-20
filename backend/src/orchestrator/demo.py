@@ -65,7 +65,7 @@ def main() -> None:
                 "WORKER_ID": args.service,
                 "WORKER_TOKEN": config["workers"][args.service],
                 "SERVER_URL": f"ws://127.0.0.1:{args.port}/v1/worker",
-                "WORKER_RUNTIME": "cpu",
+                "WORKER_RUNTIME": os.getenv("WORKER_RUNTIME", "cpu"),
                 "WORKER_VRAM_MIB": "0",
                 "WORKER_PAUSED": "false",
             }

@@ -64,6 +64,16 @@ function RuntimeToggle({ worker }: { worker: Worker }) {
     }
   };
 
+  if (worker.capabilities.machine?.runtime_control === "startup") {
+    return <div className="runtime-toggle">
+      <small className="runtime-why">
+        {usable ? accelerator?.device : why}
+        {usable && current === "cpu" ? " · CPU mode" : ""}
+      </small>
+      <small className="runtime-why">Runtime selected when this Python worker starts.</small>
+    </div>;
+  }
+
   return (
     <div className="runtime-toggle" onClick={(e) => e.stopPropagation()}>
       <div className="runtime-choices" role="group" aria-label="Where work runs">
@@ -145,12 +155,12 @@ export function WorkerGrid({
             (task) => task.worker_id === id && active(task),
           );
           const ready = !!worker && healthy(worker);
+          const serving = task?.spec.kind === "python_service";
+          const service = serving ? tasks.find(item => item.spec.kind === "simulation_job" && item.spec.job_id === task.spec.job_id) : undefined;
           const status = ready
-            ? worker.paused
-              ? "Paused"
-              : task
-                ? "Working"
-                : "Ready"
+            ? task
+              ? serving ? "Busy · serving" : "Working"
+              : worker.paused ? "Paused" : "Ready"
             : worker?.state === "unhealthy"
               ? "Reconnecting"
               : "Offline";
@@ -223,15 +233,15 @@ export function WorkerGrid({
               <div className="worker-footer">
                 <div className="work-status">
                   <span>
-                    {task
+                    {service ? taskTitle(service) : task
                       ? taskTitle(task)
                       : ready
                         ? "Ready for your next task"
                         : "Waiting for connection"}
                   </span>
-                  <span>{task ? `${Math.round(task.progress)}%` : ""}</span>
+                  <span>{serving ? "Slot reserved" : task ? `${Math.round(task.progress)}%` : ""}</span>
                 </div>
-                <div className="progress" hidden={!task}>
+                <div className="progress" hidden={!task || serving}>
                   <i style={{ width: `${task?.progress || 0}%` }} />
                 </div>
                 <div className="heartbeat">

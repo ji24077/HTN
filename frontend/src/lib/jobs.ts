@@ -1,5 +1,5 @@
 import type { Task } from "../api/types";
-import { active, taskTitle } from "./format";
+import { active, record, taskTitle } from "./format";
 
 export const statusLabels: Record<string, string> = {
   assigned: "Starting",
@@ -29,12 +29,15 @@ export function groupJobs(tasks: Task[]): JobGroup[] {
     ]);
   return [...groups]
     .map(([id, children]) => {
+      const service = children.find((t) => t.spec.kind === "simulation_job" &&
+        record(t.spec.payload).execution_mode === "service");
       const primary =
+        service ||
         children.find(active) ||
         children.find((t) => t.state === "queued") ||
         children.find((t) => t.state === "failed") ||
         children[0];
-      const state: Task["state"] = children.some(active)
+      const state: Task["state"] = service ? service.state : children.some(active)
         ? "running"
         : children.some((t) => t.state === "queued")
           ? "queued"
@@ -48,7 +51,7 @@ export function groupJobs(tasks: Task[]): JobGroup[] {
         tasks: children,
         primary,
         state,
-        title:
+        title: service ? taskTitle(service) :
           children.length > 1 && taskTitle(children[0]) === children[0].spec.id
             ? id
             : taskTitle(children[0]),

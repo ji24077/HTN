@@ -9,6 +9,7 @@ from pydantic import TypeAdapter
 
 from ..shared.protocol import Capabilities, Identifier
 from ..shared.security import credential
+from .devices import capabilities
 
 
 @dataclass(frozen=True)
@@ -42,11 +43,7 @@ class WorkerConfig:
             url=url,
             worker_id=TypeAdapter(Identifier).validate_python(os.environ["WORKER_ID"]),
             token=credential(os.environ["WORKER_TOKEN"]),
-            capabilities=Capabilities(
-                runtime=os.getenv("WORKER_RUNTIME", "cpu"),
-                vram_mib=int(os.getenv("WORKER_VRAM_MIB", "0")),
-                kinds=[kind],
-            ),
+            capabilities=capabilities(kind, os.getenv("WORKER_RUNTIME", "cpu")),
             paused=paused == "true",
             transport=transport,
         )

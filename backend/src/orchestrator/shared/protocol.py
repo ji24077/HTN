@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 from typing import Annotated, Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator
 
 VERSION = 1
 HEARTBEAT_INTERVAL = 5
@@ -71,9 +71,15 @@ class TaskSpec(Model):
     payload: JsonValue
     requirements: Requirements
     max_attempts: int = Field(ge=1, le=10, strict=True)
-    timeout_seconds: int = Field(ge=1, le=86400, strict=True)
+    timeout_seconds: int | None = Field(default=None, ge=1, le=86400, strict=True)
     target_worker_id: Identifier | None = None
     allow_failover: bool = True
+
+    @model_validator(mode="after")
+    def persistent_service_only(self):
+        if self.timeout_seconds is None and self.kind != "python_service":
+            raise ValueError("Only service assignments can omit the execution timeout")
+        return self
 
     @field_validator("payload")
     @classmethod
@@ -101,6 +107,7 @@ class Machine(Model):
     #: What the owner consented to run at once. Not a hardware fact, and deliberately
     #: lower than the core count on machines someone is sitting in front of.
     max_concurrency: int | None = Field(default=None, ge=1, le=1024)
+    runtime_control: Literal["startup", "remote"] | None = None
 
 
 class Accelerator(Model):
