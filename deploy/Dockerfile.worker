@@ -1,0 +1,28 @@
+# The worker image includes the tunnel. No host Tailscale, TUN device or NET_ADMIN needed.
+FROM golang:1.27.1-bookworm AS tunnel
+WORKDIR /build
+COPY transport/tailscale/go.mod transport/tailscale/go.sum ./
+RUN go mod download
+COPY transport/tailscale/*.go ./
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /orchestrator-tunnel .
+
+FROM python:3.12-slim-bookworm AS build
+COPY --from=ghcr.io/astral-sh/uv:0.12.10 /uv /bin/uv
+WORKDIR /app
+ENV UV_LINK_MODE=copy
+COPY backend/pyproject.toml backend/uv.lock ./
+COPY backend/src ./src
+RUN uv sync --frozen --no-dev --no-editable
+
+FROM python:3.12-slim-bookworm
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --create-home --uid 10001 worker
+WORKDIR /app
+COPY --from=build /app/.venv /app/.venv
+COPY --from=tunnel /orchestrator-tunnel /usr/local/bin/orchestrator-tunnel
+RUN mkdir /state && chown worker:worker /state && chmod 700 /state
+USER worker
+ENV WORKER_TRANSPORT=tailscale TAILSCALE_STATE_DIR=/state
+ENV PATH="/app/.venv/bin:$PATH" PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+ENTRYPOINT ["orchestrator-worker"]

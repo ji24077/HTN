@@ -1,0 +1,46 @@
+name: DWPAgent
+options:
+  bundleIdPrefix: com.dwp
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+
+packages:
+  DWPAgentKit:
+    path: DWPAgentKit
+
+targets:
+  DWPAgent:
+    type: application
+    platform: iOS
+    sources:
+      - path: DWPAgent/Sources
+    dependencies:
+      - package: DWPAgentKit
+        product: DWPAgentKit
+    configFiles:
+      Debug: Local.xcconfig
+      Release: Local.xcconfig
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(DWP_BUNDLE_ID:default=com.dwp.agent)
+        MARKETING_VERSION: "0.3.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "6.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: DWPAgent/Info.plist
+
+        # Signing is disabled for the Simulator only, so the test suite runs on any
+        # machine with no Apple account at all. Device builds use automatic signing:
+        # open the project in Xcode, pick your team under Signing & Capabilities, and
+        # Xcode provisions it. A free Apple ID works — see README.md for what that costs
+        # you (a seven-day profile).
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGNING_ALLOWED[sdk=iphonesimulator*]: NO
+        CODE_SIGNING_REQUIRED[sdk=iphonesimulator*]: NO
+        CODE_SIGN_IDENTITY[sdk=iphonesimulator*]: ""
+        # Both come from Local.xcconfig, which is gitignored and survives a regenerate.
+        # Xcode's own team picker does not: it writes into the .xcodeproj, which is
+        # generated from this file and thrown away each time.
+        DEVELOPMENT_TEAM: $(DWP_DEVELOPMENT_TEAM)

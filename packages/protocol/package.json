@@ -1,0 +1,14 @@
+{
+  "name": "@dwp/protocol",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./walker.js": "./src/walker.js",
+    "./dmath.js": "./src/dmath.js"
+  },
+  "dependencies": {
+    "zod": "4.6.5"
+  }
+}

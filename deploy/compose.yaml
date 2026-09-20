@@ -1,0 +1,42 @@
+name: gpu-orchestration-prototype
+services:
+  postgres:
+    image: postgres:17-bookworm
+    environment:
+      POSTGRES_USER: orchestrator
+      POSTGRES_PASSWORD: local-prototype
+      POSTGRES_DB: orchestrator
+    ports:
+      - "127.0.0.1:54329:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U orchestrator -d orchestrator"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+  redis:
+    image: redis:7.4-alpine
+    ports:
+      - "127.0.0.1:63799:6379"
+  server:
+    command: ["orchestrator-server"]
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    environment:
+      DATABASE_URL: postgres://orchestrator:local-prototype@postgres:5432/orchestrator?sslmode=disable
+      REDIS_URL: redis://redis:6379/0
+      LISTEN_HOST: 0.0.0.0
+      LISTEN_PORT: "8080"
+      ADMIN_TOKEN: ${ADMIN_TOKEN:?Set ADMIN_TOKEN in .env.local}
+      WORKER_TOKENS: '{"worker-1":"${WORKER_TOKEN:?Set WORKER_TOKEN in .env.local}"}'
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+volumes:
+  postgres-data:

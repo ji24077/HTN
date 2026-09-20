@@ -1,0 +1,142 @@
+import asyncio
+import hmac
+import zipfile
+from datetime import UTC, datetime
+
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import Response
+from pydantic import ValidationError
+
+from ..server.auth import require_admin
+from ..server.credits import account_id
+from ..server.db.store import Conflict
+from ..shared.protocol import Identifier, json_loads
+from .artifacts import unpack
+from .models import MAX_BUNDLE, Answer, Upload
+from .store import SimulationStore
+
+router = APIRouter(prefix="/v1/simulations", dependencies=[Depends(require_admin)])
+project_router = APIRouter(prefix="/v1/jobs", dependencies=[Depends(require_admin)])
+worker_router = APIRouter()
+
+
+@router.post("")
+@project_router.post("")
+async def submit(request: Request):
+    body = bytearray()
+    async for chunk in request.stream():
+        body.extend(chunk)
+        if len(body) > MAX_BUNDLE:
+            raise HTTPException(413, "Upload exceeds 192 MiB request limit")
+    try:
+        data = json_loads(bytes(body))
+        if request.url.path == "/v1/jobs" and isinstance(data, dict):
+            data.setdefault("workload", "auto")
+        upload = Upload.model_validate(data)
+        files = await asyncio.to_thread(unpack, upload.files)
+        if not any(name.endswith(".py") for name in files):
+            raise ValueError(
+                "Upload a Python project. Blender and non-Python runtimes are not supported."
+            )
+    except (
+        ValueError,
+        ValidationError,
+        zipfile.BadZipFile,
+        RuntimeError,
+        NotImplementedError,
+    ) as exc:
+        raise HTTPException(400, str(exc)[:300]) from exc
+    if upload.execution_mode == "service":
+        from ..server.services import ServiceStore
+
+        try:
+            return await ServiceStore(request.app.state.store).create(
+                upload, files, account_id=account_id(request)
+            )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)[:300]) from exc
+    if getattr(request.app.state, "preprocessing", None) is None:
+        raise HTTPException(503, "Preprocessing model is not configured")
+    return await SimulationStore(request.app.state.store).create(
+        upload, files, account_id=account_id(request)
+    )
+
+
+@router.get("/{job_id}")
+@project_router.get("/{job_id}")
+async def status(job_id: Identifier, request: Request):
+    from ..server.services import ServiceStore
+
+    services = ServiceStore(request.app.state.store)
+    if await services.exists(job_id):
+        return await services.status(job_id)
+    return await SimulationStore(request.app.state.store).status(job_id)
+
+
+@router.post("/{job_id}/answer")
+@project_router.post("/{job_id}/answer")
+async def answer(job_id: Identifier, body: Answer, request: Request):
+    from ..server.services import ServiceStore
+
+    services = ServiceStore(request.app.state.store)
+    if await services.exists(job_id):
+        try:
+            return await services.answer(job_id, body.message)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)[:300]) from exc
+    store = SimulationStore(request.app.state.store)
+    async with store.store.change() as (conn, _):
+        job = await conn.fetchrow("SELECT * FROM simulation_jobs WHERE job_id=$1", job_id)
+        if job is None or job["phase"] != "needs_input":
+            raise Conflict("This job is not waiting for input")
+        data = job["data"]
+        data.setdefault("answers", []).append(body.message)
+        if len(data["answers"]) > 10:
+            raise Conflict("Clarification limit reached; submit a revised project")
+        data.pop("question", None)
+        data["message"] = "Answer received. Resuming preprocessing."
+        await conn.execute(
+            "UPDATE simulation_jobs SET phase=$2,data=$3,revision=revision+1,retry_after=clock_timestamp() WHERE job_id=$1",
+            job_id,
+            data.pop("resume_phase", "inspecting"),
+            data,
+        )
+    return {"saved": True}
+
+
+@router.get("/{job_id}/artifacts/{digest}")
+async def artifact(job_id: Identifier, digest: str, request: Request):
+    return {"files": await SimulationStore(request.app.state.store).files(job_id, digest)}
+
+
+@worker_router.get("/v1/execution-bundles/{task_id}/{digest}")
+async def execution_bundle(task_id: Identifier, digest: str, request: Request):
+    store = request.app.state.store
+    task = await store.task(task_id)
+    payload = task.spec.payload if isinstance(task.spec.payload, dict) else {}
+    token = request.headers.get("authorization", "").removeprefix("Bearer ")
+    if (
+        task.state not in {"assigned", "running"}
+        or task.lease_until is None
+        or task.lease_until <= datetime.now(UTC)
+        or (
+            task.deadline <= datetime.now(UTC)
+            if task.deadline is not None
+            else task.spec.kind != "python_service"
+        )
+        or not payload.get("artifact_token")
+        or not hmac.compare_digest(token, payload["artifact_token"])
+        or digest != payload.get("bundle_hash")
+        or request.headers.get("x-worker-id") != task.worker_id
+    ):
+        raise HTTPException(403, "Artifact is not authorized for this assignment")
+    raw = await store.pool.fetchval(
+        "SELECT content FROM simulation_artifacts WHERE job_id=$1 AND digest=$2",
+        task.spec.job_id,
+        digest,
+    )
+    if raw is None:
+        raise HTTPException(404, "Artifact not found")
+    return Response(
+        bytes(raw), media_type="application/json", headers={"Cache-Control": "no-store"}
+    )

@@ -1,0 +1,63 @@
+# One machine joining the network, as a container.
+#
+#   cp .env.agent.example .env.agent      # put the invite link in it
+#   docker compose --env-file .env.agent -f deploy/compose.agent.yaml up -d --build
+#   open http://127.0.0.1:43117/          # the window tells you the token path
+#
+# This is the whole deployment for a contributing machine. It works the same on a laptop
+# in the next room and on a box in another country: the agent dials *out* to the control
+# service over HTTPS/WSS, so nothing here needs a port open to the internet, a fixed
+# address, or anything from the host beyond Docker itself.
+name: dwp-agent
+
+services:
+  agent:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.agent
+      # `--target ml` here instead for machines that should also run ONNX inference.
+      target: agent
+    image: ${DWP_AGENT_IMAGE:-dwp-agent:latest}
+    # The container runtime is the supervisor now; there is no login to start at.
+    restart: unless-stopped
+    environment:
+      # An invite link, exactly as a person would paste it into the window. Used once:
+      # an agent that already has a config in /data ignores this entirely, so bringing
+      # the stack up twice does not try to re-enrol and burn a spent code.
+      DWP_INVITE: ${DWP_INVITE:-}
+      # Or point at a server and pass the code separately.
+      DWP_SERVER: ${DWP_SERVER:-}
+      DWP_CODE: ${DWP_CODE:-}
+      # What this machine is called on the dashboard. Defaults to the container id,
+      # which is unreadable and changes on every recreate.
+      DWP_LABEL: ${DWP_LABEL:-}
+      # The image tag, so the window can say which one it is showing.
+      DWP_IMAGE: ${DWP_AGENT_IMAGE:-dwp-agent:latest}
+      # Add a tailnet or LAN name here to reach the window by something other than
+      # loopback. Names only, and never implied — see hostAllowed() in runtime.ts.
+      DWP_GUI_ALLOWED_HOSTS: ${DWP_GUI_ALLOWED_HOSTS:-}
+    ports:
+      # The window. Loopback-only on the host: the path token is the authenticator, and
+      # publishing it on 0.0.0.0 would put it in front of the whole LAN.
+      - "127.0.0.1:${DWP_GUI_PUBLISH_PORT:-43117}:43117"
+    volumes:
+      # This machine's identity: its private key, which network it joined, whether it is
+      # paused, and what it has run. Without this volume, recreating the container makes
+      # a *different* machine, which has to be invited again and loses its history.
+      - agent-data:/data
+    # A worker is not worth taking the host down for. The limits are generous enough
+    # that the walker and echo never reach them, and low enough that a runaway does not
+    # take the machine with it.
+    deploy:
+      resources:
+        limits:
+          cpus: ${DWP_CPUS:-2.0}
+          memory: ${DWP_MEMORY:-1g}
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+volumes:
+  agent-data:

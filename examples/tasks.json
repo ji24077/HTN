@@ -1,0 +1,22 @@
+{
+  "tasks": [
+    {
+      "id": "demo-frame-0001",
+      "job_id": "demo-job",
+      "kind": "stub",
+      "payload": {"duration_seconds": 20, "value": {"frame": 1}},
+      "requirements": {"runtime": "cpu", "vram_mib": 0},
+      "max_attempts": 3,
+      "timeout_seconds": 120
+    },
+    {
+      "id": "demo-frame-0002",
+      "job_id": "demo-job",
+      "kind": "stub",
+      "payload": {"duration_seconds": 20, "value": {"frame": 2}},
+      "requirements": {"runtime": "cpu", "vram_mib": 0},
+      "max_attempts": 3,
+      "timeout_seconds": 120
+    }
+  ]
+}

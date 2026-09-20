@@ -1,0 +1,4 @@
+# Same-host public HTTPS proxy. PUBLIC_ORIGIN must match this domain.
+{$PUBLIC_DOMAIN} {
+    reverse_proxy 127.0.0.1:8080
+}

@@ -1,0 +1,108 @@
+# Publish the agent image, so joining the network does not require cloning this repo.
+#
+# The whole point of the container is that someone in another country runs one command.
+# That only works if the image exists somewhere they can pull it from, which is what this
+# does — and doing it here rather than from a laptop is what makes the published image
+# reproducible from a commit rather than from whatever happened to be on one machine.
+name: agent image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/agent/**'
+      - 'packages/protocol/**'
+      - 'backend/src/**'
+      - 'backend/pyproject.toml'
+      - 'backend/uv.lock'
+      - 'deploy/Dockerfile.agent'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/agent-image.yml'
+    tags: ['agent-v*']
+  workflow_dispatch:
+
+concurrency:
+  group: agent-image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+      # The page script lives in a template literal and fails at runtime, not at compile
+      # time; without this a broken page ships in an image and shows "starting…" forever.
+      - run: pnpm check:gui
+
+  publish:
+    needs: checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      # Required for the provenance attestation buildx attaches below.
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/dwp-agent
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,format=long
+            type=semver,pattern={{version}},prefix=agent-v
+            type=ref,event=branch
+
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile.agent
+          target: agent
+          # Both, always. A single-arch image does not fail helpfully on the wrong CPU —
+          # Docker Desktop runs it under emulation, which reads as a slow machine.
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: true
+          sbom: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Say how to join
+        run: |
+          {
+            echo '## Agent image published'
+            echo
+            echo 'A machine joins the network with:'
+            echo
+            echo '```sh'
+            echo 'docker run -d --restart unless-stopped -v dwp-agent-data:/data \'
+            echo "  -p 127.0.0.1:43117:43117 -e DWP_INVITE='<invite link>' \\"
+            echo "  ghcr.io/${{ github.repository_owner }}/dwp-agent:latest"
+            echo '```'
+            echo
+            echo "Digest: \`${{ steps.build.outputs.digest }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

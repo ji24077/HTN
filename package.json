@@ -1,0 +1,37 @@
+{
+  "name": "orchestrator-desktop-workers",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "packageManager": "pnpm@10.27.0",
+  "scripts": {
+    "agent": "node --env-file-if-exists=.env packages/agent/src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test packages/protocol/test/*.test.ts packages/agent/test/*.test.ts",
+    "docker:build": "docker build -f deploy/Dockerfile.agent -t dwp-agent:latest .",
+    "docker:test": "node scripts/docker-fleet-test.ts",
+    "docker:publish": "node scripts/publish-image.ts",
+    "add-machine": "node scripts/add-machine.ts",
+    "build:binaries": "node scripts/build-binaries.ts",
+    "build:fixtures": "node scripts/build-fixtures.ts",
+    "release": "node scripts/publish-release.ts",
+    "ios:build": "cd ios/DWPAgentKit && swift build",
+    "ios:test": "cd ios/DWPAgentKit && swift test",
+    "ios:conformance": "node ios/test/conformance.ts",
+    "ios:app": "cd ios && xcodegen generate && xcodebuild -project DWPAgent.xcodeproj -scheme DWPAgent -destination \"platform=iOS Simulator,name=iPhone 17 Pro\" -derivedDataPath .build-ios build",
+    "check:gui": "node scripts/check-gui-page.ts"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2",
+    "@types/node": "24.10.1",
+    "@types/ws": "8.18.1",
+    "onnxruntime-node": "1.30.0",
+    "playwright": "1.63.0"
+  },
+  "dependencies": {
+    "@dwp/protocol": "workspace:*",
+    "ws": "8.21.3"
+  }
+}

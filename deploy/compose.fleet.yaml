@@ -1,0 +1,74 @@
+# Several agents on one host, each a separate machine as far as the network is concerned.
+#
+#   DWP_INVITE_1=… DWP_INVITE_2=… docker compose -f deploy/compose.fleet.yaml up -d --build
+#
+# This exists because "scale the agent" is the obvious thing to reach for and the one
+# thing that must not be done with `--scale`: replicas share the service's named volume,
+# so every one of them would load the same Ed25519 key, claim the same host id, and the
+# control service would hand the connection to whichever reconnected last — an endless
+# round of supersessions with work abandoned at each handover. One identity per volume,
+# one volume per service, and the fight cannot happen.
+#
+# Each agent needs its *own* invite. Codes are single-use.
+name: dwp-fleet
+
+x-agent: &agent
+  build:
+    context: ..
+    dockerfile: deploy/Dockerfile.agent
+    target: agent
+  image: ${DWP_AGENT_IMAGE:-dwp-agent:latest}
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  deploy:
+    resources:
+      limits:
+        cpus: ${DWP_CPUS:-1.0}
+        memory: ${DWP_MEMORY:-768m}
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+
+services:
+  agent-1:
+    <<: *agent
+    environment:
+      DWP_INVITE: ${DWP_INVITE_1:-}
+      DWP_LABEL: ${DWP_LABEL_PREFIX:-docker}-1
+      DWP_IMAGE: ${DWP_AGENT_IMAGE:-dwp-agent:latest}
+    ports: ["127.0.0.1:43117:43117"]
+    volumes: ["agent-1-data:/data"]
+
+  agent-2:
+    <<: *agent
+    environment:
+      DWP_INVITE: ${DWP_INVITE_2:-}
+      DWP_LABEL: ${DWP_LABEL_PREFIX:-docker}-2
+      DWP_IMAGE: ${DWP_AGENT_IMAGE:-dwp-agent:latest}
+    ports: ["127.0.0.1:43118:43117"]
+    volumes: ["agent-2-data:/data"]
+
+  agent-3:
+    <<: *agent
+    environment:
+      DWP_INVITE: ${DWP_INVITE_3:-}
+      DWP_LABEL: ${DWP_LABEL_PREFIX:-docker}-3
+      DWP_IMAGE: ${DWP_AGENT_IMAGE:-dwp-agent:latest}
+    ports: ["127.0.0.1:43119:43117"]
+    volumes: ["agent-3-data:/data"]
+
+  agent-4:
+    <<: *agent
+    environment:
+      DWP_INVITE: ${DWP_INVITE_4:-}
+      DWP_LABEL: ${DWP_LABEL_PREFIX:-docker}-4
+      DWP_IMAGE: ${DWP_AGENT_IMAGE:-dwp-agent:latest}
+    ports: ["127.0.0.1:43120:43117"]
+    volumes: ["agent-4-data:/data"]
+
+volumes:
+  agent-1-data:
+  agent-2-data:
+  agent-3-data:
+  agent-4-data:

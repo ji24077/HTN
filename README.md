@@ -1,33 +1,134 @@
-# Distributed Work Platform
+# HTN · GPU orchestration
 
-Coordinate work across computers you trust, see precisely where each task runs, and
-remotely operate an authorized browser as another task type.
+Python control plane for dispatching independent tasks to unreliable worker
+machines. Workers connect outbound over WebSockets; the dashboard receives
+server-pushed updates. PostgreSQL owns leases and accepted results.
 
-**Current phase: Pass 0 — architecture review. No implementation code exists yet.**
+**Status:** one Python/Supabase control plane with a React dashboard, Python workers,
+and paired desktop/iOS workers ported from Jack's PR. Desktop workers execute signed
+echo tests, deterministic walker simulations, and optional ONNX inference. Real GPU
+execution, job splitting, machine scoring, and validation of the combined system on
+remote hardware remain separate work.
 
-## Documents
+## Run the app
 
-| Doc | What it is |
-| --- | --- |
-| [`docs/00-handoff.md`](docs/00-handoff.md) | The original MVP / architecture / handoff brief |
-| [`docs/01-architecture.md`](docs/01-architecture.md) | Pass 0 deliverable: implementation architecture, threat model, contracts, scheduling, gates, backlog, go/no-go |
+The app uses Supabase authentication and PostgreSQL. Configure the root `.env`
+from `.env.example`, including your public origin, Supabase project, database,
+worker tokens, and approved admin emails or user IDs. Then:
 
-## Status against the delivery plan
+```sh
+npm --prefix frontend ci
+./scripts/start-app.sh
+```
 
-- [x] **Pass 0** — Architecture review
-- [ ] **Pass 1** — Network spike (two hosts, two networks, echo tasks, `/whoami`)
-- [ ] **Pass 2** — Durable batch CPU inference + measured baseline
-- [ ] **Pass 3** — Trusted-host remote browser session
-- [ ] **Pass 4** — Dashboard (fleet, new work, run map, live view, history)
-- [ ] **Pass 5** — Hardening and demo rehearsal
+This starts the public API, private worker gateway, and frontend. In this
+workspace, open **https://localhost:5174** to create an account and sign in.
+Approved email addresses receive fleet access only after email confirmation.
+The dashboard shows registered workers and real database state.
 
-## Blocked on (see architecture §14)
+Set `OPENAI_API_KEY` and `OPENAI_MODEL=gpt-6-astra` in the backend environment to
+enable the **Fleet assistant** chat panel. It can inspect the fleet, submit the
+existing workloads, and inspect or cancel tasks. Conversations and tool activity
+are saved privately on the backend. Restart the backend after changing configuration.
 
-1. A public HTTPS/WSS hostname with a real certificate for the control service.
-2. Two physical machines on two distinct networks. A VM does not substitute for this.
+See [frontend setup](frontend/README.md) for HTTPS and Supabase email redirects,
+and [networking](docs/networking.md) for hosting the website and connecting
+workers. The optional `orchestrator-demo` commands remain available for isolated
+tests; the app launcher does not use them.
 
-## Non-goals
+## Add a machine
 
-Untrusted public hosts · arbitrary code or shell execution · real logged-in accounts on
-stranger hosts · mobile host control · cross-chip translation · marketplace payments ·
-end-to-end media confidentiality.
+A machine joins the compute network by running one container:
+
+```sh
+docker run -d --restart unless-stopped -v dwp-agent-data:/data -p 127.0.0.1:43117:43117 \
+  -e DWP_INVITE='https://your-control-service/join?code=CODE' dwp-agent:latest
+```
+
+Nothing is compiled per platform and nothing needs a port open: the agent dials out, so
+a machine in another country joins the same way one in the next room does. The window at
+`http://127.0.0.1:43117/` is the same desktop app as before — status, recent work, the
+pause switch — served by the agent process itself.
+
+Whoever you invite does not need this repository. The image is published to
+`ghcr.io/<owner>/dwp-agent` by `.github/workflows/agent-image.yml`, and the `/join` page
+their invite link points at gives them that command with their code already in it. See
+[the agent as a container](docs/docker-agent.md) for publishing, several agents on one
+host, optional ML workloads, and putting the container on a tailnet.
+
+## Project layout
+
+```text
+HTN/
+├── frontend/                # React website, browser auth, and UI tests
+├── backend/
+│   ├── src/orchestrator/
+│   │   ├── server/          # Public API, private worker gateway, auth, database
+│   │   ├── worker/          # Worker agent and workload executors
+│   │   ├── client/          # Python client, CLI, and agent tools
+│   │   ├── shared/          # Protocol models and credential helpers
+│   │   └── demo.py          # Local demo launcher
+│   ├── tests/               # Unit and local PostgreSQL integration tests
+│   ├── pyproject.toml       # Python dependencies and entry points
+│   └── uv.lock
+├── deploy/                  # Dockerfiles (backend, worker, agent), Compose, HTTPS proxy
+├── transport/tailscale/     # Embedded worker tunnel (Go / tsnet)
+├── docs/                    # Architecture, setup, API, and validation guides
+├── examples/                # Runnable client and task fixtures
+├── .env.example             # Supabase / public website configuration template
+└── .env.local.example       # Local Docker development configuration template
+```
+
+`shared/` defines the contracts. Server, worker, and client implement their own
+sides of those contracts. New workload executors belong under `worker/executors/`;
+the future job planner can use the client API to submit its split tasks.
+
+Hosted entry points are `orchestrator-public` and
+`orchestrator-worker-gateway`. Other command names are stable: `orchestrator-server`, `orchestrator-worker`,
+`orchestrator-demo`, and `orchestrator`. Module entry points are also available:
+`python -m orchestrator.server`, `python -m orchestrator.worker`, and
+`python -m orchestrator.client`.
+
+## Guides
+
+- [The agent as a container](docs/docker-agent.md): one image instead of five binaries,
+  joining from an invite in the environment, several agents on one host, and the
+  end-to-end fleet check.
+- [Desktop and iOS integration](docs/jack-integration.md): device invites, real workloads,
+  signed results, releases, Sentry, and validation.
+- [Automatic worker enrollment](docs/worker-enrollment.md): Supabase sign-in,
+  backend-issued Tailscale keys, and the worker setup command.
+- [Bundled backend](docs/bundled-backend.md): website API and private gateway on one host,
+  with Tailscale included; supports local development.
+- [Bundled worker](docs/bundled-worker.md): embedded Tailscale, enrollment, and worker image.
+- [Public website and private workers](docs/networking.md): Supabase login/database,
+  separate public and worker listeners, and Tailscale Serve setup.
+- [Architecture and API](docs/architecture.md): leases, scheduling, protocols, and limits.
+- [Frontend](frontend/README.md): React development, hot reload, and builds.
+- [Development](docs/development.md): local setup, containers, checks, and contribution boundaries.
+- [Agent interface](docs/agent-interface.md): client, CLI, tool schemas, and examples.
+- [Service hosting](docs/service-hosting.md): upload an HTTP service, obtain a stable endpoint, and recover worker failures.
+- [Model client](docs/model-client.md): standalone OpenAI calls, separate from the agent loop.
+- [Fleet assistant](docs/fleet-assistant.md): chat UI, agent loop, tools, and recovery.
+- [Run usage](docs/usage.md): estimated execution costs and assistant-controlled per-run caps.
+- [Validation](docs/validation.md): completed checks and remaining failure scenarios.
+
+## Checks
+
+```sh
+npm --prefix frontend test
+npm --prefix frontend run build
+pnpm install --frozen-lockfile
+pnpm typecheck
+pnpm test
+pnpm check:gui
+pnpm docker:build && pnpm docker:test -- --agents 4 --tasks 24
+uv run --project backend python -m unittest discover -s backend/tests -v
+uvx ruff check --config backend/pyproject.toml backend/src backend/tests examples/agent_task.py --select F,I
+uv build --project backend
+```
+
+Your root `.env` holds local Supabase configuration and is ignored by Git.
+`.demo/` holds local demo data; `.local/` holds local certificates and tooling.
+The Python environment lives in `backend/.venv/`. All are ignored.
+The app requires an approved admin email or user ID and a matching public origin.
