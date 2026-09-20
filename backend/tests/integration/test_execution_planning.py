@@ -99,6 +99,21 @@ class PlanningTests(unittest.IsolatedAsyncioTestCase):
 
         self.model.respond = AsyncMock(side_effect=choose)
 
+    async def test_simulation_planner_can_reject_before_execution(self):
+        await self.start()
+        self.model.respond.side_effect = None
+        self.model.respond.return_value = legacy.proposal(
+            "reject_job",
+            {
+                "reason": "Requested simulation cannot fit the available memory.",
+                "evidence": "Fixture requires 128 GiB; connected workers have 16 GiB each.",
+            },
+        )
+        job = await self.complete()
+        self.assertEqual(job["phase"], "failed")
+        self.assertEqual(job["data"]["tasks"], [])
+        self.assertEqual(job["data"]["decisions"][-1]["tool"], "reject_job")
+
     async def test_agent_runs_10000_trials_as_one_task_on_one_worker_after_profiling(self):
         await self.start()
         job = await self.complete()

@@ -74,3 +74,36 @@ class MachineSpecsTests(unittest.TestCase):
         self.assertEqual(config.capabilities.machine.logical_cores, 8)
         self.assertEqual(config.capabilities.machine.max_concurrency, 1)
         self.assertEqual(config.capabilities.machine.runtime_control, "startup")
+
+    def test_gpu_probe_and_pricing_machine_specs_are_both_preserved(self):
+        from orchestrator.shared.protocol import Accelerator, Capabilities, Machine
+
+        probed = Capabilities(
+            runtime="cuda",
+            vram_mib=8192,
+            kinds=["python_project"],
+            accelerator=Accelerator(available=True, device="Test GPU", providers=["cuda"]),
+            machine=Machine(max_concurrency=1, runtime_control="startup"),
+        )
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "WORKER_ID": "worker-gpu",
+                    "WORKER_TOKEN": "fixture-worker-token-123456789",
+                    "SERVER_URL": "ws://localhost:8080/v1/worker",
+                    "WORKER_RUNTIME": "auto",
+                },
+                clear=True,
+            ),
+            patch("orchestrator.worker.config.capabilities", return_value=probed),
+            patch(
+                "orchestrator.worker.config.machine_specs",
+                return_value=Machine(logical_cores=8, total_ram_mb=16384),
+            ),
+        ):
+            caps = WorkerConfig.from_env("python_project").capabilities
+        self.assertEqual((caps.runtime, caps.vram_mib), ("cuda", 8192))
+        self.assertEqual(caps.accelerator.device, "Test GPU")
+        self.assertEqual((caps.machine.logical_cores, caps.machine.total_ram_mb), (8, 16384))
+        self.assertEqual(caps.machine.runtime_control, "startup")

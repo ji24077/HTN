@@ -8,7 +8,7 @@ import zipfile
 from pathlib import PurePosixPath
 
 from ..shared.protocol import json_text
-from .models import MAX_SOURCE, MAX_UPLOAD
+from .models import MAX_BUNDLE, MAX_SOURCE, MAX_UPLOAD
 
 
 def safe_path(name):
@@ -43,18 +43,17 @@ def unpack(files):
         names.add(name.casefold())
         size += len(content)
         if len(result) >= 100 or size > MAX_UPLOAD:
-            raise ValueError("Project exceeds 100 files or 8 MiB expanded")
+            raise ValueError("Project exceeds 100 files or 128 MiB expanded")
         if name.endswith(".py"):
             source_size += len(content)
             if source_size > MAX_SOURCE:
                 raise ValueError("Python sources exceed 128 KiB for this version")
-            content.decode("utf-8")
         result[name] = base64.b64encode(content).decode()
 
     for file in files:
         raw = base64.b64decode(file.content, validate=True)
         if len(raw) > MAX_UPLOAD:
-            raise ValueError("Upload exceeds 8 MiB")
+            raise ValueError("Upload exceeds 128 MiB")
         if file.name.lower().endswith(".zip"):
             with zipfile.ZipFile(io.BytesIO(raw)) as archive:
                 if len(archive.infolist()) > 200:
@@ -75,15 +74,15 @@ def unpack(files):
                     add(info.filename, content)
         else:
             add(file.name, raw)
-    if not any(name.endswith(".py") for name in result):
-        raise ValueError("Upload a Python script or a ZIP project containing Python files")
+    if not result:
+        raise ValueError("Upload at least one file")
     return result
 
 
 def bundle(files):
     raw = json_text({"files": files}).encode()
-    if len(raw) > 16 * 1024 * 1024:
-        raise ValueError("Execution bundle exceeds 16 MiB")
+    if len(raw) > MAX_BUNDLE:
+        raise ValueError("Execution bundle exceeds 192 MiB")
     return hashlib.sha256(raw).hexdigest(), raw
 
 
@@ -92,9 +91,22 @@ def encoded(text):
 
 
 def inspect_files(files):
-    return {
-        name: base64.b64decode(content).decode("utf-8")
-        if name.endswith((".py", "requirements.txt", "pyproject.toml")) and len(content) < 180000
-        else f"[data file: {len(base64.b64decode(content))} bytes]"
-        for name, content in files.items()
-    }
+    # Show bounded text regardless of extension; binary inputs remain on workers.
+    # Entrypoints come first so supporting documents cannot crowd out their source.
+    result = {}
+    remaining = MAX_SOURCE
+    for name in sorted(files, key=lambda path: (not path.endswith(".py"), path)):
+        content = files[name]
+        size = len(content) // 4 * 3 - (len(content) - len(content.rstrip("=")))
+        result[name] = f"[data file: {size} bytes]"
+        if size > remaining:
+            continue
+        try:
+            text = base64.b64decode(content).decode("utf-8")
+        except UnicodeDecodeError:
+            continue
+        if any(ord(char) < 32 and char not in "\n\r\t" for char in text):
+            continue
+        result[name] = text
+        remaining -= size
+    return result

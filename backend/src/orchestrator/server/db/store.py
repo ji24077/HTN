@@ -329,6 +329,8 @@ class Store:
                         "execution_events",
                         "simulation_jobs",
                         "simulation_artifacts",
+                        "job_outputs",
+                        "job_output_chunks",
                         "supervised_jobs",
                         "supervisor_events",
                         "supervisor_runs",

@@ -4,7 +4,7 @@ import stat
 import unittest
 import zipfile
 
-from orchestrator.preprocessing.artifacts import unpack
+from orchestrator.preprocessing.artifacts import inspect_files, unpack
 from orchestrator.preprocessing.comparison import compare, equivalent
 from orchestrator.preprocessing.models import UploadFile
 
@@ -24,6 +24,37 @@ class UploadTests(unittest.TestCase):
             self.zip([("project/main.py", b"print('hello')\n"), ("project/data.csv", b"a,b\n1,2")])
         )
         self.assertEqual(base64.b64decode(files["project/main.py"]), b"print('hello')\n")
+
+    def test_uploads_have_no_executable_extension_requirement(self):
+        for name, value in [
+            ("scene.blend", b"BLENDER\x00"),
+            ("notes.txt", b"render this"),
+            ("unknown.custom", b"\x00\xff"),
+            ("no-extension", b"data"),
+        ]:
+            with self.subTest(name=name):
+                files = unpack([UploadFile(name=name, content=base64.b64encode(value).decode())])
+                self.assertEqual(base64.b64decode(files[name]), value)
+        self.assertEqual(
+            set(unpack(self.zip([("assets/data.csv", "x,y\n1,2")]))), {"assets/data.csv"}
+        )
+        with self.assertRaisesRegex(ValueError, "at least one"):
+            unpack(self.zip([]))
+
+    def test_inspection_shows_text_without_assuming_binary_contents(self):
+        files = unpack(
+            self.zip(
+                [
+                    ("README", "user instructions are elsewhere"),
+                    ("data.custom", "x,y\n1,2"),
+                    ("binary.py", b"\x00\xff"),
+                ]
+            )
+        )
+        inspected = inspect_files(files)
+        self.assertEqual(inspected["README"], "user instructions are elsewhere")
+        self.assertEqual(inspected["data.custom"], "x,y\n1,2")
+        self.assertEqual(inspected["binary.py"], "[data file: 2 bytes]")
 
     def test_traversal_duplicate_and_symlink_rejected(self):
         link = zipfile.ZipInfo("link.py")

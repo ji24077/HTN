@@ -8,7 +8,7 @@ import { scrubTelemetry } from './telemetry.ts'
 export const ExecutionEvent = z.object({
   sequence: z.number().int().min(1).max(1000), at: z.string().datetime(),
   kind: z.enum(['started', 'step', 'stdout', 'stderr', 'progress', 'succeeded', 'failed',
-    'cancelled', 'timed_out', 'interrupted', 'truncated']),
+    'cancelled', 'timed_out', 'interrupted', 'cleaned', 'truncated']),
   data: z.record(z.string(), z.unknown()),
 })
 type Entry = z.infer<typeof ExecutionEvent>
@@ -51,7 +51,7 @@ export class ExecutionJournal {
           this.records.set(this.key(record.taskId, record.attempt), record)
           this.sizes.set(this.key(record.taskId, record.attempt), Buffer.byteLength(text))
           const last = record.events.at(-1)
-          if (last && !['succeeded', 'failed', 'cancelled', 'timed_out', 'interrupted'].includes(last.kind)) {
+          if (last && !['succeeded', 'failed', 'cancelled', 'timed_out', 'interrupted', 'cleaned'].includes(last.kind)) {
             this.emit(record.taskId, record.attempt, 'interrupted', { message: 'Runner restarted before recording completion' })
           }
         } catch { /* A damaged optional journal cannot prevent execution. */ }
@@ -99,7 +99,7 @@ export class ExecutionJournal {
       record = { taskId, attempt, events: [], acked: [] }
       this.records.set(key, record)
     }
-    const terminal = ['succeeded', 'failed', 'cancelled', 'timed_out', 'interrupted'].includes(kind)
+    const terminal = ['succeeded', 'failed', 'cancelled', 'timed_out', 'interrupted', 'cleaned'].includes(kind)
     if (record.truncated && !terminal) return
     if (record.events.length >= 999 || (record.events.length >= 997 && !terminal)) return
     let clean = scrubTelemetry(data)

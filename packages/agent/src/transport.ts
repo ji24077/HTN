@@ -18,6 +18,7 @@ import { isPaused, loadConfig, saveConfig, type AgentConfig } from './config.ts'
 import { runEcho } from './adapters/echo.ts'
 import { runInference } from './adapters/inference.ts'
 import { runWalker } from './adapters/walker.ts'
+import { runProgram } from './adapters/program.ts'
 import { SupersessionPolicy } from './supersession.ts'
 import * as history from './history.ts'
 import type { RunRecord } from './history.ts'
@@ -627,13 +628,21 @@ export function connect(
         void wallClock
 
         const work =
-          offer.adapter === 'cpu_inference_batch'
+          offer.adapter === 'python_project'
+            ? runProgram(offer.input, {
+                hostId: cfg.hostId, server: cfg.server, attempt: offer.attempt,
+                taskId: offer.taskId, jobId: offer.jobId, signal: controller.signal, report,
+                cleaned: data => journal.emit(offer.taskId, offer.attempt, 'cleaned', data),
+              })
+          : offer.adapter === 'cpu_inference_batch'
             ? runInference(offer.input, {
                 hostId: cfg.hostId, server: cfg.server, privateKey, signal: controller.signal, report,
               })
           : offer.adapter === 'walker_evolution'
             ? runWalker(offer.input, cfg.hostId, controller.signal, report)
-          : runEcho(offer.input, cfg.hostId, controller.signal, report)
+          : offer.adapter === 'echo'
+            ? runEcho(offer.input, cfg.hostId, controller.signal, report)
+          : Promise.reject(new Error(`Unsupported adapter: ${offer.adapter}`))
 
         void work
           .then(output => {
@@ -665,10 +674,19 @@ export function connect(
               return
             }
             const outputHash = hashOutput(output)
-            outcome = 'ok'
+            const programFailed = offer.adapter === 'python_project' &&
+              (output as { ok?: boolean } | null)?.ok === false
+            outcome = programFailed ? 'error' : 'ok'
+            if (programFailed) {
+              errorClass = 'project_code'
+              message = String((output as { error?: unknown }).error ?? 'Project execution failed').slice(0, 200)
+            }
             try { outputBytes = Buffer.byteLength(JSON.stringify(output) ?? '') } catch { /* unmeasurable */ }
             report.progress(1, 1)
-            finishTracking('succeeded', { output_hash: outputHash, result_url: `/v1/tasks/${offer.taskId}` })
+            finishTracking(programFailed ? 'failed' : 'succeeded', {
+              output_hash: outputHash, result_url: `/v1/tasks/${offer.taskId}`,
+              ...(programFailed ? { message } : {}),
+            })
             send('task.result', {
               taskId: offer.taskId,
               leaseId: offer.leaseId,

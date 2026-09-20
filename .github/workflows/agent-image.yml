@@ -12,6 +12,9 @@ on:
     paths:
       - 'packages/agent/**'
       - 'packages/protocol/**'
+      - 'backend/src/**'
+      - 'backend/pyproject.toml'
+      - 'backend/uv.lock'
       - 'deploy/Dockerfile.agent'
       - 'package.json'
       - 'pnpm-lock.yaml'

@@ -3,11 +3,13 @@ from uuid import UUID
 
 from pydantic import Field, JsonValue, model_validator
 
+from ..shared.dependencies import DependencyPlan
 from ..shared.protocol import Model
 from ..shared.services import ServiceConfig
 from ..shared.usage import Money
 
-MAX_UPLOAD = 8 * 1024 * 1024
+MAX_UPLOAD = 128 * 1024 * 1024
+MAX_BUNDLE = 192 * 1024 * 1024
 MAX_SOURCE = 128 * 1024
 CODE_KIND = "python_project"
 ROOT_KIND = "simulation_job"
@@ -16,13 +18,14 @@ TERMINAL = {"completed", "failed", "cancelled"}
 
 class UploadFile(Model):
     name: str = Field(min_length=1, max_length=240)
-    content: str = Field(max_length=12 * 1024 * 1024)
+    content: str = Field(max_length=MAX_BUNDLE)
 
 
 class Upload(Model):
     request_id: UUID
     description: str = Field(min_length=1, max_length=8000)
-    execution_mode: Literal["job", "service"] = "job"
+    workload: Literal["auto", "simulation", "rendering", "training", "python"] = "simulation"
+    execution_mode: Literal["auto", "job", "service"] = "job"
     service: ServiceConfig | None = None
     files: list[UploadFile] = Field(min_length=1, max_length=100)
     max_adaptations: int = Field(default=3, ge=1, le=5)
@@ -31,7 +34,7 @@ class Upload(Model):
     usage_cap: Money | None = None
 
 
-class Plan(Model):
+class Plan(DependencyPlan):
     summary: str = Field(min_length=1, max_length=3000)
     entrypoint: str = Field(min_length=1, max_length=240)
     working_directory: str = Field(default=".", max_length=240)
@@ -69,7 +72,7 @@ class Answer(Model):
 
 # Version 2 proposals have no execution-policy defaults. The model must choose
 # each setting explicitly, inside transport, capacity and submission budgets.
-class ProjectPlan(Model):
+class ProjectPlan(DependencyPlan):
     preprocessing_worker: str = Field(min_length=1, max_length=128)
     summary: str = Field(min_length=1, max_length=3000)
     entrypoint: str = Field(min_length=1, max_length=240)

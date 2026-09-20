@@ -5,13 +5,14 @@ from uuid import UUID
 
 from pydantic import Field, field_validator
 
-from .protocol import Model, Requirements
+from .dependencies import CPURequirements, DependencyPlan
+from .protocol import Model
 
 CHUNK_SIZE = 64 * 1024
 BODY_LIMIT = 1024 * 1024
 
 
-class ServiceConfig(Model):
+class ServiceConfig(DependencyPlan):
     entrypoint: str | None = Field(default=None, max_length=240)
     args: list[Annotated[str, Field(max_length=256)]] = Field(default_factory=list, max_length=32)
     working_directory: str = Field(default=".", max_length=240)
@@ -20,9 +21,7 @@ class ServiceConfig(Model):
     request_timeout_seconds: int = Field(default=300, ge=1, le=3600)
     lifetime_seconds: int | None = Field(default=None, ge=1, le=31536000)
     concurrency: int = Field(default=4, ge=1, le=16)
-    requirements: Requirements = Field(
-        default_factory=lambda: Requirements(runtime="cpu", vram_mib=0)
-    )
+    requirements: CPURequirements = Field(default_factory=CPURequirements)
 
     @field_validator("readiness_path")
     @classmethod

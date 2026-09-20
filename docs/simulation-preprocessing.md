@@ -1,9 +1,15 @@
 # Uploaded Python simulation loop
 
-Submit Python files or a ZIP plus a description through **New job → Upload simulation**.
+Submit Python files or a ZIP plus a description through **New job → Upload project**.
 The initial submission authorizes adaptation, validation, allocation, and execution.
 The original uploaded bytes remain in an immutable, job-scoped artifact. The agent
 never executes user code in the backend process and never repairs the original.
+
+## Other uploaded workloads
+
+Rendering, model training, downloadable files, and the shared `/v1/jobs` upload
+flow are described in [Uploaded compute jobs](uploaded-projects.md). The
+simulation-specific validation pipeline below remains in use for simulations.
 
 ## Lifecycle
 
@@ -71,9 +77,11 @@ outputs plus stdout/stderr through existing task telemetry. Authentication still
 uses the existing `WORKER_ID`, `WORKER_TOKEN`, and `SERVER_URL` settings.
 
 This is deliberately a **local development subprocess runner**, not an isolation
-boundary for untrusted public uploads. Production worker sandboxing, dependency
-installation, and deployment are deferred. Dependencies must already be installed
-in the worker's Python environment. The child receives a minimal environment,
+boundary for untrusted public uploads. Production worker sandboxing and deployment
+are deferred. Python requirements from uploaded manifests and the agent's dependency
+plan are installed in a private environment before execution (see
+[automatic dependencies](uploaded-projects.md#automatic-python-dependencies)).
+The child receives a minimal environment,
 not the model/server/worker credentials. Cancellation kills its process group on
 POSIX. Dependency or entry-point failures are returned, not patched.
 

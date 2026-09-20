@@ -12,7 +12,7 @@ from ..server.credits import account_id
 from ..server.db.store import Conflict
 from ..shared.protocol import Identifier, json_loads
 from .artifacts import unpack
-from .models import Answer, Upload
+from .models import MAX_BUNDLE, Answer, Upload
 from .store import SimulationStore
 
 router = APIRouter(prefix="/v1/simulations", dependencies=[Depends(require_admin)])
@@ -26,11 +26,18 @@ async def submit(request: Request):
     body = bytearray()
     async for chunk in request.stream():
         body.extend(chunk)
-        if len(body) > 12 * 1024 * 1024:
-            raise HTTPException(413, "Upload exceeds 12 MiB request limit")
+        if len(body) > MAX_BUNDLE:
+            raise HTTPException(413, "Upload exceeds 192 MiB request limit")
     try:
-        upload = Upload.model_validate(json_loads(bytes(body)))
+        data = json_loads(bytes(body))
+        if request.url.path == "/v1/jobs" and isinstance(data, dict):
+            data.setdefault("workload", "auto")
+        upload = Upload.model_validate(data)
         files = await asyncio.to_thread(unpack, upload.files)
+        if not any(name.endswith(".py") for name in files):
+            raise ValueError(
+                "Upload a Python project. Blender and non-Python runtimes are not supported."
+            )
     except (
         ValueError,
         ValidationError,
@@ -41,6 +48,7 @@ async def submit(request: Request):
         raise HTTPException(400, str(exc)[:300]) from exc
     if upload.execution_mode == "service":
         from ..server.services import ServiceStore
+
         try:
             return await ServiceStore(request.app.state.store).create(
                 upload, files, account_id=account_id(request)
@@ -58,6 +66,7 @@ async def submit(request: Request):
 @project_router.get("/{job_id}")
 async def status(job_id: Identifier, request: Request):
     from ..server.services import ServiceStore
+
     services = ServiceStore(request.app.state.store)
     if await services.exists(job_id):
         return await services.status(job_id)
@@ -68,6 +77,7 @@ async def status(job_id: Identifier, request: Request):
 @project_router.post("/{job_id}/answer")
 async def answer(job_id: Identifier, body: Answer, request: Request):
     from ..server.services import ServiceStore
+
     services = ServiceStore(request.app.state.store)
     if await services.exists(job_id):
         try:
@@ -109,7 +119,11 @@ async def execution_bundle(task_id: Identifier, digest: str, request: Request):
         task.state not in {"assigned", "running"}
         or task.lease_until is None
         or task.lease_until <= datetime.now(UTC)
-        or (task.deadline <= datetime.now(UTC) if task.deadline is not None else task.spec.kind != "python_service")
+        or (
+            task.deadline <= datetime.now(UTC)
+            if task.deadline is not None
+            else task.spec.kind != "python_service"
+        )
         or not payload.get("artifact_token")
         or not hmac.compare_digest(token, payload["artifact_token"])
         or digest != payload.get("bundle_hash")

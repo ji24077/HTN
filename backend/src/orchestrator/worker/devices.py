@@ -6,7 +6,7 @@ import platform
 import subprocess
 import sys
 
-from ..shared.protocol import Accelerator, Capabilities, Machine
+from ..shared.protocol import Accelerator, Capabilities, Machine, PythonCapability
 
 PROBE = r"""
 import json
@@ -14,7 +14,7 @@ try:
     import torch
     runtime = "cuda" if torch.cuda.is_available() and not torch.version.hip else (
         "mps" if torch.backends.mps.is_available() else "cpu")
-    result = {"runtime": runtime, "vram_mib": 0, "device": None}
+    result = {"runtime": runtime, "vram_mib": 0, "device": None, "pytorch": torch.__version__}
     if runtime != "cpu":
         value = torch.ones(16, device=runtime).sum().item()
         if value != 16:
@@ -56,6 +56,9 @@ def capabilities(kind: str, requested: str = "cpu") -> Capabilities:
         # Apple unified memory is not dedicated VRAM; do not count it as such.
         vram_mib=detected.get("vram_mib", 0) if runtime == "cuda" else 0,
         kinds=[kind],
+        python=PythonCapability(version=platform.python_version(), pytorch=detected["pytorch"])
+        if detected.get("pytorch")
+        else None,
         accelerator=Accelerator(
             available=available,
             device=detected.get("device"),

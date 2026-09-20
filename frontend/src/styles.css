@@ -3067,3 +3067,14 @@ select.lab-model:hover {
     display: none;
   }
 }
+
+/* Uploaded Python project outputs. */
+.output-files { margin-block: 20px; }
+.output-files .artifact-list { list-style: none; padding: 0; }
+.output-files .artifact-list li { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding-block: 12px; }
+.output-files .artifact-description { flex: 1; min-width: 140px; overflow-wrap: anywhere; }
+.output-files .artifact-description small { display: block; margin-top: 4px; opacity: 0.7; }
+.output-files .artifact-actions { display: flex; align-items: center; gap: 12px; }
+.output-files .artifact-preview pre { max-height: 360px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.output-files .artifact-preview img { max-width: 100%; max-height: 480px; object-fit: contain; }
+.output-files .raw-export { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 20px; }

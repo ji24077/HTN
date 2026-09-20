@@ -311,6 +311,17 @@ class GatewayTests(unittest.TestCase):
     def send_result(self, socket, result):
         socket.send_text(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
 
+    def test_python_capability_survives_device_handshake(self):
+        report = {"version": "3.12.14", "pytorch": "2.13.0+cpu"}
+        message = hello()
+        message["payload"]["capability"]["python"] = report
+        message["payload"]["capability"]["adapters"].extend(["python_project", "python_program"])
+        with self.connect() as socket:
+            socket.send_json(message)
+            self.assertEqual(socket.receive_json()["type"], "hello.ack")
+            self.assertEqual(self.store.registered[0].python.model_dump(), report)
+            self.assertIn("python_program", self.store.registered[0].kinds)
+
     def test_pairing_requires_admin_then_one_use_code_and_valid_key(self):
         self.assertEqual(self.client.post("/v1/device-invites").status_code, 401)
         issued = self.client.post(

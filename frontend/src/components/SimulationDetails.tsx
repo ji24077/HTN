@@ -9,10 +9,17 @@ import {
 } from "../api/client";
 import type { ExecutionEvent } from "../api/types";
 import { time } from "../lib/format";
+import { JobOutputs } from "./JobOutputs";
 import { ServicePanel } from "./ServicePanel";
 
 export const phaseLabels: Record<string, string> = {
   pending: "Waiting for worker",
+  service_planning: "Planning service",
+  program_planning: "Planning Python execution",
+  program_preparing: "Preparing Python worker",
+  program_probe: "Checking dependencies and execution",
+  program_placement: "Choosing execution worker",
+  program_running: "Running and validating outputs",
   starting: "Starting service",
   ready: "Ready",
   restarting: "Restarting service",
@@ -73,7 +80,9 @@ export function SimulationDetails({
         setStatus(next);
         setError("");
         if (
-          ["completed", "failed", "cancelled", "stopped"].includes(next.phase) &&
+          ["completed", "failed", "cancelled", "stopped"].includes(
+            next.phase,
+          ) &&
           !next.cleanup?.pending_workers.length
         )
           return;
@@ -134,10 +143,20 @@ export function SimulationDetails({
         {error || "Loading preprocessing progress…"}
       </p>
     );
-  if (status.service) return <>
-    {error && <p role="status" className="inline-alert">{error}</p>}
-    <ServicePanel status={status} refresh={() => setRevision(value => value + 1)} />
-  </>;
+  if (status.service)
+    return (
+      <>
+        {error && (
+          <p role="status" className="inline-alert">
+            {error}
+          </p>
+        )}
+        <ServicePanel
+          status={status}
+          refresh={() => setRevision((value) => value + 1)}
+        />
+      </>
+    );
   return (
     <section className="simulation-progress" aria-label="Simulation progress">
       <div className="section-heading">
@@ -147,6 +166,25 @@ export function SimulationDetails({
         </span>
       </div>
       <p>{status.message}</p>
+      {status.program_plan && (
+        <>
+          <details open>
+            <summary>Python execution plan</summary>
+            <p>{status.program_plan.summary}</p>
+            <p>
+              {status.program_plan.entrypoint} · CPU · validator:{" "}
+              {status.program_plan.validator}
+            </p>
+            {!!status.program_plan.dependencies?.length && (
+              <p>
+                Python dependencies:{" "}
+                {status.program_plan.dependencies.join(", ")}
+              </p>
+            )}
+          </details>
+          <JobOutputs jobId={jobId} phase={status.phase} />
+        </>
+      )}
       {status.plan &&
         ["running", "aggregating", "completed", "failed", "cancelled"].includes(
           status.phase,
@@ -193,17 +231,25 @@ export function SimulationDetails({
         </p>
       )}
       <div className="pipeline-steps">
-        {["Preprocess", "Validate on two workers", "Full run"].map(
-          (label, i) => (
-            <span
-              key={label}
-              className={
-                i ===
-                ([
-                  "distributed_reference",
-                  "distributed_validation",
-                  "validation_wait",
-                ].includes(status.phase)
+        {(status.program_plan
+          ? ["Probe", "Execute", "Validate outputs"]
+          : ["Preprocess", "Validate on two workers", "Full run"]
+        ).map((label, i) => (
+          <span
+            key={label}
+            className={
+              i ===
+              (status.program_plan
+                ? status.phase === "completed"
+                  ? 2
+                  : status.phase === "program_running"
+                    ? 1
+                    : 0
+                : [
+                      "distributed_reference",
+                      "distributed_validation",
+                      "validation_wait",
+                    ].includes(status.phase)
                   ? 1
                   : [
                         "allocating",
@@ -215,14 +261,13 @@ export function SimulationDetails({
                       ].includes(status.phase)
                     ? 2
                     : 0)
-                  ? "current"
-                  : ""
-              }
-            >
-              {i + 1}. {label}
-            </span>
-          ),
-        )}
+                ? "current"
+                : ""
+            }
+          >
+            {i + 1}. {label}
+          </span>
+        ))}
       </div>
       {status.workers.length > 0 && (
         <p className="muted">Workers: {status.workers.join(", ")}</p>

@@ -6,6 +6,7 @@ import { promisify } from 'node:util'
 import { platform } from 'node:os'
 import { installRoot } from './paths.ts'
 import { loadConfig, saveConfig } from './config.ts'
+import { programAvailable } from './adapters/program.ts'
 
 const exec = promisify(execFile)
 const require_ = createRequire(import.meta.url)
@@ -91,6 +92,7 @@ export function isInstalled(pkg: string): boolean {
 export function availableAdapters(): string[] {
   const adapters = ['echo', 'walker_evolution']   // pure JavaScript, always available
   for (const w of WORKLOADS) if (isInstalled(w.package)) adapters.push(w.adapter)
+  if (programAvailable()) adapters.push('python_project', 'python_program')
   return adapters
 }
 

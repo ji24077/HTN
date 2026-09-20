@@ -13,12 +13,15 @@ import sys
 import tempfile
 import time
 from contextlib import contextmanager
+from importlib.resources import files as package_files
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
+from ...shared.dependencies import DependencyPlan
 from ...shared.protocol import json_loads, json_text
+from .program_runner import collect_outputs
 
 # Trusted launcher: uploaded files are untouched. Only this driver wraps their entrypoints.
 LAUNCHER = r"""
@@ -39,7 +42,8 @@ if os.name != 'nt':
                     os.killpg(os.getpgrp(), signal.SIGKILL)
     threading.Thread(target=watch_owner, daemon=True).start()
 sys.path.insert(0, str(root))
-request = json.load(sys.stdin)
+request = (json.loads((root / '__dispatch_request__.json').read_text())
+           if os.environ.get('DISPATCH_DEPENDENCIES_READY') == '1' else json.load(sys.stdin))
 working = (root / request.get('working_directory', '.')).resolve()
 if not working.is_relative_to(root.resolve()):
     raise ValueError('Invalid working directory')
@@ -53,7 +57,13 @@ def values_for(module, seeds):
 
 started = time.perf_counter()
 try:
-    if request['mode'] == 'smoke':
+    from __dispatch_dependencies__ import prepare
+    prepare(root, working, request)
+    started = time.perf_counter()
+    if request['mode'] == 'program':
+        from __dispatch_program__ import run
+        result = run(request, root)
+    elif request['mode'] == 'smoke':
         sys.argv = [request['entrypoint'], *request.get('args', [])]
         sys.path.insert(0, str((root / request['entrypoint']).parent))
         try:
@@ -91,6 +101,7 @@ try:
     else:
         raise ValueError('Unknown execution mode')
     result['compute_seconds'] = time.perf_counter() - started
+    result['dependency_seconds'] = request.get('__dispatch_dependency_seconds', 0)
     text = json.dumps(result, allow_nan=False)
     if len(text.encode()) > 48000:
         raise ValueError('Result exceeds 48 KiB; reduce batch size or output size')
@@ -99,6 +110,17 @@ except BaseException as error:
     text = json.dumps({'ok': False, 'error': type(error).__name__ + ': ' + str(error)[:2000]})
 (root / '__dispatch_result__.json').write_text(text)
 """
+
+
+def write_launcher(root):
+    (root / "__dispatch_launcher__.py").write_text(LAUNCHER)
+    for target, source in (
+        ("__dispatch_program__.py", "program_runner.py"),
+        ("__dispatch_dependencies__.py", "dependency_setup.py"),
+    ):
+        (root / target).write_text(
+            package_files("orchestrator.worker.executors").joinpath(source).read_text()
+        )
 
 
 @contextmanager
@@ -122,25 +144,53 @@ def execution_workspace(report):
 
 class PythonProjectExecutor:
     kind = "python_project"
-    kinds = ("python_project", "python_service", "stub")
+    kinds = ("python_project", "python_program", "python_service", "stub")
 
-    def __init__(self, server_url, worker_id, *, fetch=None):
+    def __init__(self, server_url, worker_id, *, fetch=None, publish=None, artifact_prefix="/v1"):
         self.server_url = server_url
         self.tunnel = None
         parsed = urlsplit(server_url)
         self.origin = urlunsplit(
-            ("https" if parsed.scheme == "wss" else "http", parsed.netloc, "", "", "")
+            ("https" if parsed.scheme in {"wss", "https"} else "http", parsed.netloc, "", "", "")
         )
         self.worker_id = worker_id
+        self.artifact_prefix = artifact_prefix
         self.fetch = fetch or self.download
+        self.publish = publish or self.upload_output
+
+    async def upload_output(self, spec, report, name, path):
+        task = getattr(report, "task", None)
+        if task is None:
+            raise ValueError("Output uploads require the current task attempt")
+
+        async def chunks():
+            with path.open("rb") as stream:
+                while chunk := await asyncio.to_thread(stream.read, 1024 * 1024):
+                    yield chunk
+
+        async with httpx.AsyncClient(timeout=60, follow_redirects=False, trust_env=False) as client:
+            response = await client.put(
+                f"{self.origin}{self.artifact_prefix}/execution-outputs/{spec.id}",
+                params={"name": name},
+                content=chunks(),
+                headers={
+                    "Authorization": f"Bearer {spec.payload['artifact_token']}",
+                    "X-Worker-ID": self.worker_id,
+                    "X-Task-Attempt": str(task.generation),
+                    "Content-Type": "application/octet-stream",
+                    "Content-Length": str(path.stat().st_size),
+                },
+            )
+            response.raise_for_status()
+            return response.json()
 
     async def download(self, spec):
         payload = spec.payload
         async with (
-            httpx.AsyncClient(timeout=30, follow_redirects=False, trust_env=False) as client,
+            httpx.AsyncClient(timeout=120, follow_redirects=False, trust_env=False) as client,
             client.stream(
                 "GET",
-                f"{self.origin}/v1/execution-bundles/{spec.id}/{payload['bundle_hash']}",
+                f"{self.origin}{self.artifact_prefix}/execution-bundles/{spec.id}/{payload['bundle_hash']}",
                 headers={
                     "Authorization": f"Bearer {payload['artifact_token']}",
                     "X-Worker-ID": self.worker_id,
@@ -151,7 +201,7 @@ class PythonProjectExecutor:
             raw = bytearray()
             async for chunk in response.aiter_bytes():
                 raw.extend(chunk)
-                if len(raw) > 16 * 1024 * 1024:
+                if len(raw) > 192 * 1024 * 1024:
                     raise ValueError("Execution bundle too large")
         if hashlib.sha256(raw).hexdigest() != payload["bundle_hash"]:
             raise ValueError("Execution bundle checksum mismatch")
@@ -160,11 +210,13 @@ class PythonProjectExecutor:
     async def execute(self, spec, report):
         if spec.kind == "python_service":
             from .python_service import execute_service
+
             return await execute_service(self, spec, report)
         if spec.kind == "stub":
             from .stub import StubExecutor
 
             return await StubExecutor().execute(spec, report)
+        DependencyPlan(dependencies=spec.payload.get("dependencies", []))
         execution_started = time.perf_counter()
         with execution_workspace(report) as (root, cleanup):
             directory = str(root)
@@ -176,7 +228,9 @@ class PythonProjectExecutor:
                     raise ValueError("Invalid execution bundle path")
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(base64.b64decode(content, validate=True))
-            (root / "__dispatch_launcher__.py").write_text(LAUNCHER)
+            write_launcher(root)
+            output_dir = root / "__dispatch_outputs__"
+            output_dir.mkdir()
             # Do not inherit backend/model/worker credentials into the project process.
             env = {
                 "PATH": os.defpath,
@@ -185,6 +239,7 @@ class PythonProjectExecutor:
                 "PYTHONIOENCODING": "utf-8",
                 "PYTHONUNBUFFERED": "1",
                 "DISPATCH_OWNER_PID": str(os.getpid()),
+                "DISPATCH_OUTPUT_DIR": str(output_dir),
             }
             cleanup["processes_stopped"] = False
             spawn = asyncio.create_task(
@@ -268,9 +323,28 @@ class PythonProjectExecutor:
                 result = json_loads(path.read_bytes())
                 if not isinstance(result, dict) or type(result.get("ok")) is not bool:
                     return {"ok": False, "error": "Invalid execution result"}
+                program = spec.payload.get("program")
+                if result["ok"] and not (program and program["probe"]):
+                    try:
+                        names = [item["path"] for item in program["outputs"]] if program else None
+                        outputs = collect_outputs(output_dir, names)
+                    except (ValueError, OSError) as exc:
+                        return {"ok": False, "error": str(exc)}
+                    if outputs:
+                        result["files"] = []
+                        for name, output in outputs:
+                            saved = await self.publish(spec, report, name, output)
+                            # Metadata is in the output API. Bound task results even
+                            # when a job produces many long Unicode filenames.
+                            result["files"].append({"id": saved["id"], "size": saved["size"]})
+                        if not program:
+                            # Simulation values already use most of the result JSON
+                            # allowance. Files are discoverable through the job API.
+                            result["output_file_count"] = len(result.pop("files"))
                 result["metrics"] = {
                     "execution_seconds": time.perf_counter() - execution_started,
                     "download_seconds": download_seconds,
+                    "dependency_seconds": result.pop("dependency_seconds", 0),
                     "output_bytes": path.stat().st_size,
                     "cpu_count": os.cpu_count(),
                 }
