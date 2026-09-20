@@ -1,14 +1,105 @@
-# HTN · GPU orchestration
+# ChatGPU · distributed compute workspace
 
-Python control plane for dispatching independent tasks to unreliable worker
-machines. Workers connect outbound over WebSockets; the dashboard receives
-server-pushed updates. PostgreSQL owns leases and accepted results.
+ChatGPU connects machines you already own into one fleet and runs compute jobs
+on them through agents. You upload Python files and describe the result you
+want. An agent plans the run, picks a machine, executes it, validates the
+output, and reports the cost. GPU Lab applies the same agents to model training
+and inference on rented GPUs and reports speedups with before/after
+measurements. A faster result that changes any answer is rejected.
 
-**Status:** one Python/Supabase control plane with a React dashboard, Python workers,
-and paired desktop/iOS workers ported from Jack's PR. Desktop workers execute signed
-echo tests, deterministic walker simulations, and optional ONNX inference. Real GPU
-execution, job splitting, machine scoring, and validation of the combined system on
-remote hardware remain separate work.
+## What it does
+
+- **Fleet.** A laptop, desktop, container, or iPhone joins by running one
+  container or pairing the desktop/iOS app. Machines connect outbound over
+  WebSockets, so no inbound port is needed. PostgreSQL holds every lease and
+  result.
+- **Agents.** A planning coordinator reads the uploaded source, chooses runtime,
+  dependencies, and worker, runs a short probe, then the full job and its
+  validator. It asks the user only when information is missing. A supervisor
+  agent watches each job. A fleet assistant answers questions in chat. Agents
+  act only through validated tools, and job state is decided by the server.
+- **Verification.** Workers run a tensor op on a GPU before advertising it.
+  Paired devices sign every result with an Ed25519 key that stays on the
+  device. A GPU speedup is accepted only when every answer on a fixed 300-case
+  suite is unchanged.
+
+## How it works
+
+```mermaid
+flowchart LR
+    U[You: upload or chat] --> UI[ChatGPU web app<br/>React, SSE updates]
+    UI --> API[FastAPI control plane<br/>scheduler, leases, audit]
+    API --> PG[(PostgreSQL<br/>tasks, leases, results, usage)]
+    API --> LLM[Agents on gpt-6-astra<br/>coordinator, analysts, supervisor, assistant]
+    W1[Python worker<br/>CPU, CUDA, Apple MPS] -->|outbound WebSocket| API
+    W2[Docker agent / desktop / iOS<br/>signed results] -->|outbound WebSocket| API
+```
+
+A request becomes one or more tasks in PostgreSQL. Workers pull the oldest
+compatible task under a database lock, heartbeat every 5 seconds against a
+45-second lease, and the server accepts a result only if the assignment is
+still valid. A per-job supervisor and a metering trigger run alongside. The
+Experiments view (GPU Lab) reads from the separate GPUShare service, which
+holds the recorded GPU measurements.
+
+## Screenshots
+
+Captured from the local demo (`orchestrator-demo`) on September 20, 2026, with
+two CPU workers and one completed connection test. No model key was configured,
+so the assistant and supervisor show their unconfigured states.
+
+| | |
+| --- | --- |
+| **Jobs.** Counts of active, completed, and failed jobs and online workers, then the job list. ![Jobs view](docs/screenshots/01-jobs.png) | **Workers.** One card per machine with its reported hardware. A one-time invite pairs a desktop or iOS agent. ![Workers view](docs/screenshots/02-workers.png) |
+| **New job.** Files, a description, and an optional CAD cap. ![New job composer](docs/screenshots/03-new-job.png) | **Job overview.** Result, files, metrics, and a downloadable summary built from saved results. ![Job overview](docs/screenshots/04-job-overview.png) |
+| **Job details.** Execution attempts, the accepted result, estimated cost, and supervisor findings. ![Job details](docs/screenshots/05-job-details.png) | **Activity.** Audit trail of queueing, assignment, starts, and accepted results. ![Activity feed](docs/screenshots/06-activity.png) |
+
+<p align="center">
+  <img src="docs/screenshots/07-agent-window.png" width="420" alt="Desktop agent window showing connected status and recent signed work">
+  <br><em>The desktop agent window: connection status, recent signed work, and a pause switch, served by the agent process.</em>
+</p>
+
+## What works today
+
+| Area | You can | Limits |
+| --- | --- | --- |
+| Upload a job | Drop Python files or a ZIP, describe the result, set a CAD cap. The agent plans, probes, runs, and validates. | Python and PyTorch only. Process isolation, no sandbox. One program on one worker. |
+| Concurrent analysis | The coordinator can start up to three analysis agents (dependencies, parallelization, validation). | Reports are advisory. Six child calls per job. |
+| Monte Carlo simulations | Seeded trials are validated on two distinct workers against fresh seeds, then scheduled in waves. | Tolerance rel 1e-8. |
+| GPU-aware placement | Workers verify CUDA and Apple MPS with a tensor op. Explicit GPU requests do not fall back to CPU. | No GPU rental. The device used is whatever the program reports. |
+| Job supervisor | One agent per job wakes on failures and Sentry alerts, searches logs, and can retry, pause, or cancel. | Cannot raise attempt limits or edit payloads. |
+| Fleet assistant | Ask which workers are free, submit supported workloads, inspect or cancel tasks, adjust a run's cap. | 8 tool calls and 90 s per turn. No uploads or shell. |
+| Hosted services | Upload an HTTP server and ask to host it. Authenticated endpoint under `/serve`. | One worker gateway process. |
+| Devices and signing | Desktop and iOS agents pair with a one-time invite and sign every result. | iOS is a developer build. Python workers use enrolled tokens. |
+| Usage and credit | Every attempt is metered in CAD from cores and RAM. A per-run cap cancels the job. | Estimates only. No payments. Soft cap. |
+| Experiments (GPU Lab) | Workflow commands such as `/compare saved MI300X` open recorded evidence: latency ratio, verdict, and the changed answers. | Backed by the separate GPUShare service. Recorded mode by default. |
+
+Recorded GPU evidence (GPUShare, Qwen2.5-0.5B, 13 sentences x 5 rounds, 300-case
+exact-value check): A5000 1.383 s to 0.234 s (5.91x, accepted, 0 changed
+answers); L40S 1.702 s to 0.254 s (6.69x, accepted); MI300X 1.136 s to 0.248 s
+(4.58x, rejected, 13 of 300 answers changed). No migration from the original
+RTX 4090 passed the check.
+
+## What's in flight
+
+- **PR #25** adds a pre-training loop that proposes and benchmarks native CUDA/HIP
+  kernel edits, translates CUDA to HIP for AMD targets, and accepts only if faster
+  on every shape and numerically identical. Tests pass on synthetic GPU reports;
+  a live NVIDIA plus AMD run is still needed.
+- **GPUShare branches** (`integrate/gpushare-platform`, `ji-phin-agentinfra`,
+  `relay/gpu-safety`) hold the training, optimization, and migration work, the
+  recorded hardware matrix, and the Relay marketplace agents with three approval
+  gates. They share no git history with `main` yet.
+
+Not on `main`: GPU rental, job splitting across machines, the marketplace,
+automatic deploy or rollback.
+
+**Status:** one Python/Supabase control plane with a React dashboard, Python
+workers with verified CPU/CUDA/MPS runtimes, and paired desktop/iOS workers.
+Desktop workers execute signed echo tests, deterministic walker simulations,
+optional ONNX inference, and uploaded Python projects. GPU rental, job splitting,
+machine scoring, and validation of the combined system on remote hardware remain
+separate work.
 
 ## Run the app
 
