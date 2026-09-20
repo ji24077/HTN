@@ -44,6 +44,16 @@ export type RunRecord = {
    */
   shared: boolean
   outputBytes?: number
+  /**
+   * The compute device this machine was using when the run happened.
+   *
+   * Recorded only for adapters that can actually reach an accelerator, because the
+   * figure is otherwise a machine property wearing a run's clothes: an echo test on a
+   * CUDA box did not use the GPU, and labelling it `cuda` would be the same quiet lie
+   * the accelerator report was written to stop. Absent on older records and on runs
+   * where the question does not apply, which the window renders as no chip at all.
+   */
+  runtime?: string
   agentVersion: string
 }
 

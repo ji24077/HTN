@@ -397,6 +397,11 @@ function page(token: string): string {
   .run .cost { color: var(--dim); font-size: 12px; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
   .run .when { color: var(--dim); font-size: 12px; margin-left: auto; flex: none; }
   .run .mark { font-size: 12px; font-weight: 600; flex: none; }
+  /* The device a run actually used. Quiet by default — it is only interesting when it
+     is not the CPU, which is the case the border draws attention to. */
+  .run .dev { font-size: 11px; flex: none; padding: 1px 6px; border-radius: 999px;
+    border: 1px solid var(--line); color: var(--dim); font-family: var(--mono); }
+  .run .dev.accel { color: var(--ok); border-color: var(--ok); }
   .run .mark.ok { color: var(--ok); }
   .run .mark.warn { color: var(--warn); }
   .run .mark.bad { color: var(--bad); }
@@ -754,7 +759,8 @@ function renderHistory(s) {
     const bar = mk('div', outcomeKind(r.outcome))
     const share = longest > 0 ? Math.max(1, (r.durationMs / longest) * 25) : 1
     bar.style.width = share.toFixed(2) + '%'
-    bar.title = r.adapter + ' · ' + dur(r.durationMs) + ' · ' + outcomeWord(r.outcome)
+    bar.title = (ADAPTER_NAMES[r.adapter] || r.adapter) + (r.runtime ? ' (' + r.runtime + ')' : '') +
+      ' · ' + dur(r.durationMs) + ' · ' + outcomeWord(r.outcome)
     bar.setAttribute('role', 'listitem')
     bar.setAttribute('aria-label', bar.title)
     strip.appendChild(bar)
@@ -764,7 +770,13 @@ function renderHistory(s) {
   list.textContent = ''
   for (const r of runs.slice(0, 10)) {
     const row = mk('div', 'run')
-    row.appendChild(mk('code', null, r.adapter))
+    /* The adapter id is cpu_inference_batch whatever device ran it, so showing it raw
+       told every GPU owner their GPU was idle. Name it for a person, and say separately
+       what it ran on. */
+    row.appendChild(mk('code', null, ADAPTER_NAMES[r.adapter] || r.adapter))
+    if (r.runtime) {
+      row.appendChild(mk('span', 'dev' + (r.runtime === 'cpu' ? '' : ' accel'), r.runtime))
+    }
     row.appendChild(mk('span', 'mark ' + outcomeKind(r.outcome), outcomeWord(r.outcome)))
     let cost = dur(r.durationMs) + ' · cpu ' + dur(r.cpuMs) + ' · ' + Math.round(r.rssMb) + ' MB'
     if (r.shared) cost += ' (shared)'
