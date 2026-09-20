@@ -215,37 +215,64 @@ def test_streaming_route_reports_errors_as_a_frame_not_a_500(monkeypatch):
     assert "no model is loaded" in frames[-1]["error"]
 
 
-def test_model_picker_keeps_checkpoint_pod_and_agent_artifact(monkeypatch):
-    monkeypatch.setattr(
-        runner,
-        "latest_run",
-        lambda: {
-            "job_id": "baseline-job",
-            "pod_id": "pod-base",
-            "remote_checkpoint": "/workspace/gpushare-ui/.runs/base/ckpt",
-        },
-    )
-    monkeypatch.setattr(
-        runner.JOBS,
-        "list",
-        lambda: [
-            {
-                "id": "agent-job",
-                "kind": "optimize-training-speed",
-                "status": "complete",
-                "result": {
-                    "pod": {"id": "pod-agent"},
-                    "remote_checkpoint": "/workspace/gpushare-ui/.runs/agent/validate/ckpt",
-                },
-            }
-        ],
+def test_the_picker_offers_only_what_somebody_saved(monkeypatch, tmp_path):
+    monkeypatch.setattr(runner, "SAVED_PATH", tmp_path / "saved.json")
+
+    assert runner.available_models() == []
+
+    runner.save_model(name="starter", ref="Qwen/Qwen2.5-0.5B", kind="base")
+    runner.save_model(
+        name="json-extractor v1",
+        ref="/workspace/gpushare-ui/.runs/base/ckpt",
+        kind="trained",
+        pod_id="pod-base",
+        base="Qwen/Qwen2.5-0.5B",
+        metrics={"exact_match_rate": 0.82},
     )
 
     models = {model["id"]: model for model in runner.available_models()}
+    assert set(models) == {"starter", "json-extractor v1"}
+    assert models["json-extractor v1"]["pod_id"] == "pod-base"
+    assert models["json-extractor v1"]["kind"] == "trained"
+    # The pod holding the weights belongs in the label: the sync back excludes
+    # *.safetensors, so this name stops resolving when that pod is released.
+    assert "pod-base" in models["json-extractor v1"]["detail"]
 
-    assert models["finetuned"]["pod_id"] == "pod-base"
-    assert models["agent-trained"]["pod_id"] == "pod-agent"
-    assert models["agent-trained"]["kind"] == "agent"
+
+def test_saving_a_name_twice_replaces_rather_than_duplicates(monkeypatch, tmp_path):
+    """A name is the one thing a later run must not silently redefine.
+
+    The picker this replaced derived a single "finetuned" entry from whichever
+    run was latest, so training twice moved that label onto new weights while
+    the chat went on showing the old one.
+    """
+    monkeypatch.setattr(runner, "SAVED_PATH", tmp_path / "saved.json")
+
+    runner.save_model(name="v1", ref="/runs/first/ckpt", kind="trained", pod_id="pod-a")
+    runner.save_model(name="v1", ref="/runs/second/ckpt", kind="trained", pod_id="pod-b")
+
+    models = runner.available_models()
+    assert [model["id"] for model in models] == ["v1"]
+    assert models[0]["ref"] == "/runs/second/ckpt"
+    assert models[0]["pod_id"] == "pod-b"
+
+
+def test_a_saved_model_can_be_forgotten(monkeypatch, tmp_path):
+    monkeypatch.setattr(runner, "SAVED_PATH", tmp_path / "saved.json")
+    runner.save_model(name="keep", ref="Qwen/Qwen2.5-0.5B", kind="base")
+    runner.save_model(name="drop", ref="Qwen/Qwen2.5-0.5B", kind="base")
+
+    runner.forget_model(name="drop")
+    assert [model["id"] for model in runner.available_models()] == ["keep"]
+
+    with pytest.raises(runner.JobError):
+        runner.forget_model(name="drop")
+
+
+def test_an_unnamed_model_is_refused(monkeypatch, tmp_path):
+    monkeypatch.setattr(runner, "SAVED_PATH", tmp_path / "saved.json")
+    with pytest.raises(runner.JobError):
+        runner.save_model(name="   ", ref="Qwen/Qwen2.5-0.5B", kind="base")
 
 
 def test_checkpoint_model_refuses_the_wrong_pod(monkeypatch):

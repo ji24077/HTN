@@ -40,7 +40,12 @@ from gpushare.contracts import JobConfig
 from gpushare.dashboard.runner import (
     JOBS,
     JobError,
+    BASE_CATALOG,
+    MODEL_ID_FOR_SERVE,
     available_models,
+    forget_model,
+    save_model,
+    saved_models,
     generate,
     generate_stream,
     latest_run,
@@ -394,8 +399,22 @@ class DataRequest(BaseModel):
     workers: int = Field(default=8, ge=1, le=16)
 
 
+class SaveModelRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+    ref: str
+    kind: str = "base"
+    pod_id: str | None = None
+    base: str | None = None
+
+
+class ForgetModelRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+
+
 class TrainRequest(BaseModel):
     pod_id: str
+    save_as: str = Field(default="", max_length=60)
+    base: str = MODEL_ID_FOR_SERVE
     steps: int = Field(default=500, ge=10, le=10_000)
     dtype: str = "bf16"
     attention: str = "sdpa"
@@ -462,8 +481,31 @@ def build_app():
 
     @app.get("/api/models")
     def models():
-        """What the chat box can point at, and what it is pointed at now."""
-        return {"models": available_models(), "serving": serving()}
+        """What the chat box can point at, and what it is pointed at now.
+
+        `catalog` is what can still be saved — offered separately so the picker
+        never quietly contains something nobody chose to keep.
+        """
+        return {
+            "models": available_models(),
+            "saved": saved_models(),
+            "catalog": BASE_CATALOG,
+            "serving": serving(),
+        }
+
+    @app.post("/api/models/save")
+    def models_save(req: SaveModelRequest):
+        try:
+            return save_model(**req.model_dump())
+        except JobError as e:
+            raise HTTPException(400, str(e)) from e
+
+    @app.post("/api/models/forget")
+    def models_forget(req: ForgetModelRequest):
+        try:
+            return forget_model(name=req.name)
+        except JobError as e:
+            raise HTTPException(404, str(e)) from e
 
     @app.post("/api/serve")
     def serve(req: ServeRequest):

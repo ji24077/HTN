@@ -127,7 +127,8 @@
     .metric span { color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.06em; }
     .metric b { display:block; font-size:25px; letter-spacing:-.04em; margin-top:7px; }
     .metric small { color:var(--muted); }
-    .chat-layout { display:grid; grid-template-columns:310px 1fr; gap:16px; align-items:stretch; }
+    .chat-layout { display:grid; grid-template-columns:290px 1fr 300px; gap:16px; align-items:stretch; }
+    .chip-panel { display:flex; flex-direction:column; gap:8px; }
     .model-control { display:flex; flex-direction:column; gap:12px; }
     .model-state { margin-top:auto; }
     .chat { min-height:500px; display:flex; flex-direction:column; padding:0; overflow:hidden; }
@@ -212,6 +213,7 @@
             <label class="span2">학습할 GPU Pod<select id="trainPod"><option value="">Pod 불러오는 중…</option></select></label>
             <label>학습 Steps<input id="trainSteps" type="number" min="10" max="10000" value="500"></label>
             <label>Micro batch<input id="microBatch" type="number" min="1" max="128" value="16"></label>
+            <label class="span2">저장할 이름<input id="trainSaveAs" placeholder="비우면 저장하지 않습니다"></label>
           </div>
           <div class="btnrow">
             <button id="trainBtn" class="btn" data-testid="run-training">일반 학습 시작</button>
@@ -246,23 +248,17 @@
           <button id="prepareBtn" class="btn blue" style="margin-top:10px">선택한 GPU 에 올리기</button>
           <div id="serveState" class="callout model-state warn"><strong>추론 준비 필요</strong>모델을 선택하고 위 버튼을 누르세요.</div>
           <button id="stopBtn" class="btn secondary">모델 내리기</button>
+          <div class="label" style="margin-top:14px">저장된 모델</div>
+          <div id="savedList" class="hint">불러오는 중…</div>
+          <label style="margin-top:8px">저장할 대상<select id="saveSource"></select></label>
+          <label style="margin-top:8px">이름<input id="saveName" placeholder="예: json-extractor v2"></label>
+          <button id="saveBtn" class="btn secondary" style="margin-top:8px">이 이름으로 저장</button>
+          <div id="saveState" class="hint">기본 모델이나 학습이 끝난 체크포인트를 이름 붙여 보관합니다.</div>
         </aside>
         <article class="card chat">
           <div class="chat-head">
             <div><strong>직접 추론</strong><div class="hint">첫 토큰 시간과 전체 생성 시간을 함께 기록합니다.</div></div>
             <span id="chatModel" class="pill">모델 준비 안 됨</span>
-          </div>
-          <div class="chain" style="padding:0 20px 12px">
-            <div class="hint" style="margin-bottom:7px">
-              같은 문장을 네 번 보냅니다. 버튼이 모델과 칩을 맞춰 두니, 누른 뒤 <b>전송</b>만 하세요.
-            </div>
-            <div class="btnrow">
-              <button id="chain1" class="btn secondary">① 학습 전</button>
-              <button id="chain2" class="btn secondary">② 학습 후</button>
-              <button id="chain3" class="btn secondary">③ 칩 이동 후</button>
-              <button id="chain4" class="btn blue">④ 이동 칩 + 최적화</button>
-            </div>
-            <div id="chainHint" class="hint" style="margin-top:7px">① 부터 눌러 보세요.</div>
           </div>
           <div class="btnrow" style="padding:0 20px 10px">
             <button id="chatBefore" class="btn secondary">추론 최적화 전으로</button>
@@ -281,29 +277,21 @@
             <button id="sendBtn" class="btn" disabled>전송</button>
           </div>
         </article>
-      </div>
-    </section>
-
-    <section class="section" id="agents">
-      <div class="section-head">
-        <div><div class="eyebrow">Step 3 · Agent on</div><h2>같은 기준에 에이전트 적용</h2></div>
-        <p>기준 실행이 있어야 버튼이 활성화됩니다.</p>
-      </div>
-      <div class="agent-grid">
-        <article class="card agent-card">
-          <div class="eyebrow">Training agent</div>
-          <h3>학습 설정 최적화</h3>
-          <p>동일한 tokens/step을 유지한 채 batch×accum 후보를 실측하고, 가장 빠른 설정으로 기준과 같은 step 수를 다시 학습합니다. 품질도 같은 held-out으로 검증합니다.</p>
+        <aside class="card chip-panel">
+          <div class="eyebrow">Chips</div>
+          <h3 style="margin:2px 0 10px">이 모델을 다른 칩으로</h3>
+          <label>Source Pod<select id="migrationSource"></select></label>
+          <label style="margin-top:9px">Target Pod<select id="migrationTarget"></select></label>
+          <div class="btnrow" style="margin-top:9px">
+            <button id="migrateBtn" class="btn secondary">칩 이동 실행</button>
+          </div>
+          <div class="hint">동일 모델·동일 held-out 으로 자동 검증합니다.</div>
+          <div class="label" style="margin-top:14px">칩 최적화</div>
           <div id="trainAgentState" class="callout">기준 학습을 기다리는 중입니다.</div>
           <button id="trainAgentBtn" class="btn" data-testid="optimize-training">학습 에이전트 실행</button>
-        </article>
-        <article class="card agent-card">
-          <div class="eyebrow">Inference agent</div>
-          <h3>추론 처리량 최적화</h3>
-          <p>같은 체크포인트와 64개 입력을 순차 처리와 batch 처리로 각각 측정합니다. 생성 토큰 수와 품질이 같을 때만 속도 향상으로 인정합니다.</p>
-          <div id="inferAgentState" class="callout">학습된 체크포인트를 기다리는 중입니다.</div>
+          <div id="inferAgentState" class="callout" style="margin-top:9px">학습된 체크포인트를 기다리는 중입니다.</div>
           <button id="inferAgentBtn" class="btn" data-testid="optimize-inference">추론 에이전트 실행</button>
-        </article>
+        </aside>
       </div>
     </section>
 
@@ -417,15 +405,6 @@
             </div>
             <div class="btnrow"><button id="dataBtn" class="btn secondary">데이터 생성</button><span id="dataState" class="hint">—</span></div>
           </div>
-          <div class="tool">
-            <div class="eyebrow">Migration</div><h3>체크포인트 이동 및 검증</h3>
-            <label>Source Pod<select id="migrationSource"></select></label>
-            <label style="margin-top:9px">Target Pod<select id="migrationTarget"></select></label>
-            <div class="btnrow">
-              <button id="migrateBtn" class="btn secondary">Migration 실행</button>
-              <span class="hint">동일 모델·동일 held-out 자동 검증</span>
-            </div>
-          </div>
         </div>
       </details>
     </section>
@@ -460,7 +439,7 @@
     const pct = (v) => v == null ? '—' : (Number(v) * 100).toFixed(1) + '%';
     const secs = (v, digits=2) => v == null || !Number.isFinite(Number(v)) ? '—' : Number(v).toFixed(digits) + 's';
     const duration = (job) => job && job.started_at && job.finished_at ? job.finished_at - job.started_at : null;
-    let appState = null, pods = [], jobs = [], models = [], serving = {running:false}, activeJob = null;
+    let appState = null, pods = [], jobs = [], models = [], catalog = [], serving = {running:false}, activeJob = null;
     let lastInteractive = null;
 
     function toast(message, bad=false) {
@@ -1005,69 +984,6 @@
     el('chatBefore').addEventListener('click', setBefore);
     el('chatAfter').addEventListener('click', setAfter);
 
-    // The four stages of the same question. Each button only puts the right
-    // model on the right chip and says what to do next — it never sends the
-    // message itself, because the presenter typing the same sentence each time
-    // is what makes the comparison legible to a room.
-    function chainSay(text, warn) {
-      const box = el('chainHint');
-      box.textContent = text;
-      box.style.color = warn ? 'var(--warn, #b45309)' : '';
-    }
-    function podsWhere(predicate) {
-      return pods.filter((p) => p.status === 'running' && predicate(p));
-    }
-    async function chainServe(modelId, pickPod, label) {
-      const model = models.find((m) => m.id === modelId);
-      if (!model) {
-        chainSay(`${label}: 이 서버에는 ${modelId} 모델이 없습니다. `
-          + '학습 기록이 있는 디렉터리에서 make ui 를 실행했는지 확인하세요.', true);
-        return;
-      }
-      const pod = pickPod();
-      if (!pod) { chainSay(`${label}: 조건에 맞는 실행 중인 파드가 없습니다.`, true); return; }
-      el('serveModel').value = modelId;
-      el('servePod').value = pod.id;
-      syncModelPod();
-      chainSay(`${label}: ${pod.name} 에 ${modelId} 올리는 중… (10-20초)`);
-      const job = await start('/api/serve', {pod_id: pod.id, model_id: modelId, dtype: 'bf16'});
-      if (job) chainSay(`${label}: 준비되면 같은 문장을 그대로 [전송] 하세요.`);
-    }
-
-    el('chain1').onclick = () => chainServe(
-      'base',
-      // The base model has no checkpoint of its own, so any running pod does;
-      // prefer the cheapest so the "before" shot does not burn the big card.
-      () => podsWhere(() => true).sort((a, b) => a.cost_per_hour - b.cost_per_hour)[0],
-      '① 학습 전');
-
-    el('chain2').onclick = () => chainServe(
-      'finetuned',
-      // Where training actually left the weights. Any other pod is a guess.
-      () => pods.find((p) => p.id === (models.find((m) => m.id === 'finetuned') || {}).pod_id),
-      '② 학습 후');
-
-    el('chain3').onclick = () => chainServe(
-      'finetuned',
-      () => podsWhere((p) => p.vendor === 'amd')[0],
-      '③ 칩 이동 후 (AMD)');
-
-    el('chain4').onclick = async () => {
-      // The felt speed-up in this demo is prefill reuse on the long-context
-      // model, not the batch-16 throughput the inference agent measures — so
-      // this step serves that model and turns the cache on, and the table row
-      // it produces says so.
-      const longctx = models.find((m) => m.id === 'longctx');
-      if (!longctx) { chainSay('④: longctx 모델이 없습니다.', true); return; }
-      if (!(serving.running && serving.model_id === 'longctx')) {
-        await chainServe('longctx', () => podsWhere((p) => p.vendor === 'amd')[0]
-          || podsWhere(() => true)[0], '④ 이동 칩 + 최적화');
-        chainSay('④: 모델이 올라오면 다시 눌러 정책 캐시를 켭니다.');
-        return;
-      }
-      await setAfter();
-      chainSay('④: 정책 KV 재사용 켜짐. ③ 과 같은 문장을 [전송] 해 비교하세요.');
-    };
     paintState(''); paintChatState();
 
     function renderFlow() {
@@ -1110,14 +1026,82 @@
     }
 
     function renderModels() {
-      const visible = models.filter((m) => ['base','finetuned','agent'].includes(m.kind));
+      // Everything here was saved under a name somebody typed, so there is
+      // nothing to filter out and no "preferred" kind to guess at.
       const select = el('serveModel'), previous = select.value;
-      select.innerHTML = visible.map((m) => '<option value="' + esc(m.id) + '">' + esc(m.label) + '</option>').join('');
-      const preferred = visible.find((m) => m.kind === 'finetuned') || visible[0];
-      select.value = visible.some((m) => m.id === previous) ? previous : (preferred ? preferred.id : '');
+      if (!models.length) {
+        select.innerHTML = '<option value="">저장된 모델 없음 — 왼쪽에서 먼저 저장하세요</option>';
+        select.value = '';
+      } else {
+        select.innerHTML = models.map((m) => '<option value="' + esc(m.id) + '">'
+          + esc(m.label) + (m.detail ? ' — ' + esc(m.detail) : '') + '</option>').join('');
+        select.value = models.some((m) => m.id === previous) ? previous : models[0].id;
+      }
+      renderSaved();
       syncModelPod();
       renderServing();
     }
+    // What can still be given a name: the base catalogue, plus any finished
+    // run that left a checkpoint. The agent-optimised run is in here too —
+    // the old picker surfaced that one automatically, which is precisely how
+    // an artefact nobody chose ended up being served.
+    function saveCandidates() {
+      const saved = new Set(models.map((m) => m.ref));
+      const out = catalog.map((c) => ({
+        ref: c.ref, kind: 'base', pod_id: null, base: null,
+        label: c.label + ' · ' + c.detail,
+      }));
+      for (const job of jobs) {
+        const result = job.result || {};
+        const ref = result.remote_checkpoint;
+        if (!ref || job.status !== 'complete' || saved.has(ref)) continue;
+        out.push({
+          ref, kind: 'trained', pod_id: (result.pod || {}).id || null,
+          base: (result.train || {}).base_model || null,
+          label: job.kind + ' · ' + new Date(job.created_at * 1000).toLocaleTimeString(),
+        });
+      }
+      return out;
+    }
+
+    function renderSaved() {
+      const box = el('savedList');
+      box.innerHTML = models.length
+        ? models.map((m) => '<div class="saved-row"><span>' + esc(m.label) + '</span>'
+            + '<button class="linklike" data-forget="' + esc(m.id) + '">제거</button></div>').join('')
+        : '아직 없습니다.';
+      for (const button of box.querySelectorAll('[data-forget]')) {
+        button.onclick = async () => {
+          try {
+            await api('/api/models/forget', {method:'POST', body: JSON.stringify({name: button.dataset.forget})});
+            await load();
+          } catch (err) { toast(err.message, true); }
+        };
+      }
+      const select = el('saveSource'), previous = select.value;
+      const candidates = saveCandidates();
+      select.innerHTML = candidates.map((c, i) => '<option value="' + i + '">' + esc(c.label) + '</option>').join('');
+      if (candidates.some((_, i) => String(i) === previous)) select.value = previous;
+      select.dataset.candidates = JSON.stringify(candidates);
+    }
+
+    el('saveBtn').onclick = async () => {
+      const select = el('saveSource');
+      const candidates = JSON.parse(select.dataset.candidates || '[]');
+      const chosen = candidates[+select.value];
+      if (!chosen) { el('saveState').textContent = '저장할 대상을 고르세요.'; return; }
+      const name = el('saveName').value.trim();
+      if (!name) { el('saveState').textContent = '이름을 입력하세요.'; return; }
+      try {
+        await api('/api/models/save', {method:'POST', body: JSON.stringify({
+          name, ref: chosen.ref, kind: chosen.kind, pod_id: chosen.pod_id, base: chosen.base,
+        })});
+        el('saveName').value = '';
+        el('saveState').textContent = name + ' 저장됨.';
+        await load();
+      } catch (err) { el('saveState').textContent = err.message; }
+    };
+
     function selectedModel() { return models.find((m) => m.id === el('serveModel').value); }
     function syncModelPod() {
       const model = selectedModel();
@@ -1156,17 +1140,15 @@
     // compares against the FIRST row: a migration that changes the answer is
     // not a migration, and that has to be visible rather than inferred.
     let firstAnswer = null, gpuRunNo = 0;
-    // What this run IS, read off the live state rather than off which button
-    // the presenter meant to press. A row labelled "학습 후" that was actually
-    // produced by the base model is the one mistake this table exists to stop.
-    function stageLabel(pod) {
-      const model = serving.model_id || '';
-      if (model === 'base') return '① 학습 전';
-      if (model === 'longctx') return policyLoaded
-        ? (optimized ? '④ 이동 칩 + 최적화' : '③ 최적화 전')
-        : '정책 미로드';
-      if (model === 'finetuned') return pod.vendor === 'amd' ? '② 칩 이동 후 (AMD)' : '② 학습 후';
-      return model || '?';
+    // The name this run was served under, read off the live serving state
+    // rather than off the picker — those disagree while a load is in flight,
+    // and a row attributed to the wrong model is the one mistake this table
+    // exists to stop. The cache state rides along because the same weights
+    // answer at very different speeds with the prefix warm.
+    function stageLabel() {
+      const name = serving.model_id || '?';
+      if (!policyLoaded) return name;
+      return name + (optimized ? ' · 캐시 on' : ' · 캐시 off');
     }
 
     function addGpuRow(text, ttft, total) {
@@ -1175,7 +1157,7 @@
       if (gpuRunNo++ === 0) { body.innerHTML = ''; firstAnswer = text; }
       const same = text === firstAnswer;
       const tr = document.createElement('tr');
-      tr.innerHTML = '<td>' + esc(stageLabel(pod))
+      tr.innerHTML = '<td>' + esc(stageLabel())
         + '</td><td>' + esc((pod.gpu || '?').replace('NVIDIA ','').replace('AMD ',''))
         + '</td><td>' + esc(pod.vendor || '?') + '</td><td>' + (ttft == null ? '—' : ttft.toFixed(2) + 's')
         + '</td><td>' + total.toFixed(2) + 's</td><td>'
@@ -1316,7 +1298,7 @@
         const modelData = await api('/api/models');
         let podData = {pods:[]};
         try { podData = await api('/api/pods'); } catch (err) { toast('RunPod 목록: ' + err.message, true); }
-        appState = stateData; jobs = jobData.jobs || []; models = modelData.models || []; serving = modelData.serving || {running:false}; pods = podData.pods || [];
+        appState = stateData; jobs = jobData.jobs || []; models = modelData.models || []; catalog = modelData.catalog || []; serving = modelData.serving || {running:false}; pods = podData.pods || [];
         // The server can already be holding a cached policy prefix from
         // before this page load (a previous session, or a reload). Without
         // this, policyLoaded/optimized stay at their fresh-page defaults
@@ -1418,7 +1400,11 @@
 
     el('trainBtn').onclick = () => start('/api/jobs/train', {
       pod_id:el('trainPod').value, steps:+el('trainSteps').value, dtype:'bf16', attention:'sdpa',
-      micro_batch:+el('microBatch').value, grad_accum:Math.max(1,Math.round(16/+el('microBatch').value))
+      micro_batch:+el('microBatch').value, grad_accum:Math.max(1,Math.round(16/+el('microBatch').value)),
+      // Sent, not applied here: the run registers the name only after it has
+      // finished and passed its own evaluation, so a half-written checkpoint
+      // never takes a name in the picker.
+      save_as:el('trainSaveAs').value.trim(), base:el('trainModel').value
     });
     el('prepareBtn').onclick = () => start('/api/serve', {pod_id:el('servePod').value,model_id:el('serveModel').value,dtype:'bf16'});
     el('stopBtn').onclick = async () => { try { await api('/api/serve/stop',{method:'POST'}); serving={running:false}; renderServing(); } catch (err) { toast(err.message,true); } };

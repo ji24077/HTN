@@ -39,6 +39,7 @@ STATE_ROOT = ROOT / ".gpushare"
 JOB_ROOT = STATE_ROOT / "jobs"
 RUN_ROOT = STATE_ROOT / "runs"
 LATEST_PATH = STATE_ROOT / "latest.json"
+SAVED_PATH = STATE_ROOT / "saved-models.json"
 REMOTE_ROOT = "/workspace/gpushare-ui"
 
 _POD_ID = re.compile(r"^[a-zA-Z0-9_-]{4,64}$")
@@ -1029,6 +1030,8 @@ def start_training(
     attention: str,
     micro_batch: int,
     grad_accum: int,
+    save_as: str = "",
+    base: str = MODEL_ID_FOR_SERVE,
 ) -> Job:
     if not 10 <= steps <= 10_000:
         raise JobError("steps must be between 10 and 10,000")
@@ -1157,6 +1160,23 @@ def start_training(
                 "remote_checkpoint": ckpt_dir,
             }
         )
+        # Saved last, and only on success: a name in the picker should mean a
+        # checkpoint that finished and passed its own evaluation, never one a
+        # run was part way through writing.
+        if save_as:
+            result["saved"] = save_model(
+                name=save_as,
+                ref=ckpt_dir,
+                kind="trained",
+                pod_id=placed_id,
+                base=base,
+                metrics={
+                    "exact_match_rate": (after or {}).get("exact_match_rate"),
+                    "json_parse_rate": (after or {}).get("json_parse_rate"),
+                    "held_out_loss": (after or {}).get("held_out_loss"),
+                    "steps": steps,
+                },
+            )
         return result
 
     return JOBS.create("train-and-evaluate", params, work)
@@ -1575,81 +1595,128 @@ _serve_lock = threading.Lock()
 _serve: dict[str, Any] = {}
 
 
-def available_models() -> list[dict[str, Any]]:
-    """The three things a person actually wants to compare.
+# The base models a run can start from. Saving one puts it in the picker under
+# a name of your choosing; it is a Hugging Face id, so the pod fetches it and
+# no weights are copied here.
+BASE_CATALOG = [
+    {
+        "ref": MODEL_ID_FOR_SERVE,
+        "label": "Qwen2.5-0.5B",
+        "detail": "small task model — the one the JSON fine-tune uses",
+    },
+    {
+        "ref": LONG_CONTEXT_MODEL,
+        "label": "Qwen3-4B-Instruct",
+        "detail": "40K context — carries the prefill/prefix-cache story, not accuracy",
+    },
+]
 
-    `base` is the untrained model and is listed first on purpose: it is the
-    control. A before/after claim with no before is not a claim, and the run we
-    have scores base at json_parse_rate 0.000 — which is what makes the trained
-    number mean anything.
+
+def saved_models() -> list[dict[str, Any]]:
+    try:
+        data = json.loads(SAVED_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    return data if isinstance(data, list) else []
+
+
+def _write_saved(entries: list[dict[str, Any]]) -> None:
+    STATE_ROOT.mkdir(parents=True, exist_ok=True)
+    SAVED_PATH.write_text(json.dumps(entries, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def save_model(
+    *,
+    name: str,
+    ref: str,
+    kind: str,
+    pod_id: str | None = None,
+    base: str | None = None,
+    metrics: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Put a model in the picker under a name a person chose.
+
+    Names, not slots. The registry this replaces had exactly one "finetuned"
+    entry derived from the last run, so training twice silently redefined what
+    that word pointed at — and a chat labelled with it kept answering from
+    whichever checkpoint happened to be latest. A name that was typed on
+    purpose cannot be reassigned by a later run.
+
+    A trained entry records the pod holding the weights. Nothing is copied
+    here: the rsync back deliberately excludes *.safetensors, so this is a
+    pointer, and it stops meaning anything when that pod is released. The UI
+    says which entries those are rather than discovering it at serve time.
     """
-    out = [
-        {
-            "id": "base",
-            "label": "Qwen2.5-0.5B (before training)",
-            "ref": MODEL_ID_FOR_SERVE,
-            "kind": "base",
-            "detail": "has never seen the JSON format",
-        }
-    ]
-    # The long-context serving model. It is NOT the fine-tuned task model and is
-    # not compared against it on accuracy: it is here because prefill cost scales
-    # with parameters x context, and 0.5B cannot produce a prefill worth
-    # optimising — measured, it tops out near 0.5s at its 32K ceiling. Quality
-    # claims stay with the 0.5B run; this one carries latency claims only.
-    out.append(
-        {
-            "id": "longctx",
-            "label": "Qwen3-4B Instruct (long-context serving)",
-            "ref": LONG_CONTEXT_MODEL,
-            "kind": "longctx",
-            "detail": "40K context - for prefill/prefix-cache measurement, not accuracy",
-        }
-    )
-    latest = latest_run()
-    if latest and latest.get("remote_checkpoint"):
-        out.append(
-            {
-                "id": "finetuned",
-                "label": "fine-tuned (latest dashboard run)",
-                "ref": latest["remote_checkpoint"],
-                "kind": "finetuned",
-                "job_id": latest.get("job_id"),
-                "pod_id": latest.get("pod_id"),
-                "detail": "trained from this dashboard",
-            }
-        )
-    # No fallback entry. There used to be one pointing at the first
-    # experiment's path, which exists on no pod that did not run it — and a
-    # missing local path is read by transformers as a Hugging Face repo id, so
-    # the failure arrived minutes later as "Repo id must be in the form
-    # 'namespace/repo_name'". Offering nothing is what lets the UI say there is
-    # nothing to serve until something is trained.
+    name = (name or "").strip()
+    if not name:
+        raise JobError("give the model a name")
+    if len(name) > 60:
+        raise JobError("model name must be 60 characters or fewer")
+    entries = [e for e in saved_models() if e["name"] != name]
+    entry = {
+        "name": name,
+        "ref": ref,
+        "kind": kind,
+        "pod_id": pod_id,
+        "base": base,
+        "metrics": metrics or {},
+        "saved_at": time.time(),
+    }
+    entries.insert(0, entry)
+    _write_saved(entries)
+    return entry
 
-    agent_job = next(
-        (
-            job
-            for job in JOBS.list()
-            if job["kind"] == "optimize-training-speed"
-            and job["status"] == "complete"
-            and job.get("result", {}).get("remote_checkpoint")
-        ),
-        None,
-    )
-    if agent_job:
-        result = agent_job["result"]
+
+def forget_model(*, name: str) -> dict[str, Any]:
+    entries = saved_models()
+    kept = [e for e in entries if e["name"] != name]
+    if len(kept) == len(entries):
+        raise JobError(f"no saved model named {name!r}")
+    _write_saved(kept)
+    return {"forgotten": name}
+
+
+def available_models() -> list[dict[str, Any]]:
+    """Exactly the models a person saved, in the order they saved them.
+
+    This used to synthesise the list instead: two hard-coded entries plus a
+    "finetuned" one derived from whichever run was latest. Training twice
+    therefore changed what "finetuned" meant without anyone choosing that, and
+    the chat went on showing the old label over the new weights. The picker now
+    shows saved names only, so what it offers is what somebody decided to keep.
+    """
+    out = []
+    for entry in saved_models():
         out.append(
             {
-                "id": "agent-trained",
-                "label": "fine-tuned (agent optimized)",
-                "ref": result["remote_checkpoint"],
-                "kind": "agent",
-                "job_id": agent_job["id"],
-                "pod_id": result.get("pod", {}).get("id"),
-                "detail": "same base model, trained with the agent-selected config",
+                "id": entry["name"],
+                "label": entry["name"],
+                "ref": entry["ref"],
+                "kind": entry.get("kind", "base"),
+                "pod_id": entry.get("pod_id"),
+                "base": entry.get("base"),
+                "metrics": entry.get("metrics") or {},
+                "saved_at": entry.get("saved_at"),
+                "detail": _saved_detail(entry),
             }
         )
     return out
+
+
+def _saved_detail(entry: dict[str, Any]) -> str:
+    if entry.get("kind") == "base":
+        return f"base model · {entry['ref']}"
+    metrics = entry.get("metrics") or {}
+    exact = metrics.get("exact_match_rate")
+    bits = [f"trained from {entry.get('base') or '?'}"]
+    if exact is not None:
+        bits.append(f"exact {exact:.0%}")
+    # Weights live on the pod: the sync back excludes *.safetensors, so this
+    # name stops resolving when that pod is released. Saying so in the picker
+    # beats finding out at serve time.
+    if entry.get("pod_id"):
+        bits.append(f"weights on pod {entry['pod_id'][:8]}")
+    return " · ".join(bits)
 
 
 def _model_ref(model_id: str, pod_id: str) -> str:
